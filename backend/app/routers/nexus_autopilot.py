@@ -10,8 +10,6 @@ runtime and its connector-specific controls.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -104,12 +102,13 @@ DEFAULT_POLICY = {
 }
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _actor(user: dict) -> str:
-    return user.get("name") or user.get("email") or user.get("id") or "Unknown technician"
+    from app.services.identity_utils import actor_label
+
+    return actor_label(user, "Unknown technician")
 
 
 def _tenant_id(user: dict) -> str:

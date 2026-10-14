@@ -1,7 +1,14 @@
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 from datetime import datetime, timezone
 import uuid
 
@@ -20,34 +27,39 @@ async def get_report_templates(user=Depends(get_current_user)):
         for t in defaults:
             t["created_at"] = datetime.now(timezone.utc).isoformat()
             await db.report_templates.insert_one(t)
+            t.pop("_id", None)
         templates = defaults
     return templates
 
 @router.get("/generate/{client_id}")
 async def generate_client_report(client_id: str, user=Depends(get_current_user)):
     await assert_client_scope(user, client_id, operation="client_report.generate", mask_not_found=True)
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    client = await assert_tenant_record_scope(
+        user, db.clients, client_id,
+        operation="client_report.generate", resource_name="Client",
+    )
     if not client:
         return {"error": "Client not found"}
     
     # Gather metrics
-    open_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}})
-    resolved_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["resolved", "closed"]}})
-    total_tickets = await db.tickets.count_documents({"client_id": client_id})
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "name": 1, "status": 1, "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1, "compliance_score": 1}).to_list(200)
+    open_tickets = await db.tickets.count_documents(tenant_scoped_query(user, {"client_id": client_id, "status": {"$in": ["open", "in_progress"]}}))
+    resolved_tickets = await db.tickets.count_documents(tenant_scoped_query(user, {"client_id": client_id, "status": {"$in": ["resolved", "closed"]}}))
+    total_tickets = await db.tickets.count_documents(tenant_scoped_query(user, {"client_id": client_id}))
+    devices = await db.devices.find(tenant_scoped_query(user, {"client_id": client_id}), {"_id": 0, "name": 1, "status": 1, "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1, "compliance_score": 1}).to_list(200)
     
     online_devices = len([d for d in devices if d.get("status") == "online"])
     avg_compliance = round(sum(d.get("compliance_score", 0) for d in devices) / max(len(devices), 1), 1)
     
-    contracts = await db.contracts.find({"client_id": client_id, "status": "active"}, {"_id": 0}).to_list(10)
+    contracts = await db.contracts.find(tenant_scoped_query(user, {"client_id": client_id, "status": "active"}), {"_id": 0}).to_list(10)
     total_mrr = sum(c.get("value", 0) for c in contracts)
     
-    csat = await db.csat_surveys.find({"client_id": client_id}, {"_id": 0, "score": 1}).to_list(50)
+    csat = await db.csat_surveys.find(tenant_scoped_query(user, {"client_id": client_id}), {"_id": 0, "score": 1}).to_list(50)
     avg_csat = round(sum(c["score"] for c in csat) / len(csat), 1) if csat else 0
     
     report = {
         "id": f"rpt-{str(uuid.uuid4())[:8]}",
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(user),
         "client_name": client["name"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_by": user.get("name", "System"),
@@ -76,6 +88,6 @@ async def generate_client_report(client_id: str, user=Depends(get_current_user))
 @router.get("/history")
 async def get_report_history(user=Depends(get_current_user)):
     reports = await db.generated_reports.find(
-        scoped_query(user), {"_id": 0}
+        tenant_scoped_query(user, scoped_query(user)), {"_id": 0}
     ).sort("generated_at", -1).to_list(100)
     return reports

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone
 import uuid
-import io
 import logging
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -111,12 +111,15 @@ def generate_ticket_pdf(ticket, comments, whitelabel_config=None):
 @router.post("/tickets/{ticket_id}/notify-client")
 async def notify_client_with_pdf(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Send email notification to client with PDF conversation history"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.notification.send", resource_name="Ticket",
+    )
 
     # Get client email
-    client_obj = await db.clients.find_one({"id": ticket.get("client_id")}, {"_id": 0})
+    client_obj = await db.clients.find_one(
+        tenant_scoped_query(current_user, {"id": ticket.get("client_id")}), {"_id": 0}
+    )
     if not client_obj:
         raise HTTPException(status_code=404, detail="Client not found")
 
@@ -125,7 +128,9 @@ async def notify_client_with_pdf(ticket_id: str, data: dict, current_user: dict 
         raise HTTPException(status_code=400, detail="No email address found for client")
 
     # Get ticket conversation
-    comments = await db.ticket_comments.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    comments = await db.ticket_comments.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    ).sort("created_at", 1).to_list(500)
 
     # Get white label config
     wl_config = await db.settings.find_one({"key": "whitelabel_options"}, {"_id": 0})
@@ -170,6 +175,7 @@ async def notify_client_with_pdf(ticket_id: str, data: dict, current_user: dict 
     # Record the notification
     notif_record = {
         "id": str(uuid.uuid4()),
+        "tenant_id": ticket.get("tenant_id") or platform_tenant_id(current_user),
         "ticket_id": ticket_id,
         "ticket_number": ticket_number,
         "client_id": ticket.get("client_id"),
@@ -191,8 +197,12 @@ async def notify_client_with_pdf(ticket_id: str, data: dict, current_user: dict 
 @router.get("/tickets/{ticket_id}/notification-history")
 async def get_ticket_notification_history(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Get email notification history for a ticket"""
+    await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.notification.read", resource_name="Ticket",
+    )
     history = await db.ticket_email_notifications.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     return history
 
@@ -201,11 +211,14 @@ async def download_ticket_pdf(ticket_id: str, current_user: dict = Depends(get_c
     """Download ticket conversation as PDF"""
     from fastapi.responses import Response
 
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.notification.pdf", resource_name="Ticket",
+    )
 
-    comments = await db.ticket_comments.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    comments = await db.ticket_comments.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    ).sort("created_at", 1).to_list(500)
 
     wl_config = await db.settings.find_one({"key": "whitelabel_options"}, {"_id": 0})
     whitelabel = wl_config.get("value", {}) if wl_config else {}

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import ticket_audit
+from app.services.scope_permissions import assert_tenant_record_scope, tenant_scoped_query
 
 router = APIRouter()
 
@@ -64,9 +65,9 @@ async def get_priority_matrix(current_user: dict = Depends(get_current_user)):
 @router.patch("/tickets/{ticket_id}/categorisation")
 async def update_ticket_categorisation(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Update category/issue_type/urgency/impact on a ticket and auto-recompute priority."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id, operation="ticket.categorisation.update", resource_name="Ticket"
+    )
 
     patch = {"updated_at": datetime.now(timezone.utc).isoformat()}
     allowed_fields = {"category_id", "category_name", "issue_type_id", "issue_type_name", "itil_urgency", "itil_impact"}
@@ -90,18 +91,18 @@ async def update_ticket_categorisation(ticket_id: str, data: dict, current_user:
         except Exception:
             pass
 
-    await db.tickets.update_one({"id": ticket_id}, {"$set": patch})
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": patch})
 
     changes = [f"{key.replace('_', ' ')}: {value}" for key, value in patch.items() if key != "updated_at"]
     await ticket_audit(ticket_id, current_user, "categorisation_updated", "; ".join(changes))
 
-    return await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    return await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
 
 
 @router.get("/tickets/{ticket_id}/categorisation")
 async def get_ticket_categorisation(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await db.tickets.find_one(
-        {"id": ticket_id},
+        tenant_scoped_query(current_user, {"id": ticket_id}),
         {"_id": 0, "category_id": 1, "category_name": 1, "issue_type_id": 1,
          "issue_type_name": 1, "itil_urgency": 1, "itil_impact": 1, "priority": 1, "priority_auto_computed": 1},
     )

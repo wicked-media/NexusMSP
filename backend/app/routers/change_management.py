@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -13,8 +13,7 @@ VALID_CATEGORIES = {"standard", "normal", "emergency", "expedited"}
 VALID_RISKS = {"low", "medium", "high"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _get_change(change_id: str, user: dict) -> dict:
@@ -149,6 +148,15 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
     if risk_level in {"medium", "high"} and len(rollback_plan) < 8:
         raise HTTPException(400, "Record a rollback plan for medium and high-risk changes")
 
+    # A change raised from derived evidence ("the fleet baseline says three
+    # endpoints share this shape") keeps two things a hand-written request does
+    # not need: how the repair will be verified, and the evidence it came from.
+    # Both are optional here so an ordinary request is unchanged, and both are
+    # declared here rather than in the caller so a derived change cannot carry a
+    # source this owner would not persist.
+    verification = str(payload.get("verification") or "").strip()
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+
     client_id = str(payload.get("client_id") or "").strip()
     if client_id:
         await assert_client_scope(user, client_id, operation="change_management.create")
@@ -166,6 +174,8 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
         "risk_level": risk_level,
         "impact": impact,
         "rollback_plan": rollback_plan,
+        "verification": verification,
+        "source": source,
         "client_id": client_id,
         "client_name": (client or {}).get("name") or str(payload.get("client_name") or ""),
         "devices_affected": payload.get("devices_affected") or [],
@@ -180,6 +190,7 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
         "updated_at": now,
     }
     await db.change_requests.insert_one(doc)
+    doc.pop("_id", None)
     await _write_audit(user, "change_request_submitted", doc)
     return doc
 

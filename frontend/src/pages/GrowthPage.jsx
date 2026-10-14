@@ -14,6 +14,7 @@ import {
   TrendingUp, RefreshCw, Loader2, Sparkles, DollarSign, Target, Search,
   Award, CheckCircle2, XCircle, Copy, FileText, Mail, Filter,
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 function fmtUSD(n) {
   if (n == null) return "—";
@@ -94,19 +95,7 @@ export default function GrowthPage() {
 
   return (
     <div className="p-6 space-y-5" data-testid="growth-page">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-            <TrendingUp className="w-7 h-7 text-emerald-500" />
-            Revenue Growth
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            AI-ranked upsell opportunities mined from every client's environment. Pipeline-driven, not gut-driven.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
+      <OperationalPageHeader eyebrow="Revenue intelligence · opportunity pipeline" title="Revenue Growth" description="Prioritise evidence-backed client opportunities from the service, asset and commercial signals Nexus already holds." icon={TrendingUp} tone="emerald" signal={summary?.by_status?.new > 0 ? "working" : "ready"} actions={<Button
             onClick={runScan}
             disabled={scanning}
             variant="outline"
@@ -115,9 +104,7 @@ export default function GrowthPage() {
           >
             {scanning ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Sparkles className="w-4 h-4 mr-2" />}
             {scanning ? "Scanning…" : "Run scan"}
-          </Button>
-        </div>
-      </div>
+          </Button>} />
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

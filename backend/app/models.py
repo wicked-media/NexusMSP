@@ -37,6 +37,9 @@ class User(BaseModel):
     site_scope_ids: List[str] = []
     archived: bool = False
     archived_at: Optional[str] = None
+    # A server-side session generation invalidates every older JWT after a
+    # password/security change or explicit account-session revocation.
+    session_version: int = 0
     about_me: Optional[str] = None
     hire_date: Optional[str] = None
     birthday: Optional[str] = None
@@ -67,6 +70,7 @@ class ClientCreate(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     industry: Optional[str] = None
+    website: Optional[str] = None
     contract_type: str = "monthly"
     mrr: float = 0.0
     contacts: List[Dict[str, Any]] = []
@@ -81,6 +85,7 @@ class Client(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     industry: Optional[str] = None
+    website: Optional[str] = None
     contract_type: str = "monthly"
     mrr: float = 0.0
     device_count: int = 0
@@ -114,6 +119,7 @@ class TicketCreate(BaseModel):
     device_id: Optional[str] = None
     device_ids: List[str] = []  # Multi-device linking (Syncro-style); device_id kept for backward compat as primary
     service_code: Optional[str] = None  # Service Catalog SKU — auto-attaches SLA, priority, billing
+    idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=128)  # Retry-safe create: replaying the key returns the existing ticket
 
 class Ticket(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -124,6 +130,10 @@ class Ticket(BaseModel):
     description: str = ""
     client_id: Optional[str] = None
     client_name: Optional[str] = None
+    # Persist the client identity selected at ticket creation so queues,
+    # ticket detail and printable records can render the correct brand without
+    # relying on a mutable display name or a second frontend-side lookup.
+    client_logo_url: Optional[str] = None
     priority: str = "medium"
     status: str = "open"
     category: str = "support"
@@ -151,6 +161,14 @@ class Ticket(BaseModel):
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
     custom_fields: Dict[str, Any] = {}
+    # Operational timestamps are evidence for queue recovery. They remain
+    # separate from the mutable ticket title/status fields so the UI never has
+    # to infer customer silence from a missing arbitrary property.
+    last_activity_at: Optional[datetime] = None
+    last_activity_by_id: Optional[str] = None
+    last_activity_by_name: Optional[str] = None
+    last_customer_reply_at: Optional[datetime] = None
+    last_technician_reply_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -206,6 +224,20 @@ class Device(BaseModel):
     last_heartbeat: Optional[str] = None
     agent_version: Optional[str] = None
     nexus_agent_id: Optional[str] = None
+    # Lifecycle state is deliberately separate from live-agent telemetry. An
+    # archived managed asset remains auditable but is excluded from active fleet
+    # views; it is not silently reactivated by a later heartbeat.
+    archived: bool = False
+    archived_at: Optional[str] = None
+    archived_by: Optional[str] = None
+    archived_by_name: Optional[str] = None
+    archive_reason: Optional[str] = None
+    lifecycle_state: Optional[str] = None
+    merged_into_id: Optional[str] = None
+    merged_at: Optional[str] = None
+    merged_by: Optional[str] = None
+    merged_device_ids: List[str] = []
+    asset_id: Optional[str] = None
     nexus_elevate_state: Optional[str] = None
     nexus_elevate_updated_at: Optional[str] = None
     nexus_elevate_active_at: Optional[str] = None
@@ -219,6 +251,11 @@ class Device(BaseModel):
     encryption_status: Optional[str] = None
     compliance_score: Optional[int] = None
     patch_status: Optional[str] = None
+    # This is a device assignment projection of a confirmed policy-register
+    # ring. It never means patches have been deployed.
+    patch_ring: Optional[str] = None
+    patch_ring_assigned_at: Optional[str] = None
+    patch_ring_assigned_by: Optional[str] = None
     pending_patches: Optional[int] = 0
     last_patch_date: Optional[str] = None
     installed_software_count: Optional[int] = 0
@@ -345,6 +382,11 @@ class LineItemCreate(BaseModel):
     asset_type_filter: Optional[str] = None
     product_id: Optional[str] = None
     source_label: Optional[str] = None
+    # An explicit external Microsoft SKU reference. This is not a Nexus
+    # relationship key; it is provider evidence attached to this authoritative
+    # Nexus contract inclusion for M365 billing assurance.
+    m365_sku_id: Optional[str] = None
+    m365_sku_part_number: Optional[str] = None
 
 class LineItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -376,6 +418,10 @@ class LineItem(BaseModel):
     asset_type_filter: Optional[str] = None
     product_id: Optional[str] = None
     source_label: Optional[str] = None
+    m365_sku_id: Optional[str] = None
+    m365_sku_part_number: Optional[str] = None
+    m365_mapping_updated_at: Optional[str] = None
+    m365_mapping_updated_by: Optional[str] = None
     synced_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -384,6 +430,9 @@ class InvoiceCreate(BaseModel):
     contract_id: Optional[str] = None
     ticket_id: Optional[str] = None
     invoice_name: Optional[str] = None
+    document_label: Optional[str] = None
+    document_terms: Optional[str] = None
+    document_template_id: Optional[str] = None
     due_date: Optional[str] = None
     notes: Optional[str] = None
     line_items: List[Dict[str, Any]] = []
@@ -405,6 +454,9 @@ class Invoice(BaseModel):
     contract_id: Optional[str] = None
     ticket_id: Optional[str] = None
     invoice_name: Optional[str] = None
+    document_label: Optional[str] = None
+    document_terms: Optional[str] = None
+    document_template_id: Optional[str] = None
     ticket_number: Optional[str] = None
     ticket_title: Optional[str] = None
     status: str = "draft"
@@ -444,6 +496,7 @@ class TimeEntryCreate(BaseModel):
     minutes: int
     billable: bool = True
     date: Optional[str] = None
+    idempotency_key: Optional[str] = None
 
 class TimeEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -542,7 +595,7 @@ class RemoteSession(BaseModel):
     user_id: str
     user_name: Optional[str] = None
     session_type: str = "remote_desktop"  # remote_desktop, terminal, file_transfer
-    status: str = "active"  # active, ended, failed
+    status: str = "active"  # authorised, active, ended, failed
     rustdesk_id: Optional[str] = None
     provider: str = "rustdesk"  # rustdesk, splashtop, screenconnect, etc.
     provider_device_id: Optional[str] = None
@@ -550,7 +603,7 @@ class RemoteSession(BaseModel):
     consent_required: bool = False
     consent_confirmed: bool = False
     consent_confirmed_at: Optional[datetime] = None
-    launch_status: str = "requested"  # requested, launched, handoff_required, failed
+    launch_status: str = "requested"  # requested, ready, launched, handoff_required, not_confirmed, completed, failed
     device_type: Optional[str] = None  # desktop, server, laptop, workstation
     was_locked_before_disconnect: Optional[bool] = None
     lock_action_on_disconnect: Optional[str] = None  # locked, unlocked, no_change
@@ -580,6 +633,7 @@ class EmailMessage(BaseModel):
     cc_addresses: List[str] = []
     client_id: Optional[str] = None
     client_name: Optional[str] = None
+    tenant_id: Optional[str] = None
     ticket_id: Optional[str] = None
     direction: str = "outbound"  # inbound, outbound
     status: str = "draft"  # draft, sent, failed, received
@@ -594,8 +648,8 @@ class EmailMessageCreate(BaseModel):
     subject: str
     body: str
     body_type: str = "html"
-    to_addresses: List[str]
-    cc_addresses: List[str] = []
+    to_addresses: List[EmailStr]
+    cc_addresses: List[EmailStr] = []
     client_id: Optional[str] = None
     ticket_id: Optional[str] = None
 
@@ -659,6 +713,7 @@ class Lead(BaseModel):
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     assigned_name: Optional[str] = None
+    assigned_to_name: Optional[str] = None
     converted_to_client: Optional[str] = None  # client_id if converted
     last_contact: Optional[datetime] = None
     next_follow_up: Optional[datetime] = None
@@ -828,27 +883,6 @@ class SSLCertificate(BaseModel):
     last_check: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-# ============== VENDOR MANAGEMENT ==============
-
-class Vendor(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    category: str = "general"  # hardware, software, cloud, telecom, security, other
-    contact_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    website: Optional[str] = None
-    address: Optional[str] = None
-    account_number: Optional[str] = None
-    account_manager: Optional[str] = None
-    support_phone: Optional[str] = None
-    support_email: Optional[str] = None
-    support_portal: Optional[str] = None
-    notes: Optional[str] = None
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 # ============== NETWORK MONITORING ==============
 
 class NetworkScan(BaseModel):
@@ -932,6 +966,7 @@ class TicketEmailCreate(BaseModel):
     to_addresses: List[str]
     cc_addresses: List[str] = []
     bcc_addresses: List[str] = []
+    attachment_ids: List[str] = []
     subject: Optional[str] = None  # If None, uses ticket title
     body: str
     body_type: str = "html"
@@ -949,6 +984,8 @@ class TicketEmail(BaseModel):
     to_addresses: List[str] = []
     cc_addresses: List[str] = []
     bcc_addresses: List[str] = []
+    attachment_ids: List[str] = []
+    attachment_count: int = 0
     subject: str
     body: str
     body_type: str = "html"
@@ -972,6 +1009,27 @@ class ScriptCreate(BaseModel):
     run_as_admin: bool = True
     timeout_seconds: int = 300
     parameters: List[Dict[str, Any]] = []  # Script parameters
+
+class ScriptUpdate(BaseModel):
+    """Technician-editable script fields.
+
+    Identity, run counters and authorship are server-owned and cannot be sent.
+    Library provenance is included because the pack install/uninstall flows
+    legitimately maintain it through this endpoint.
+    """
+    model_config = ConfigDict(extra="forbid")
+    name: Optional[str] = None
+    description: Optional[str] = None
+    script_type: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    os_target: Optional[str] = None
+    run_as_admin: Optional[bool] = None
+    timeout_seconds: Optional[int] = None
+    parameters: Optional[List[Dict[str, Any]]] = None
+    library_pack_ids: Optional[List[str]] = None
+    library_template_name: Optional[str] = None
+
 
 class Script(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1258,9 +1316,45 @@ class ProjectTask(BaseModel):
     ticket_title: Optional[str] = None
     due_date: Optional[str] = None
     completed_at: Optional[datetime] = None
+    implemented_by: Optional[str] = None
+    implemented_by_name: Optional[str] = None
+    implemented_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    reviewed_by_name: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    review_result: Optional[str] = None  # verified, changes_requested
+    review_notes: Optional[str] = None
+    blocker_reason: Optional[str] = None
     dependencies: List[str] = []  # Task IDs this depends on
     order: int = 0
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ProjectScopeItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    project_id: str
+    client_id: Optional[str] = None
+    component: str
+    state: str = "required"  # required, optional, not_applicable
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class ProjectDecision(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    project_id: str
+    client_id: Optional[str] = None
+    title: str
+    detail: Optional[str] = None
+    status: str = "open"  # open, resolved
+    raised_by: Optional[str] = None
+    raised_by_name: Optional[str] = None
+    resolved_by: Optional[str] = None
+    resolved_by_name: Optional[str] = None
+    resolution: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    resolved_at: Optional[datetime] = None
 
 # ============== AUDIT LOG MODEL ==============
 
@@ -1447,6 +1541,7 @@ class RentalAgreement(RentalAgreementCreate):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     client_name: Optional[str] = None
+    sla_contract_name: Optional[str] = None
     device_model: Optional[str] = None
     device_serial: Optional[str] = None
     device_mac: Optional[str] = None

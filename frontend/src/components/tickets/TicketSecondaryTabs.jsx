@@ -1,14 +1,22 @@
+import { useState } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Plus, CheckCircle, Loader2, Paperclip, FileText, Download, Trash2,
   ShoppingCart, Receipt, History, Boxes, Clock,
-  BellRing, Building2, CalendarClock, GitPullRequest, MonitorCog, Tags, UserCheck,
+  BellRing, Building2, CalendarClock, GitPullRequest, MonitorCog, ShieldCheck, Tags, UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -16,6 +24,8 @@ import { API } from "@/App";
 
 /* ============== Worksheets Tab ============== */
 export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, setNewWorksheetItem, worksheetItems, setWorksheetItems }) {
+  const [pendingRemoval, setPendingRemoval] = useState(null);
+  const [removing, setRemoving] = useState(false);
   const reload = async () => {
     try {
       const r = await axios.get(`${API}/tickets/${viewingTicket.id}/worksheet`, { headers });
@@ -37,6 +47,20 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
       await reload();
     } catch { toast.error("Failed"); }
   };
+  const remove = async () => {
+    if (!pendingRemoval) return;
+    setRemoving(true);
+    try {
+      await axios.delete(`${API}/tickets/${viewingTicket.id}/worksheet/${pendingRemoval.id}`, { headers });
+      await reload();
+      setPendingRemoval(null);
+      toast.success("Worksheet item removed");
+    } catch {
+      toast.error("Failed to remove worksheet item");
+    } finally {
+      setRemoving(false);
+    }
+  };
   const completed = worksheetItems.filter(item => item.checked).length;
   const progress = worksheetItems.length ? Math.round((completed / worksheetItems.length) * 100) : 0;
 
@@ -51,7 +75,7 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
           <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500" style={{ width: `${progress}%` }} /></div>
           <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/[0.12] p-1.5">
             <Input className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" placeholder="Add the next work item..." value={newWorksheetItem} onChange={e => setNewWorksheetItem(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} data-testid="worksheet-input" />
-            <Button size="sm" className="h-8 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={add} data-testid="add-worksheet-btn"><Plus className="w-3.5 h-3.5 mr-1" />Add task</Button>
+            <Button size="sm" className="h-8 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={add} disabled={!newWorksheetItem.trim()} data-testid="add-worksheet-btn"><Plus className="w-3.5 h-3.5 mr-1" />Add task</Button>
           </div>
         </CardContent>
       </Card>
@@ -76,6 +100,7 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
                 <span className={`text-sm ${wi.checked ? "line-through text-zinc-500" : "text-zinc-200"}`}>{wi.item}</span>
                 {wi.checked_by_name && <span className="text-[10px] text-muted-foreground ml-2">by {wi.checked_by_name} {wi.checked_at?.slice(0, 16)}</span>}
               </div>
+              <Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 text-zinc-500 opacity-0 transition-opacity hover:bg-rose-500/[0.10] hover:text-rose-300 group-hover:opacity-100 focus-visible:opacity-100" onClick={(event) => { event.stopPropagation(); setPendingRemoval(wi); }} aria-label={`Remove task: ${wi.item}`} title="Remove task"><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>
           ))}
           <div className="flex items-center justify-between px-1 pt-2 text-[11px] text-zinc-500">
@@ -83,19 +108,51 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
           </div>
         </div>
       )}
+      <AlertDialog open={Boolean(pendingRemoval)} onOpenChange={(open) => !open && !removing && setPendingRemoval(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove worksheet task?</AlertDialogTitle>
+            <AlertDialogDescription>{pendingRemoval ? `Remove “${pendingRemoval.item}” from this ticket checklist?` : ""}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Keep task</AlertDialogCancel>
+            <AlertDialogAction onClick={remove} disabled={removing} className="bg-rose-600 text-white hover:bg-rose-500">{removing ? "Removing…" : "Remove task"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
 
 /* ============== Attachments Tab ============== */
 export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, handleAttachmentUpload, handleDeleteAttachment, handleDownloadAttachment }) {
+  const [pendingDeletion, setPendingDeletion] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const confirmDeletion = async () => {
+    if (!pendingDeletion) return;
+    setDeleting(true);
+    try {
+      await handleDeleteAttachment(pendingDeletion.id);
+      setPendingDeletion(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+  const uploadAttachment = async (event) => {
+    try {
+      await handleAttachmentUpload(event);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
   return (
     <>
       <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(120deg,rgba(59,130,246,0.08),transparent_48%)]">
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div><p className="text-sm font-semibold text-zinc-100">Evidence & files</p><p className="mt-0.5 text-[11px] text-zinc-500">Screenshots, exports, diagnostics and customer documents.</p></div>
           <div className="relative">
-          <input type="file" id="attachment-upload" className="hidden" onChange={handleAttachmentUpload} />
+          <input type="file" id="attachment-upload" className="hidden" onChange={uploadAttachment} />
           <Button size="sm" className="bg-sky-500 text-sky-950 hover:bg-sky-400" onClick={() => document.getElementById("attachment-upload").click()} disabled={attachmentUploading} data-testid="upload-attachment-btn">
             {attachmentUploading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Paperclip className="w-3.5 h-3.5 mr-1.5" />}Upload file
           </Button>
@@ -117,8 +174,8 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
               </div>
             </div>
             <div className="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-sky-300 hover:bg-sky-500/[0.10] hover:text-sky-100" onClick={() => handleDownloadAttachment(att)}><Download className="w-3.5 h-3.5" /></Button>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-zinc-500 hover:bg-rose-500/[0.10] hover:text-rose-300" onClick={() => handleDeleteAttachment(att.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-sky-300 hover:bg-sky-500/[0.10] hover:text-sky-100" onClick={() => handleDownloadAttachment(att)} aria-label={`Download ${att.filename}`} title={`Download ${att.filename}`}><Download className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-zinc-500 hover:bg-rose-500/[0.10] hover:text-rose-300" onClick={() => setPendingDeletion(att)} aria-label={`Delete ${att.filename}`} title={`Delete ${att.filename}`}><Trash2 className="w-3.5 h-3.5" /></Button>
             </div>
           </div>
         )) : (
@@ -130,6 +187,22 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
           </div>
         )}
       </ScrollArea>
+      <AlertDialog open={Boolean(pendingDeletion)} onOpenChange={(open) => !open && !deleting && setPendingDeletion(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove ticket evidence?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDeletion ? `Remove “${pendingDeletion.filename}” from this ticket? This cannot be undone.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep file</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeletion} disabled={deleting} className="bg-rose-600 text-white hover:bg-rose-500">
+              {deleting ? "Removing…" : "Remove file"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -212,27 +285,48 @@ export function TicketChildrenTab({ childTickets, fetchTicketDetail, statusConfi
 }
 
 /* ============== Time Tab ============== */
-export function TicketTimeTab({ timeEntries }) {
-  const totalMinutes = timeEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
-  const billableMinutes = timeEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+export function TicketTimeTab({ timeEntries, ticketId, headers, onUpdated }) {
+  const [adjustmentTarget, setAdjustmentTarget] = useState(null);
+  const [adjustmentMinutes, setAdjustmentMinutes] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [adjusting, setAdjusting] = useState(false);
+  const authoritativeEntries = timeEntries.filter(entry => entry.authoritative !== false);
+  const totalMinutes = authoritativeEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+  const billableMinutes = authoritativeEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+  const adjustmentCount = authoritativeEntries.filter(entry => entry.adjustment).length;
   const formatDuration = (minutes) => minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60 ? `${minutes % 60}m` : ""}` : `${minutes}m`;
+  const submitAdjustment = async () => {
+    const minutes = Number(adjustmentMinutes);
+    if (!ticketId || !adjustmentTarget || !Number.isInteger(minutes) || !minutes || !adjustmentReason.trim()) return;
+    setAdjusting(true);
+    try {
+      await axios.post(`${API}/tickets/${ticketId}/time-entries/${adjustmentTarget.id}/adjustments`, { minutes, reason: adjustmentReason.trim() }, { headers });
+      toast.success("Time adjustment recorded");
+      setAdjustmentTarget(null); setAdjustmentMinutes(""); setAdjustmentReason("");
+      await onUpdated?.();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not record time adjustment"); }
+    finally { setAdjusting(false); }
+  };
   if (!timeEntries.length) return <div className="rounded-xl border border-dashed border-white/[0.10] bg-black/[0.08] py-12 text-center"><Clock className="mx-auto mb-3 h-9 w-9 text-violet-300/35" /><p className="text-sm text-zinc-300">No time entries recorded</p><p className="mt-1 text-[11px] text-zinc-500">Log technician effort to keep billing and service reporting accurate.</p></div>;
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Card className="border border-violet-500/20 bg-violet-500/[0.07]"><CardContent className="p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-300">Total effort</p><p className="mt-1 text-lg font-semibold text-violet-100">{formatDuration(totalMinutes)}</p></CardContent></Card>
         <Card className="border border-emerald-500/20 bg-emerald-500/[0.07]"><CardContent className="p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">Billable</p><p className="mt-1 text-lg font-semibold text-emerald-100">{formatDuration(billableMinutes)}</p></CardContent></Card>
+        <Card className="col-span-2 border border-amber-500/20 bg-amber-500/[0.06] lg:col-span-1"><CardContent className="p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">Ledger adjustments</p><p className="mt-1 text-lg font-semibold text-amber-100">{adjustmentCount}</p><p className="mt-0.5 text-[10px] text-zinc-500">Net totals include signed corrections.</p></CardContent></Card>
       </div>
       <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-black/[0.08]">
         <Table>
-          <TableHeader><TableRow className="border-white/[0.06]"><TableHead>Technician</TableHead><TableHead>Duration</TableHead><TableHead>Work performed</TableHead><TableHead>Billing</TableHead><TableHead>Logged</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow className="border-white/[0.06]"><TableHead>Technician</TableHead><TableHead>Duration</TableHead><TableHead>Work performed</TableHead><TableHead>Labour</TableHead><TableHead>Billing</TableHead><TableHead>Logged</TableHead></TableRow></TableHeader>
           <TableBody>
             {timeEntries.map(te => (
-              <TableRow key={te.id} className="border-white/[0.06] hover:bg-white/[0.025]"><TableCell className="font-medium text-zinc-200">{te.user_name || "Technician"}</TableCell><TableCell className="font-mono text-violet-200">{formatDuration(Number(te.minutes || 0))}</TableCell><TableCell className="max-w-[360px] truncate text-zinc-300">{te.description || "No description"}</TableCell><TableCell>{te.billable ? <Badge className="border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">Billable</Badge> : <Badge variant="outline" className="border-zinc-700 text-zinc-500">Internal</Badge>}</TableCell><TableCell className="text-xs text-zinc-500">{te.created_at && formatDistanceToNow(new Date(te.created_at), { addSuffix: true })}</TableCell></TableRow>
+              <TableRow key={te.id} className="border-white/[0.06] hover:bg-white/[0.025]"><TableCell className="font-medium text-zinc-200">{te.user_name || "Technician"}</TableCell><TableCell className={`font-mono ${Number(te.minutes || 0) < 0 ? "text-amber-200" : "text-violet-200"}`}>{Number(te.minutes || 0) > 0 && te.adjustment ? "+" : ""}{formatDuration(Number(te.minutes || 0))}</TableCell><TableCell className="max-w-[300px] truncate text-zinc-300">{te.description || "No description"}{te.adjustment_of && <p className="mt-0.5 font-mono text-[9px] text-amber-300/80">Adjustment of {String(te.adjustment_of).slice(0, 12)}</p>}</TableCell><TableCell><div className="min-w-[120px]"><p className="text-xs text-zinc-200">{te.labour_type_name || "Technician default"}</p>{te.labour_type_code && <p className="mt-0.5 font-mono text-[9px] text-zinc-500">{te.labour_type_code}</p>}</div></TableCell><TableCell><div className="flex flex-wrap items-center gap-1.5">{te.billable ? <Badge className="border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">Billable</Badge> : <Badge variant="outline" className="border-zinc-700 text-zinc-500">Internal</Badge>}{te.adjustment && <Badge variant="outline" className="border-amber-400/25 text-amber-200">Adjustment</Badge>}{te.invoiced && <><Badge variant="outline" className="border-sky-400/20 text-sky-200">Invoiced</Badge><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-amber-200" onClick={() => setAdjustmentTarget(te)}>Adjust</Button></>}</div></TableCell><TableCell className="text-xs text-zinc-500"><span className="block">{te.created_at && formatDistanceToNow(new Date(te.created_at), { addSuffix: true })}</span>{te.performed_at && <span className="mt-0.5 block text-[10px] text-zinc-600">Performed {formatDistanceToNow(new Date(te.performed_at), { addSuffix: true })}</span>}</TableCell></TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+      {timeEntries.some(entry => entry.authoritative === false) && <p className="px-1 text-[10px] text-zinc-500">Legacy time history is retained below for context and excluded from the canonical effort and billing totals above.</p>}
+      <Dialog open={Boolean(adjustmentTarget)} onOpenChange={(open) => !open && setAdjustmentTarget(null)}><NexusWorkflowDialog eyebrow="Billing correction" title="Adjust invoiced time" description="The original invoice evidence stays unchanged. Nexus records this as a linked signed adjustment for the next billing review." icon={Clock} tone="amber" footer={<><Button variant="outline" onClick={() => setAdjustmentTarget(null)} disabled={adjusting}>Cancel</Button><Button onClick={submitAdjustment} disabled={adjusting || !adjustmentReason.trim() || !Number.isInteger(Number(adjustmentMinutes)) || !Number(adjustmentMinutes)}>{adjusting ? "Recording…" : "Record adjustment"}</Button></>}><div className="space-y-3"><div><Label>Signed minutes</Label><Input value={adjustmentMinutes} onChange={(event) => setAdjustmentMinutes(event.target.value)} placeholder="e.g. -15 for a credit, 15 for extra work" inputMode="numeric" /></div><div><Label>Reason</Label><Input value={adjustmentReason} onChange={(event) => setAdjustmentReason(event.target.value)} placeholder="Explain the billing correction" /></div></div></NexusWorkflowDialog></Dialog>
     </div>
   );
 }
@@ -243,6 +337,8 @@ export function TicketAuditTab({ auditLog }) {
     created: { label: "Created ticket", Icon: CheckCircle, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
     updated: { label: "Updated ticket", Icon: History, tone: "border-sky-500/25 bg-sky-500/[0.10] text-sky-300" },
     time_logged: { label: "Logged time", Icon: Clock, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
+    time_corrected: { label: "Corrected time", Icon: Clock, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-200" },
+    time_deleted: { label: "Deleted time", Icon: Trash2, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
     customer_changed: { label: "Changed client", Icon: Building2, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
     categorisation_updated: { label: "Updated classification", Icon: Tags, tone: "border-sky-500/25 bg-sky-500/[0.10] text-sky-300" },
     picked_up: { label: "Picked up ticket", Icon: UserCheck, tone: "border-blue-500/25 bg-blue-500/[0.10] text-blue-300" },
@@ -250,9 +346,24 @@ export function TicketAuditTab({ auditLog }) {
     maintenance_scheduled: { label: "Scheduled maintenance", Icon: CalendarClock, tone: "border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-300" },
     converted_to_change: { label: "Converted to change", Icon: GitPullRequest, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
     device_action: { label: "Device action", Icon: MonitorCog, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
+    ticket_attachment_added: { label: "Attached evidence", Icon: Paperclip, tone: "border-sky-500/25 bg-sky-500/[0.10] text-sky-300" },
+    ticket_attachment_deleted: { label: "Removed evidence", Icon: Trash2, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
+    ticket_attachment_downloaded: { label: "Downloaded evidence", Icon: Download, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
     blocked_on: { label: "Marked blocked", Icon: History, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
     unblocked: { label: "Removed blocker", Icon: CheckCircle, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
     csat_sent: { label: "Sent satisfaction survey", Icon: BellRing, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
+    ticket_subscriber_added: { label: "Added ticket subscriber", Icon: BellRing, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
+    ticket_subscriber_removed: { label: "Removed ticket subscriber", Icon: BellRing, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
+    nexus_elevate_requested: { label: "Nexus Elevate requested", Icon: ShieldCheck, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
+    nexus_elevate_policy_auto_approved: { label: "Nexus Elevate policy queued launch", Icon: ShieldCheck, tone: "border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-300" },
+    nexus_elevate_policy_denied: { label: "Nexus Elevate policy blocked request", Icon: ShieldCheck, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
+    nexus_elevate_policy_review_required: { label: "Nexus Elevate policy requires review", Icon: ShieldCheck, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
+    nexus_elevate_approved: { label: "Nexus Elevate approved", Icon: ShieldCheck, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
+    nexus_elevate_denied: { label: "Nexus Elevate denied", Icon: ShieldCheck, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
+    nexus_elevate_cancelled: { label: "Nexus Elevate request withdrawn", Icon: ShieldCheck, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
+    nexus_elevate_revoked: { label: "Nexus Elevate queued launch revoked", Icon: ShieldCheck, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
+    nexus_elevate_executed: { label: "Nexus Elevate executed", Icon: ShieldCheck, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
+    nexus_elevate_execution_failed: { label: "Nexus Elevate execution failed", Icon: ShieldCheck, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
   };
   const describe = (entry) => entry.details || Object.entries(entry.changes || {})
     .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`).join(" · ");

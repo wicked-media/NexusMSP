@@ -130,7 +130,7 @@ export default function AutoDocumentationPage() {
         ].map((st, index) => <HeroTile key={st.label} label={st.label} value={st.value} icon={st.icon} glow={["sky", "emerald", "violet", "amber"][index]} />)}
       </div>
 
-      <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/50 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] sm:flex-row sm:items-center sm:justify-between">
         <div><p className="text-sm font-semibold">Inventory documentation</p><p className="text-xs text-muted-foreground">Generate a baseline now, then validate it against the client’s approved records.</p></div>
         <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={upgradeAllDocuments} disabled={upgradingAll} data-testid="upgrade-auto-docs">{upgradingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Upgrade all</Button><Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button><Button size="sm" onClick={() => setShowGenerate(true)} data-testid="generate-doc-toolbar"><Plus className="w-4 h-4 mr-2" />Generate document</Button></div>
       </div>
@@ -140,7 +140,7 @@ export default function AutoDocumentationPage() {
         {byType.map(t => {
           const Icon = t.icon;
           return (
-            <Card key={t.type} className="border-border/40 hover:border-primary/40 transition-colors cursor-pointer group" onClick={() => { setForm({ ...form, doc_type: t.type }); setShowGenerate(true); }} data-testid={`gen-${t.type}`}>
+            <Card key={t.type} role="button" tabIndex={0} className="group cursor-pointer overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] transition-all hover:-translate-y-0.5 hover:border-sky-400/35 hover:shadow-[0_22px_42px_-34px_rgba(56,189,248,0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60" onClick={() => { setForm({ ...form, doc_type: t.type }); setShowGenerate(true); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setForm({ ...form, doc_type: t.type }); setShowGenerate(true); } }} data-testid={`gen-${t.type}`}>
               <CardContent className="pt-5 pb-4">
                 <div className="flex items-start gap-3">
                   <div className={`w-12 h-12 rounded-lg ${t.bg} flex items-center justify-center group-hover:scale-110 transition-transform`}>
@@ -173,7 +173,7 @@ export default function AutoDocumentationPage() {
             const Icon = dt.icon;
             const StatusIcon = sc.icon;
             return (
-              <Card key={d.id} className={`border-border/40 hover:shadow-md transition-all cursor-pointer`} onClick={() => setSelectedDoc(d)} data-testid={`doc-${d.id}`}>
+              <Card key={d.id} role="button" tabIndex={0} className="cursor-pointer overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] transition-all hover:-translate-y-0.5 hover:border-sky-400/35 hover:shadow-[0_22px_42px_-34px_rgba(56,189,248,0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60" onClick={() => setSelectedDoc(d)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedDoc(d); } }} data-testid={`doc-${d.id}`}>
                 <CardContent className="pt-4 pb-3">
                   <div className="flex items-center gap-4">
                     <div className={`w-10 h-10 rounded-lg ${dt.bg} flex items-center justify-center`}>
@@ -202,11 +202,11 @@ export default function AutoDocumentationPage() {
         </TabsContent>
 
         <TabsContent value="byClient" className="mt-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {[...new Set(docs.map(d => d.client_name))].map(client => {
               const clientDocs = docs.filter(d => d.client_name === client);
               return (
-                <Card key={client} className="border-border/40">
+                <Card key={client} className="overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)]">
                   <CardHeader className="pb-2"><CardTitle className="text-sm">{client}</CardTitle></CardHeader>
                   <CardContent>
                     <div className="space-y-2">
@@ -214,11 +214,11 @@ export default function AutoDocumentationPage() {
                         const dt = DOC_TYPES[d.doc_type] || { icon: FileText, color: "text-blue-400" };
                         const Icon = dt.icon;
                         return (
-                          <div key={d.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 cursor-pointer hover:bg-muted/50" onClick={() => setSelectedDoc(d)}>
+                          <button key={d.id} type="button" className="flex w-full items-center gap-2 rounded-xl bg-muted/30 p-2 text-left transition-colors hover:bg-sky-400/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60" onClick={() => setSelectedDoc(d)}>
                             <Icon className={`w-4 h-4 ${dt.color}`} />
                             <span className="text-sm flex-1 truncate">{d.title}</span>
                             <Badge variant="outline" className="text-[10px] capitalize">{d.status}</Badge>
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
@@ -272,13 +272,13 @@ export default function AutoDocumentationPage() {
 
       {/* Document Detail Dialog */}
       <Dialog open={!!selectedDoc} onOpenChange={() => setSelectedDoc(null)}>
-        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto" aria-describedby="doc-detail-desc">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="doc-detail-desc">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-blue-400/15 via-blue-400/[0.04] to-transparent px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5 text-blue-400" />{selectedDoc?.title}</DialogTitle>
             <DialogDescription id="doc-detail-desc">Document details and sections</DialogDescription>
           </DialogHeader>
           {selectedDoc && (
-            <div className="space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div><span className="text-muted-foreground text-xs">Client</span><p className="font-medium">{selectedDoc.client_name}</p></div>
                 <div><span className="text-muted-foreground text-xs">Type</span><p className="font-medium capitalize">{selectedDoc.doc_type?.replace(/_/g, " ")}</p></div>
@@ -303,9 +303,9 @@ export default function AutoDocumentationPage() {
                 </div>
               )}
               {selectedDoc.content_html && <div className="rounded-lg border border-border/60 bg-background p-4"><p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Generated document preview</p><div className="prose prose-sm max-w-none dark:prose-invert" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selectedDoc.content_html) }} /></div>}
-              <DialogFooter><Button variant="outline" onClick={() => regenerateDoc(selectedDoc.id)} disabled={regeneratingId === selectedDoc.id} data-testid="regenerate-auto-doc">{regeneratingId === selectedDoc.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Refresh from inventory</Button></DialogFooter>
             </div>
           )}
+          {selectedDoc && <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button variant="outline" onClick={() => regenerateDoc(selectedDoc.id)} disabled={regeneratingId === selectedDoc.id} data-testid="regenerate-auto-doc">{regeneratingId === selectedDoc.id ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Refresh from inventory</Button></DialogFooter>}
         </DialogContent>
       </Dialog>
     </div>

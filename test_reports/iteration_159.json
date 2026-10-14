@@ -25,7 +25,7 @@
     "backend": "100% (25/25 tests passed)",
     "frontend": "100% (all 9 tabs verified, all UI elements present)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "TEST_Import_Product created via bulk import test, TEST_Warehouse created and deleted",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -56,7 +56,7 @@
         "GET /api/billing-pro/products/inventory/snapshot": "PASS - returns total_units, total_value_cost, by_category, low_stock"
       },
       "suggest_retail": {
-        "POST /api/billing-pro/products/suggest-retail": "PASS - cost=100, margin=35% → retail≈153.85, markup≈53.8%"
+        "POST /api/billing-pro/products/suggest-retail": "PASS - cost=100, margin=35% â†’ retailâ‰ˆ153.85, markupâ‰ˆ53.8%"
       },
       "bulk_import": {
         "POST /api/billing-pro/products/bulk-import": "PASS - imports CSV rows"
@@ -74,7 +74,7 @@
         "PUT /api/billing-pro/settings/tax-compliance": "PASS - saves config"
       },
       "fx_rate": {
-        "GET /api/billing-pro/fx/rate": "PASS - returns numeric rate for AUD→USD"
+        "GET /api/billing-pro/fx/rate": "PASS - returns numeric rate for AUDâ†’USD"
       },
       "retainers": {
         "GET /api/billing-pro/retainers/{client_id}": "PASS - returns balance (0 by default)",

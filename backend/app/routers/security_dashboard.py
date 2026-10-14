@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
 from app.database import db
+from app.services.scope_permissions import scoped_query
 
 router = APIRouter()
 
@@ -22,7 +23,8 @@ def _is_open(record: dict) -> bool:
 @router.get("/security-dashboard/overview")
 async def get_security_overview(current_user: dict = Depends(get_current_user)):
     """Return an evidence-backed security summary for legacy API consumers."""
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
+    scope = scoped_query(current_user)
+    devices = await db.devices.find(scope, {"_id": 0}).to_list(5000)
     assessed = [device for device in devices if device.get("security_assessed_at")]
     managed = [device for device in devices if device.get("nexus_agent_id")]
     assessed_scores = [
@@ -31,11 +33,13 @@ async def get_security_overview(current_user: dict = Depends(get_current_user)):
         if isinstance(device.get("compliance_score"), (int, float))
     ]
     patched = sum(1 for device in assessed if int(device.get("pending_patches") or 0) == 0)
-    soc_alerts = await db.soc_alerts.find({}, {"_id": 0}).to_list(5000)
-    threat_events = await db.threat_events.find({}, {"_id": 0}).to_list(5000)
+    soc_alerts = await db.soc_alerts.find(scope, {"_id": 0}).to_list(5000)
+    threat_events = await db.threat_events.find(scope, {"_id": 0}).to_list(5000)
     active_alerts = [alert for alert in soc_alerts if _is_open(alert)]
     active_events = [event for event in threat_events if _is_open(event) and not event.get("resolved")]
-    canary_triggers = await db.canary_triggers.count_documents({"resolved": False})
+    canary_triggers = await db.canary_triggers.count_documents(
+        scoped_query(current_user, {"resolved": False})
+    )
     incidents = sorted(
         [*active_alerts, *active_events],
         key=lambda item: item.get("created_at") or item.get("detected_at") or item.get("triggered_at") or "",
@@ -75,7 +79,9 @@ async def get_security_overview(current_user: dict = Depends(get_current_user)):
 @router.get("/security-dashboard/score-trend")
 async def get_score_trend(current_user: dict = Depends(get_current_user)):
     """Return recorded snapshots only. An empty list explicitly means no history exists."""
-    snapshots = await db.security_dashboard_snapshots.find({}, {"_id": 0}).sort("recorded_at", -1).to_list(180)
+    snapshots = await db.security_dashboard_snapshots.find(
+        scoped_query(current_user), {"_id": 0}
+    ).sort("recorded_at", -1).to_list(180)
     snapshots.reverse()
     return [
         {

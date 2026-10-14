@@ -24,11 +24,11 @@
     "backend": "100% (28/28 tests passed)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required - tested with existing data (client-001, TKT-001)",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "24 Power Features fully tested. Backend: All 24 endpoints return correct response structures. Frontend: Command Center page (/command-center) has 8 tabs all working, TicketAIBundle has 5 buttons (Doppelgänger, Suggest Resolution, Smart Assign, Apology AI, To Runbook), ClientAIBundle has 5 buttons (Anniversary AI, Monthly Recap, Pre-call Brief, Insurance Plan, Dossier PDF). Claude AI integration working for monthly-recap, pre-call-brief, daily-briefing, quality-audit endpoints.",
+  "context_for_next_testing_agent": "24 Power Features fully tested. Backend: All 24 endpoints return correct response structures. Frontend: Command Center page (/command-center) has 8 tabs all working, TicketAIBundle has 5 buttons (DoppelgÃ¤nger, Suggest Resolution, Smart Assign, Apology AI, To Runbook), ClientAIBundle has 5 buttons (Anniversary AI, Monthly Recap, Pre-call Brief, Insurance Plan, Dossier PDF). Claude AI integration working for monthly-recap, pre-call-brief, daily-briefing, quality-audit endpoints.",
   "features_tested": {
     "backend_apis": {
       "POST /api/tickets/{id}/smart-assign": "PASS - Returns top_pick with tech_id/name/score/reason + alternatives[]",
@@ -62,7 +62,7 @@
       "Command Center tabs (8 total)": "PASS - All 8 tabs present: tab-center, tab-risk, tab-unbilled, tab-pricing, tab-monday, tab-leaderboard, tab-streaks, tab-capacity",
       "Right now tab - 4 stat tiles": "PASS - data-testid='command-center-card' shows SLA hot tickets (43), Sentiment escalations 24h (0), Patch anomalies (0), Overloaded techs (0)",
       "Revenue at Risk tab": "PASS - data-testid='total-at-risk' shows $35,350",
-      "TicketAIBundle - Doppelgänger button": "PASS - data-testid='ai-doppelganger-btn'",
+      "TicketAIBundle - DoppelgÃ¤nger button": "PASS - data-testid='ai-doppelganger-btn'",
       "TicketAIBundle - Suggest Resolution button (NEW)": "PASS - data-testid='ai-resolution-btn'",
       "TicketAIBundle - Smart Assign button (NEW)": "PASS - data-testid='ai-smart-assign-btn', opens data-testid='smart-assign-panel'",
       "TicketAIBundle - Apology AI button": "PASS - data-testid='ai-apology-btn'",

@@ -186,9 +186,9 @@ export default function IntelligentRoutingPage({ embedded = false }) {
 
       {/* Add Rule Dialog */}
       <Dialog open={showAddRule} onOpenChange={setShowAddRule}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Routing Rule</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+        <DialogContent className="flex h-[min(700px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="routing-rule-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12"><DialogTitle>Add Routing Rule</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <div><Label>Rule Name</Label><Input value={ruleForm.name} onChange={e => setRuleForm({ ...ruleForm, name: e.target.value })} placeholder="e.g., Critical → Senior Tech" data-testid="rule-name" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Priority Filter</Label>
@@ -206,7 +206,7 @@ export default function IntelligentRoutingPage({ embedded = false }) {
               </Select>
             </div>
           </div>
-          <DialogFooter><Button onClick={addRule} data-testid="save-rule-btn">Create Rule</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4"><Button variant="outline" onClick={() => setShowAddRule(false)}>Cancel</Button><Button onClick={addRule} data-testid="save-rule-btn">Create Rule</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

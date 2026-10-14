@@ -27,8 +27,7 @@ HOSTNAME_RE = re.compile(r"^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?
 SPF_LOOKUP_RE = re.compile(r"\b(?:include|a|mx|ptr|exists|redirect)[:=]?[^\s]*", re.IGNORECASE)
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _status(value: Any) -> str:

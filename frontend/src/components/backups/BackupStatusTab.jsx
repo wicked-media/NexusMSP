@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
-import { ChevronLeft, ChevronRight, Loader2, Play, Wifi, WifiOff, Search, FilterX, HardDrive } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Play, RefreshCw, Wifi, WifiOff, Search, FilterX, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 
 export default function BackupStatusTab({ token, onDataChange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -23,16 +24,33 @@ export default function BackupStatusTab({ token, onDataChange }) {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const r = await axios.get(`${API}/acronis/backup-statuses`, { headers: { Authorization: `Bearer ${token}` } });
       setData(r.data);
       onDataChange?.(r.data);
-    } catch { toast.error("Failed to load backup statuses"); }
+    } catch (error) {
+      const message = error.response?.data?.detail || "Nexus could not load the Acronis backup-status feed.";
+      setLoadError(message);
+      toast.error(message);
+    }
     finally { setLoading(false); }
   }, [onDataChange, token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { setPage(1); }, [search, statusFilter]);
+
+  const normalizedSearch = search.trim().toLowerCase();
+  const matchesSearch = (machine) => !normalizedSearch || [
+    machine.machine_name,
+    machine.tenant_name,
+    machine.plan_names,
+    machine.backup_health,
+  ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
+  const machines = (data?.machines || [])
+    .filter((machine) => statusFilter === "all" || machine.backup_health === statusFilter)
+    .filter(matchesSearch);
+  const eligibleBulkMachines = machines.filter((machine) => machine.agent_online === true && (machine.backup_application_ids?.length || 0) > 0);
 
   const handleRun = async (m) => {
     if (!m.resource_id && !(m.backup_application_ids?.length)) {
@@ -55,24 +73,19 @@ export default function BackupStatusTab({ token, onDataChange }) {
   };
 
   const handleBulkRun = async (confirmed = false) => {
-    const machines = (data?.machines || []).filter(m =>
-      (statusFilter === "all" || m.backup_health === statusFilter) &&
-      m.agent_online === true &&
-      (m.backup_application_ids?.length || 0) > 0
-    );
-    if (!machines.length) {
+    if (!eligibleBulkMachines.length) {
       toast.error("No eligible machines (must be online with applied backup plans)");
       return;
     }
     if (!confirmed) {
-      setBulkRunTarget({ count: machines.length, planCount: new Set(machines.flatMap((machine) => machine.backup_application_ids || [])).size });
+      setBulkRunTarget({ count: eligibleBulkMachines.length, planCount: new Set(eligibleBulkMachines.flatMap((machine) => machine.backup_application_ids || [])).size });
       return;
     }
     setRunningId("__bulk__");
-    const allAppIds = [...new Set(machines.flatMap(m => m.backup_application_ids || []))];
+    const allAppIds = [...new Set(eligibleBulkMachines.flatMap(m => m.backup_application_ids || []))];
     try {
       const res = await axios.post(`${API}/acronis/backup/run`, { application_ids: allAppIds }, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success(res.data?.message || `Bulk backup triggered for ${machines.length} machines`);
+      toast.success(res.data?.message || `Bulk backup triggered for ${eligibleBulkMachines.length} machines`);
       setBulkRunTarget(null);
       setTimeout(fetchData, 3000);
     } catch (e) {
@@ -82,17 +95,10 @@ export default function BackupStatusTab({ token, onDataChange }) {
     }
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+  if (loading && !data) {
+    return <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground" role="status"><Loader2 className="h-5 w-5 animate-spin" />Loading backup agent status…</div>;
+  }
 
-  const normalizedSearch = search.trim().toLowerCase();
-  const machines = (data?.machines || [])
-    .filter(m => statusFilter === "all" || m.backup_health === statusFilter)
-    .filter((machine) => !normalizedSearch || [
-      machine.machine_name,
-      machine.tenant_name,
-      machine.plan_names,
-      machine.backup_health,
-    ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch)));
   const pageSize = 25;
   const totalPages = Math.max(1, Math.ceil(machines.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -121,12 +127,13 @@ export default function BackupStatusTab({ token, onDataChange }) {
           <Button
             size="sm"
             className="bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30"
-            disabled={runningId === "__bulk__"}
+            disabled={runningId === "__bulk__" || eligibleBulkMachines.length === 0}
             onClick={handleBulkRun}
             data-testid="bulk-run-backup"
+            title={eligibleBulkMachines.length ? "Queue backups for eligible machines in the visible filtered result" : "No visible machines are both online and assigned a backup plan"}
           >
             {runningId === "__bulk__" ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Play className="w-3.5 h-3.5 mr-1" />}
-            Run on All Online ({statusFilter})
+            Queue eligible ({eligibleBulkMachines.length})
           </Button>
         )}
         {statusFilter !== "all" && (
@@ -135,6 +142,8 @@ export default function BackupStatusTab({ token, onDataChange }) {
           </Button>
         )}
       </div>
+
+      {loadError && <Card className="border-amber-400/25 bg-amber-500/[0.045]" data-testid="backup-status-feed-warning"><CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-2.5"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" /><div><p className="text-sm font-semibold text-amber-100">Backup status feed needs attention</p><p className="mt-0.5 text-xs text-muted-foreground">{data ? "Showing the last successfully loaded result. " : "No status result is available yet. "}{loadError}</p></div></div><Button size="sm" variant="outline" className="w-fit border-amber-400/25 text-amber-100 hover:bg-amber-500/10" onClick={fetchData}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry feed</Button></CardContent></Card>}
 
       <Card>
         <CardContent className="p-0">

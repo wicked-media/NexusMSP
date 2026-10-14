@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Body
 from app.database import db
 from app.auth import get_current_user
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 
 router = APIRouter(prefix="/escalation-matrix", tags=["Escalation Matrix"])
@@ -20,6 +20,7 @@ async def get_escalation_rules(user=Depends(get_current_user)):
         for r in defaults:
             r["created_at"] = datetime.now(timezone.utc).isoformat()
             await db.escalation_rules.insert_one(r)
+            r.pop("_id", None)
         rules = defaults
     return rules
 
@@ -32,6 +33,7 @@ async def create_escalation_rule(payload: dict = Body(...), user=Depends(get_cur
         "created_by": user.get("name"),
     }
     await db.escalation_rules.insert_one(doc)
+    doc.pop("_id", None)
     return doc
 
 @router.put("/rules/{rule_id}")

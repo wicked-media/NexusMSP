@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
@@ -20,7 +20,7 @@ import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
   ArrowLeft, ChevronRight, MoreVertical, MessageSquareReply, CheckCircle2, AlertTriangle,
   Building2, UserCircle2, Mail, Loader2, History, Search,
-  ArrowLeftRight, Bookmark, X, RotateCcw, Wrench, Receipt, Play, Square,
+  ArrowLeftRight, Bookmark, X, RotateCcw, Wrench, Receipt, Play, Square, PackagePlus,
 } from "lucide-react";
 
 const STATUS_FLOW = ["open", "in_progress", "on_hold", "resolved", "closed"];
@@ -32,10 +32,16 @@ export default function TicketConsoleHeader({
   onReply,
   onResolve,
   onStatusChange,
+  onRequestResolution,
   onChangeCustomer,
   onMoreAction,
   onOpenTools,
   onInvoice,
+  onAddItems,
+  itemCount = 0,
+  focusMode = false,
+  onToggleFocus,
+  onCatchUp,
   onTitleSave,
   onDescriptionSave,
   onMutate,
@@ -93,12 +99,29 @@ export default function TicketConsoleHeader({
     const secs = total % 60;
     return [hours, minutes, secs].map(value => String(value).padStart(2, "0")).join(":");
   };
+  const requestResolution = (target) => {
+    if (onRequestResolution) {
+      onRequestResolution(ticket, target);
+      return;
+    }
+    setResolutionTarget(target);
+  };
+  const saveTitle = () => {
+    const nextTitle = titleDraft.trim();
+    if (nextTitle && nextTitle !== (ticket?.title || "")) onTitleSave?.(nextTitle);
+    setTitleEdit(false);
+  };
+  const saveDescription = () => {
+    const nextDescription = descriptionDraft.trim();
+    if (nextDescription !== (ticket?.description || "")) onDescriptionSave?.(nextDescription);
+    setDescriptionEdit(false);
+  };
 
   if (!ticket) return null;
 
   return (
     <>
-      <Card className="nx-ambient-surface sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-nx-signal={signal} data-testid="ticket-console-header">
+      <Card className="nx-ambient-surface sticky top-0 z-30 overflow-clip rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-nx-signal={signal} data-testid="ticket-console-header">
         <CardContent className="p-4 space-y-3">
           {/* Row 1 — Back · ID · Priority · Title · Primary actions · More */}
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live service record <span className="text-zinc-600">/</span><span className="text-zinc-400">{ticket.ticket_type?.replace("_", " ") || "incident"}</span></div>
@@ -131,27 +154,29 @@ export default function TicketConsoleHeader({
                 <Input
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
-                  onBlur={() => { onTitleSave?.(titleDraft); setTitleEdit(false); }}
+                  onBlur={saveTitle}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") { onTitleSave?.(titleDraft); setTitleEdit(false); }
-                    if (e.key === "Escape") { setTitleDraft(ticket.title || ""); setTitleEdit(false); }
+                    if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                    if (e.key === "Escape") { e.preventDefault(); setTitleDraft(ticket.title || ""); setTitleEdit(false); }
                   }}
                   className="h-10 text-xl font-semibold bg-zinc-950 border-emerald-500/30"
                   autoFocus
                   data-testid="console-title-input"
                 />
               ) : (
-                <h2
-                  className="text-xl md:text-2xl font-semibold tracking-tight text-white truncate cursor-pointer hover:text-emerald-200 transition-colors"
+                <button
+                  type="button"
+                  className="block max-w-full truncate text-left text-xl md:text-2xl font-semibold tracking-tight text-white hover:text-emerald-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 rounded-sm"
                   onClick={() => setTitleEdit(true)}
-                  title="Click to edit"
+                  title="Edit ticket title"
+                  aria-label="Edit ticket title"
                   data-testid="console-title"
                 >
                   {ticket.title || "Untitled ticket"}
-                </h2>
+                </button>
               )}
               {descriptionEdit ? (
-                <Textarea value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} onBlur={() => { onDescriptionSave?.(descriptionDraft); setDescriptionEdit(false); }} onKeyDown={(e) => { if (e.key === "Escape") { setDescriptionDraft(ticket.description || ""); setDescriptionEdit(false); } }} rows={2} className="mt-2 min-h-16 resize-none border-cyan-500/25 bg-zinc-950 text-sm" autoFocus data-testid="console-description-input" />
+                <Textarea value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} onBlur={saveDescription} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setDescriptionDraft(ticket.description || ""); setDescriptionEdit(false); } if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} rows={2} className="mt-2 min-h-16 resize-none border-cyan-500/25 bg-zinc-950 text-sm" autoFocus data-testid="console-description-input" />
               ) : (
                 <button type="button" onClick={() => setDescriptionEdit(true)} className="mt-1.5 block max-w-full truncate text-left text-xs text-zinc-400 transition-colors hover:text-cyan-100" title="Click to edit description" data-testid="console-description">{ticket.description || "Add a ticket description"}</button>
               )}
@@ -166,9 +191,9 @@ export default function TicketConsoleHeader({
               data-testid="console-timer-btn"
             >{isTimerRunning ? formatElapsed(timerElapsed) : "Start timer"}</TicketHeaderAction>
             {isActiveTicket && <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>}
-            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => setResolutionTarget("resolved")} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
-            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => setResolutionTarget("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
-            <TicketHeaderAction icon={Wrench} tone="compact" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
+            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => requestResolution("resolved")} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
+            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => requestResolution("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
+            {isClosed && <TicketHeaderAction icon={RotateCcw} tone="warning" onClick={() => requestResolution("reopen")} data-testid="console-reopen-btn">Reopen ticket</TicketHeaderAction>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -176,6 +201,10 @@ export default function TicketConsoleHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Quick actions</DropdownMenuLabel>
+                {onCatchUp && <DropdownMenuItem onClick={onCatchUp} data-testid="ticket-catch-up"><History className="w-3.5 h-3.5 mr-2" />Catch me up</DropdownMenuItem>}
+                {onAddItems && <DropdownMenuItem onClick={onAddItems} data-testid="console-add-items-btn"><PackagePlus className="w-3.5 h-3.5 mr-2" />Add products{itemCount > 0 ? ` · ${itemCount}` : ""}</DropdownMenuItem>}
+                {onToggleFocus && <DropdownMenuItem onClick={onToggleFocus} data-testid="ticket-focus-toggle">{focusMode ? <Search className="w-3.5 h-3.5 mr-2" /> : <Wrench className="w-3.5 h-3.5 mr-2" />}{focusMode ? "Show full context" : "Focus view"}</DropdownMenuItem>}
+                <DropdownMenuItem onClick={onOpenTools} data-testid="console-tools-btn"><Wrench className="w-3.5 h-3.5 mr-2" />Tools & integrations</DropdownMenuItem>
                 <DropdownMenuItem onClick={onInvoice} data-testid="console-invoice-btn"><Receipt className="w-3.5 h-3.5 mr-2" />Review billing</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onMoreAction?.("transfer")}><ArrowLeftRight className="w-3.5 h-3.5 mr-2" />Reassign technician</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onPinObject?.()} data-testid="pin-ticket-object"><Bookmark className="w-3.5 h-3.5 mr-2" />Pin to Object Dock</DropdownMenuItem>
@@ -225,7 +254,7 @@ export default function TicketConsoleHeader({
                 return (
                   <button
                     key={s}
-                    onClick={() => ["resolved", "closed"].includes(s) ? setResolutionTarget(s) : onStatusChange?.(s)}
+                    onClick={() => ["resolved", "closed"].includes(s) ? requestResolution(s) : onStatusChange?.(s)}
                 className={`text-[10px] uppercase tracking-[0.1em] px-2 py-1 rounded-md transition-colors ${
                       active ? "bg-white/[0.12] text-white ring-1 ring-white/[0.14]" :
                       past ? "text-emerald-300/70 hover:bg-emerald-500/[0.06]" :
@@ -252,11 +281,16 @@ export default function TicketConsoleHeader({
       />
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-w-lg" data-testid="customer-history-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><History className="w-4 h-4 text-amber-400" />Customer Change History</DialogTitle>
-            <DialogDescription>Every customer reassignment is logged.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-lg"
+          eyebrow="Ticket relationship · audit evidence"
+          title="Customer change history"
+          description="Every customer reassignment is recorded before the ticket relationship changes."
+          icon={History}
+          tone="amber"
+          data-testid="customer-history-dialog"
+          footer={<>{hasHistory && <Button variant="outline" onClick={revert} className="text-amber-300 border-amber-500/30" data-testid="revert-customer-btn"><RotateCcw className="w-3 h-3 mr-1" />Revert last</Button>}<Button onClick={() => setHistoryOpen(false)}>Close</Button></>}
+        >
           {history.length === 0 ? <p className="text-xs text-muted-foreground text-center py-4">No changes yet.</p> :
             <ScrollArea className="max-h-64">
               <div className="space-y-2">
@@ -276,11 +310,7 @@ export default function TicketConsoleHeader({
               </div>
             </ScrollArea>
           }
-          <DialogFooter>
-            {hasHistory && <Button variant="outline" onClick={revert} className="text-amber-300 border-amber-500/30" data-testid="revert-customer-btn"><RotateCcw className="w-3 h-3 mr-1" />Revert last</Button>}
-            <Button onClick={() => setHistoryOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={confirmRevert} onOpenChange={setConfirmRevert}>
         <NexusWorkflowDialog
@@ -366,14 +396,16 @@ function ChangeCustomerDialog({ open, onClose, ticket, clients, onChanged }) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-xl" data-testid="change-customer-dialog">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Building2 className="w-5 h-5 text-emerald-400" />Change Customer</DialogTitle>
-          <DialogDescription>
-            Reassign <b>{ticket.ticket_number || ticket.id?.slice(0, 8)}</b> from <b className="text-zinc-300">{ticket.client_name || "—"}</b> to another customer.
-            History is logged and a comment is auto-posted.
-          </DialogDescription>
-        </DialogHeader>
+      <NexusWorkflowDialog
+        className="max-w-xl"
+        eyebrow="Ticket relationship · audited reassignment"
+        title="Change customer"
+        description={`Reassign ${ticket.ticket_number || ticket.id?.slice(0, 8)} from ${ticket.client_name || "an unassigned customer"}. Nexus records the history and posts an internal comment.`}
+        icon={Building2}
+        tone="emerald"
+        data-testid="change-customer-dialog"
+        footer={<><Button variant="outline" onClick={onClose}><X className="w-3 h-3 mr-1" />Cancel</Button><Button onClick={submit} disabled={busy || !selectedClientId} className="bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/40" data-testid="change-customer-submit">{busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ArrowLeftRight className="w-3 h-3 mr-1" />}Reassign</Button></>}
+      >
 
         <div className="space-y-3">
           <div className="relative">
@@ -440,13 +472,7 @@ function ChangeCustomerDialog({ open, onClose, ticket, clients, onChanged }) {
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}><X className="w-3 h-3 mr-1" />Cancel</Button>
-          <Button onClick={submit} disabled={busy || !selectedClientId} className="bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/40" data-testid="change-customer-submit">
-            {busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ArrowLeftRight className="w-3 h-3 mr-1" />}Reassign
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }

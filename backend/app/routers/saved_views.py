@@ -5,7 +5,6 @@ sort, color, icon, pinned (top-bar), shared (visible to whole team).
 """
 
 from fastapi import APIRouter, Depends, Body, HTTPException
-from datetime import datetime, timezone
 import uuid
 
 from app.database import db
@@ -14,8 +13,7 @@ from app.routers.auth import get_current_user
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _strip(d: dict) -> dict:

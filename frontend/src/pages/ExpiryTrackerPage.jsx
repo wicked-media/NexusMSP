@@ -126,7 +126,6 @@ export default function ExpiryTrackerPage() {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
 
   const stats = dashboard || { warranties: { expiring_soon: 0 }, licenses: { expiring_soon: 0 }, domains: { expiring_soon: 0 }, ssl_certificates: { expiring_soon: 0 }, total_expiring: 0 };
-  const tabLabels = { warranties: "Warranties", licenses: "Licences", domains: "Domains", ssl: "SSL certificates" };
   const actionLabel = activeTab === "ssl" ? "Add certificate" : `Add ${activeTab.slice(0, -1)}`;
 
   return (

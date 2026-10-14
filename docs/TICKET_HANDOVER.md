@@ -1,0 +1,9 @@
+# Catch me up — recorded ticket handover
+
+Open a service desk ticket and select **Catch me up** in the header. The shared Nexus dialog shows the request, current status, numbered blocker, open child work, recorded resolution and dated notes. Choose last 24 hours, last 7 days or recent history. Each excerpt links to its source note in the conversation. Use Back to work to dismiss without mutations.
+
+This is deterministic evidence presentation, not an AI inference, last-read receipt, full incident summary or proof that recorded actions succeeded. Email, call, remote-session and attachment evidence are not yet included. Parent metadata is current even when notes use a time filter. Input is capped at 200 notes/100 child records; up to 30 matching notes are displayed. Invalid note dates are excluded and disclosed. Excerpts are capped at 1,200 characters; view the source for full content.
+
+API: `GET /api/tickets/{id}/handover?hours=0|24|168`. It authenticates through the existing technician auth dependency, authorises the parent with ticket comment-read scope, and tenant-filters notes and same-client child records. No new store or migration. Named tenants do not inherit unowned legacy notes. Failure leaves the ticket unchanged; the UI supports retry, timeout and cancellation when switching scope.
+
+Verified locally on SR-0010: empty 24-hour view, recent history containing a real note, source-note navigation, desktop and 390px dialog layout. Screenshots: `.codex-qa/ticket-handover-final.png`, `.codex-qa/ticket-handover-mobile.png`. No customer message, note or work item was created. Regression tests cover time filtering, invalid dates, visibility, scope denial before evidence access and tenant-constrained queries. Rollback removes the handover route/service/dialog and header action; canonical records remain untouched.

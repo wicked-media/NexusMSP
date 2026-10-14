@@ -13,13 +13,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   MessageSquare, Send, X, Ticket, Search, Zap, ArrowRightLeft, Users, Inbox,
-  UserCheck, Clock, AlertTriangle, Plus, Trash2, Building2, HardDrive, ChevronRight, ShieldCheck, ExternalLink
+  UserCheck, AlertTriangle, Plus, Trash2, Building2, HardDrive, ChevronRight, ShieldCheck, ExternalLink, MoreHorizontal, ArrowLeft, RefreshCw, Wrench
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
+
+const messageInitials = (name = "") =>
+  String(name).trim().split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
 
 export default function LiveChatPage() {
   const { token, user } = useAuth();
@@ -44,6 +49,9 @@ export default function LiveChatPage() {
   const [typingUsers, setTypingUsers] = useState([]);
   const [creatingTicket, setCreatingTicket] = useState(false);
   const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
+  const [queueRefreshing, setQueueRefreshing] = useState(false);
+  const [queueError, setQueueError] = useState("");
   const messagesEndRef = useRef(null);
   const typingAtRef = useRef(0);
   const headers = { Authorization: `Bearer ${token}` };
@@ -55,7 +63,10 @@ export default function LiveChatPage() {
     try {
       const r = await axios.get(`${API}/live-chat/sessions`, { headers, params });
       setSessions(r.data || []);
-    } catch {}
+      setQueueError("");
+    } catch {
+      setQueueError("The live queue could not refresh. Showing the most recent sessions.");
+    }
   };
   const fetchStats = async () => {
     try { const r = await axios.get(`${API}/live-chat/stats`, { headers }); setStats(r.data); } catch {}
@@ -66,9 +77,18 @@ export default function LiveChatPage() {
   const fetchAgents = async () => {
     try { const r = await axios.get(`${API}/live-chat/agents`, { headers }); setAgents(r.data || []); } catch {}
   };
+  const refreshQueue = async () => {
+    setQueueRefreshing(true);
+    await Promise.all([fetchSessions(), fetchStats()]);
+    setQueueRefreshing(false);
+  };
 
-  useEffect(() => { fetchSessions(); fetchStats(); fetchCanned(); fetchAgents(); }, []); // eslint-disable-line
-  useEffect(() => { fetchSessions(); }, [search, statusFilter]); // eslint-disable-line
+  useEffect(() => { refreshQueue(); fetchCanned(); fetchAgents(); }, []); // eslint-disable-line
+  useEffect(() => { refreshQueue(); }, [search, statusFilter]); // eslint-disable-line
+  useEffect(() => {
+    const timer = setInterval(() => { refreshQueue(); }, 15_000);
+    return () => clearInterval(timer);
+  }, [search, statusFilter]); // eslint-disable-line
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
   useEffect(() => {
     const sessionId = searchParams.get("session");
@@ -81,13 +101,13 @@ export default function LiveChatPage() {
     const t = setInterval(async () => {
       try {
         const { data } = await axios.get(`${API}/live-chat/sessions/${activeSession.id}`, { headers });
-        if (data.messages?.length !== messages.length) setMessages(data.messages);
+        if (data.messages) setMessages(current => data.messages.length === current.length ? current : data.messages);
         const typing = await axios.get(`${API}/live-chat/sessions/${activeSession.id}/typing`, { headers });
         setTypingUsers(typing.data?.typing_users || []);
       } catch {}
     }, 5000);
     return () => clearInterval(t);
-  }, [activeSession, messages.length]); // eslint-disable-line
+  }, [activeSession?.id]); // eslint-disable-line
 
   const loadSession = async (sessionId) => {
     try {
@@ -95,8 +115,8 @@ export default function LiveChatPage() {
       setActiveSession(data.session);
       setMessages(data.messages || []);
       setContext(data.context || {});
-      fetchSessions();
-      fetchStats();
+      setMobileConversationOpen(true);
+      refreshQueue();
     } catch { toast.error("Failed to load session"); }
   };
 
@@ -141,7 +161,7 @@ export default function LiveChatPage() {
       setCloseConfirmationOpen(false);
       setActiveSession(null);
       setMessages([]);
-      fetchSessions(); fetchStats();
+      refreshQueue();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to close session");
     }
@@ -217,8 +237,8 @@ export default function LiveChatPage() {
 
   return (
     <PageShell data-testid="live-chat-page">
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-      <div className="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-950/35 via-[#171c24] to-emerald-950/25 px-5 py-5 shadow-lg shadow-black/10 flex items-start justify-between flex-wrap gap-4">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+      <div className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} relative items-start justify-between gap-4 overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-950/35 via-[#171c24] to-emerald-950/25 px-5 py-5 shadow-lg shadow-black/10 md:flex-wrap`}>
         <div>
           <div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-500/10"><MessageSquare className="h-5 w-5 text-cyan-200" /></span><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Client communication</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Live Chat</h1></div></div>
           <p className="text-xs text-zinc-500 mt-0.5">Real-time chat with clients · queue · transfer · canned responses</p>
@@ -230,19 +250,20 @@ export default function LiveChatPage() {
         </div>
       </div>
 
-      <MetricStrip columns={5}>
-        <MetricTile label="Active" value={stats.active || 0} accent="sky" icon={<Inbox className="w-2.5 h-2.5 text-sky-400" />} testid="livechat-metric-active" />
-        <MetricTile label="Assigned to Me" value={stats.mine || 0} accent="emerald" icon={<UserCheck className="w-2.5 h-2.5 text-emerald-400" />} testid="livechat-metric-mine" />
-        <MetricTile label="Unassigned" value={stats.unassigned || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="livechat-metric-unassigned" />
-        <MetricTile label="Messages Today" value={stats.messages_today || 0} accent="cyan" icon={<MessageSquare className="w-2.5 h-2.5 text-cyan-400" />} testid="livechat-metric-today" />
-        <MetricTile label="Closed (total)" value={stats.closed || 0} accent="slate" icon={<Clock className="w-2.5 h-2.5 text-zinc-400" />} testid="livechat-metric-closed" />
-      </MetricStrip>
+      <div className={mobileConversationOpen ? "hidden md:block" : ""}>
+        <MetricStrip columns={4}>
+          <MetricTile label="Active" value={stats.active || 0} accent="sky" icon={<Inbox className="w-2.5 h-2.5 text-sky-400" />} testid="livechat-metric-active" />
+          <MetricTile label="Assigned to Me" value={stats.mine || 0} accent="emerald" icon={<UserCheck className="w-2.5 h-2.5 text-emerald-400" />} testid="livechat-metric-mine" />
+          <MetricTile label="Unassigned" value={stats.unassigned || 0} accent="amber" icon={<AlertTriangle className="w-2.5 h-2.5 text-amber-400" />} testid="livechat-metric-unassigned" />
+          <MetricTile label="Messages Today" value={stats.messages_today || 0} accent="cyan" icon={<MessageSquare className="w-2.5 h-2.5 text-cyan-400" />} testid="livechat-metric-today" />
+        </MetricStrip>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[640px]">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-12 xl:h-[640px]">
         {/* Queue */}
-        <Card className="lg:col-span-3 flex flex-col">
+        <Card className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-[520px] flex-col md:col-span-4 xl:col-span-3 xl:min-h-0`}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4" />Queue</CardTitle>
+            <div className="flex items-center justify-between gap-2"><CardTitle className="flex items-center gap-2 text-sm"><Users className="w-4 h-4" />Queue</CardTitle><Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={refreshQueue} disabled={queueRefreshing} aria-label="Refresh live chat queue" title="Refresh live chat queue"><RefreshCw className={`h-3.5 w-3.5 ${queueRefreshing ? "animate-spin" : ""}`} /></Button></div>
             <div className="space-y-2 mt-2">
               <div className="relative">
                 <Search className="absolute left-2 top-2 w-3.5 h-3.5 text-muted-foreground" />
@@ -255,6 +276,7 @@ export default function LiveChatPage() {
                   <TabsTrigger value="closed" className="text-[11px]">Closed</TabsTrigger>
                 </TabsList>
               </Tabs>
+              {queueError && <p role="status" className="text-[10px] leading-4 text-amber-300">{queueError}</p>}
             </div>
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden p-2">
@@ -267,7 +289,16 @@ export default function LiveChatPage() {
                     <div
                       key={s.id}
                       onClick={() => loadSession(s.id)}
-                      className={`p-2.5 rounded-md border cursor-pointer hover:bg-muted/50 transition-colors ${activeSession?.id === s.id ? "border-primary bg-primary/5" : ""} ${s.unread_count > 0 ? "border-l-2 border-l-emerald-400" : ""}`}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          loadSession(s.id);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      aria-current={activeSession?.id === s.id ? "page" : undefined}
+                      className={`cursor-pointer rounded-xl border p-2.5 transition-all hover:-translate-y-px hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${activeSession?.id === s.id ? "border-primary/60 bg-primary/10 shadow-sm shadow-primary/10" : "border-border/60"} ${s.unread_count > 0 ? "border-l-2 border-l-emerald-400" : ""}`}
                       data-testid={`chat-session-${s.id}`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
@@ -292,30 +323,38 @@ export default function LiveChatPage() {
         </Card>
 
         {/* Chat panel */}
-        <Card className="lg:col-span-6 flex flex-col">
+        <Card className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-h-[calc(100dvh-96px)] flex-col md:col-span-8 md:min-h-[520px] xl:col-span-6 xl:min-h-0`}>
           {activeSession ? (
             <>
               <CardHeader className="pb-2 border-b">
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      {activeSession.visitor_name}
-                      {activeSession.priority && activeSession.priority !== "normal" && <Badge className={`text-[10px] ${priorityColor(activeSession.priority)}`}>{activeSession.priority}</Badge>}
-                    </CardTitle>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {activeSession.client_name || "Walk-in"} · {activeSession.subject || "No subject"} · Assigned: {activeSession.assigned_name || "—"}
-                    </p>
+                  <div className="flex min-w-0 items-start gap-1.5">
+                    <Button variant="ghost" size="sm" className="-ml-2 mt-0.5 h-8 w-8 shrink-0 p-0 md:hidden" onClick={() => setMobileConversationOpen(false)} aria-label="Back to live chat queue"><ArrowLeft className="h-4 w-4" /></Button>
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        {activeSession.visitor_name}
+                        {activeSession.priority && activeSession.priority !== "normal" && <Badge className={`text-[10px] ${priorityColor(activeSession.priority)}`}>{activeSession.priority}</Badge>}
+                      </CardTitle>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {activeSession.client_name || "Walk-in"} · {activeSession.subject || "No subject"} · Assigned: {activeSession.assigned_name || "—"}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex gap-1.5 shrink-0">
-                    <Button size="sm" variant="outline" onClick={() => setTransferDialog(true)} disabled={activeSession.status === "closed"} data-testid="transfer-btn">
-                      <ArrowRightLeft className="w-3 h-3 mr-1" />Transfer
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button size="sm" variant="outline" className="h-8 px-2.5" onClick={() => activeSession.ticket_id ? navigate(`/tickets?ticket=${activeSession.ticket_id}`) : createTicket()} disabled={creatingTicket} title={activeSession.ticket_id ? "Open linked ticket" : "Create ticket from this conversation"} data-testid="create-ticket-from-chat">
+                      <Ticket className="h-3.5 w-3.5" /><span className="ml-1.5">{activeSession.ticket_id ? "Open" : creatingTicket ? "Creating…" : "Ticket"}</span>
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => activeSession.ticket_id ? navigate(`/tickets?ticket=${activeSession.ticket_id}`) : createTicket()} disabled={creatingTicket} data-testid="create-ticket-from-chat">
-                      <Ticket className="w-3 h-3 mr-1" />{activeSession.ticket_id ? "Open ticket" : creatingTicket ? "Creating…" : "Create ticket"}
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={() => setCloseConfirmationOpen(true)} disabled={activeSession.status === "closed"} data-testid="close-chat">
-                      <X className="w-3 h-3 mr-1" />Close
-                    </Button>
+                    {canStartWorkSession(activeSession.ticket_id) && <Button size="sm" variant="outline" className="h-8 px-2.5 border-violet-400/30 bg-violet-500/[0.05] text-violet-700 hover:bg-violet-500/10 dark:text-violet-100" onClick={() => navigate(workSessionPath(activeSession.ticket_id))} title="Start a Work Session for the linked ticket" data-testid="start-work-from-live-chat"><Wrench className="h-3.5 w-3.5" /><span className="ml-1.5">Start work</span></Button>}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="outline" className="h-8 w-8 p-0" aria-label="Conversation actions" title="Conversation actions" data-testid="live-chat-actions"><MoreHorizontal className="h-4 w-4" /></Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem onSelect={() => setTransferDialog(true)} disabled={activeSession.status === "closed"}><ArrowRightLeft className="mr-2 h-3.5 w-3.5" />Transfer conversation</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => setCloseConfirmationOpen(true)} disabled={activeSession.status === "closed"} className="text-rose-300 focus:text-rose-200"><X className="mr-2 h-3.5 w-3.5" />Close conversation</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               </CardHeader>
@@ -324,14 +363,24 @@ export default function LiveChatPage() {
                   <div className="space-y-3">
                     {messages.map(m => (
                       m.sender_type === "system" ? (
-                        <div key={m.id} className="text-center text-[10px] text-muted-foreground italic py-1" data-testid={`msg-${m.id}`}>— {m.content} —</div>
+                        <div key={m.id} className="flex items-center gap-3 py-1.5" data-testid={`msg-${m.id}`}>
+                          <span className="h-px flex-1 bg-border/60" />
+                          <span className="text-[10px] italic text-muted-foreground">{m.content}</span>
+                          <span className="h-px flex-1 bg-border/60" />
+                        </div>
                       ) : (
-                        <div key={m.id} className={`flex ${m.sender_type === "agent" ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
-                          <div className={`max-w-[75%] p-2.5 rounded-lg ${m.sender_type === "agent" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            <p className="text-[10px] font-medium mb-0.5 opacity-80">{m.sender_name}</p>
-                            <p className="text-sm whitespace-pre-wrap">{m.content}</p>
-                            <p className="text-[9px] opacity-60 mt-1">{new Date(m.sent_at).toLocaleTimeString()}</p>
+                        <div key={m.id} className={`flex items-end gap-2 ${m.sender_type === "agent" ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
+                          {m.sender_type !== "agent" && (
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[9px] font-bold text-muted-foreground">{messageInitials(m.sender_name || "C")}</span>
+                          )}
+                          <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm ${m.sender_type === "agent" ? "rounded-br-md border border-primary/20 bg-primary text-primary-foreground shadow-primary/10" : "rounded-bl-md border border-border/60 bg-muted/60 text-foreground"}`}>
+                            <p className={`mb-1 text-[10px] font-semibold ${m.sender_type === "agent" ? "opacity-80" : "text-muted-foreground"}`}>{m.sender_name}</p>
+                            <p className="whitespace-pre-wrap text-sm leading-6">{m.content}</p>
+                            <p className={`mt-1.5 text-[9px] ${m.sender_type === "agent" ? "opacity-70" : "text-muted-foreground"}`}>{new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
                           </div>
+                          {m.sender_type === "agent" && (
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[9px] font-bold text-primary">{messageInitials(m.sender_name || "Me")}</span>
+                          )}
                         </div>
                       )
                     ))}
@@ -343,7 +392,7 @@ export default function LiveChatPage() {
                   <div className="flex items-end gap-2">
                     <Popover open={showCanned} onOpenChange={setShowCanned}>
                       <PopoverTrigger asChild>
-                        <Button size="sm" variant="outline" className="h-9" data-testid="canned-trigger">
+                        <Button size="sm" variant="outline" className="h-9 shrink-0" aria-label="Open canned responses" title="Canned responses" data-testid="canned-trigger">
                           <Zap className="w-3.5 h-3.5" />
                         </Button>
                       </PopoverTrigger>
@@ -375,13 +424,14 @@ export default function LiveChatPage() {
                       placeholder={activeSession.status === "closed" ? "Session closed" : "Type a message… (Enter to send, Shift+Enter for newline)"}
                       disabled={activeSession.status === "closed"}
                       onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                      className="min-h-[60px] max-h-[160px] resize-none focus-visible:ring-emerald-500/50"
+                      className="min-h-[60px] max-h-[160px] min-w-0 flex-1 resize-none focus-visible:ring-emerald-500/50"
                       data-testid="chat-input"
                     />
-                    <Button onClick={sendMessage} disabled={!newMsg.trim() || activeSession.status === "closed"} className="h-9 bg-emerald-600 hover:bg-emerald-500" data-testid="send-message">
+                    <Button onClick={sendMessage} disabled={!newMsg.trim() || activeSession.status === "closed"} className="hidden h-9 shrink-0 bg-emerald-600 hover:bg-emerald-500 sm:inline-flex" data-testid="send-message">
                       <Send className="w-4 h-4" /><span className="ml-1.5 hidden sm:inline">Send</span>
                     </Button>
                   </div>
+                  <div className="flex justify-end sm:hidden"><Button onClick={sendMessage} disabled={!newMsg.trim() || activeSession.status === "closed"} className="h-8 bg-emerald-600 px-3 text-xs hover:bg-emerald-500" data-testid="send-message-mobile"><Send className="mr-1.5 h-3.5 w-3.5" />Send reply</Button></div>
                   {typingUsers.length > 0 && <div className="flex items-center gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06] px-2.5 py-1.5 text-[10px] text-cyan-100"><span className="flex gap-0.5"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:240ms]" /></span>{typingUsers.map(person => person.name).join(", ")} typing...</div>}
                   {cannedSuggestions.length > 0 && <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-500/15 bg-emerald-500/[0.045] p-2" aria-label="Canned response suggestions">
                     <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-300">Reply library</span>
@@ -402,9 +452,9 @@ export default function LiveChatPage() {
         </Card>
 
         {/* Context sidebar */}
-        <Card className="lg:col-span-3 flex flex-col">
+        <Card className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-[230px] flex-col md:col-span-12 xl:col-span-3 xl:min-h-0`}>
           <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Building2 className="w-4 h-4" />Context</CardTitle></CardHeader>
-          <CardContent className="flex-1 overflow-auto space-y-3">
+          <CardContent className="min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto">
             {activeSession ? (
               <>
                 <div>
@@ -439,7 +489,7 @@ export default function LiveChatPage() {
                       </div>
                       <Badge variant="outline" className={context.endpoint.elevate_state === "active" ? "border-emerald-500/30 bg-emerald-500/10 text-[9px] text-emerald-300" : context.endpoint.elevate_state === "deploying" ? "border-sky-500/30 bg-sky-500/10 text-[9px] text-sky-300" : "text-[9px]"}>{String(context.endpoint.elevate_state || "not activated").replace(/_/g, " ")}</Badge>
                     </div>
-                    {context.endpoint.elevate_last_error && <p className="line-clamp-2 text-[10px] text-rose-300">{context.endpoint.elevate_last_error}</p>}
+                    {context.endpoint.elevate_last_error && <p className="line-clamp-2 break-words text-[10px] text-rose-300">{context.endpoint.elevate_last_error}</p>}
                     <div className="flex gap-2">
                       <Button size="sm" className="h-7 flex-1 text-xs" onClick={() => navigate(`/nexus-elevate?status=pending&device=${encodeURIComponent(context.endpoint.agent_id || "")}`)} disabled={!context.endpoint.agent_id}><ShieldCheck className="mr-1 h-3 w-3" />Review queue</Button>
                       <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => navigate(`/devices/${context.endpoint.id}`)} title="Open endpoint"><ExternalLink className="h-3.5 w-3.5" /></Button>

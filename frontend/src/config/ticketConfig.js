@@ -6,8 +6,19 @@ export const priorityConfig = {
   low: { label: "Low", class: "bg-green-600 text-white" }
 };
 
+// Canonical queue order shared by the queue filters and the inline status
+// control. `pending` is a real service-desk status (see TICKET_STATUS_STYLES)
+// that was previously missing from this map, which meant the queue filter and
+// any status menu could not select it.
+export const TICKET_STATUS_ORDER = ["open", "pending", "in_progress", "on_hold", "resolved", "closed"];
+
+// Reversible queue states. Terminal states (resolved/closed) are deliberately
+// excluded: closure carries audit meaning and keeps its governed review flow.
+export const TICKET_QUEUE_STATUSES = ["open", "pending", "in_progress", "on_hold"];
+
 export const statusConfig = {
   open: { label: "Open", class: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
+  pending: { label: "Pending", class: "bg-slate-500/10 text-slate-400 border-slate-500/20" },
   in_progress: { label: "In Progress", class: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
   on_hold: { label: "On Hold", class: "bg-orange-500/10 text-orange-500 border-orange-500/20" },
   resolved: { label: "Resolved", class: "bg-green-500/10 text-green-500 border-green-500/20" },

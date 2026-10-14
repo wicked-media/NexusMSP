@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, BarChart3, X } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const ROW = (label, fn, fmt = (v) => v ?? "—") => ({ label, fn, fmt });
 
@@ -86,11 +87,7 @@ export default function DeviceComparePage() {
 
   return (
     <div className="space-y-5 p-6" data-testid="device-compare-page">
-      <div className="rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.08),transparent_28%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.20)] md:p-6">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-300">Asset intelligence</p>
-        <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><BarChart3 className="h-6 w-6 text-cyan-200" />Compare managed assets</h1>
-        <p className="text-sm text-zinc-500">Side-by-side health, specs, and tickets — pick up to 4 devices.</p>
-      </div>
+      <OperationalPageHeader eyebrow="Asset intelligence · side-by-side evidence" title="Compare managed assets" description="Compare health, specifications and related service history for up to four devices." icon={BarChart3} tone="cyan" signal={ids.length > 1 ? "ready" : undefined} variant="record" />
 
       {/* Slot pickers */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">

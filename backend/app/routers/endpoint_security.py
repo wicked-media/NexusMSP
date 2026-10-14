@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query
 
 router = APIRouter()
 
@@ -13,7 +14,10 @@ def _grade(score: float) -> str:
 @router.get("/endpoint-security/scores")
 async def get_endpoint_scores(current_user: dict = Depends(get_current_user)):
     """Return evidence-based endpoint posture from Nexus Agent telemetry only."""
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
+    # Endpoint posture exposes host names, patch state and security controls.
+    # Use the caller's client/site boundary rather than relying on the UI to
+    # hide other customers' devices.
+    devices = await db.devices.find(scoped_query(current_user), {"_id": 0}).to_list(5000)
     scored = []
     for device in devices:
         agent_enrolled = bool(device.get("nexus_agent_id"))

@@ -7,18 +7,53 @@ Endpoints:
   GET /api/clients/{client_id}/billing-detail — Inline invoices + payment promises + AR
   GET /api/clients/{client_id}/assets-detail  — Devices + warranty + family tree
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope
 
-router = APIRouter()
+
+async def _enforce_client_360_scope(request: Request, current_user: dict = Depends(get_current_user)):
+    """Apply a masked server-side client boundary to every Client 360 read."""
+    client_id = request.path_params.get("client_id")
+    if client_id:
+        await assert_record_scope(
+            current_user,
+            db.clients,
+            client_id,
+            request=request,
+            operation=f"client_360:{request.method.lower()}",
+            resource_name="Client",
+            client_field="id",
+            site_field="site_id",
+        )
 
 
-def _iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+router = APIRouter(dependencies=[Depends(_enforce_client_360_scope)])
+
+
+from app.services.time_utils import now_iso as _iso
+
+
+def _monthly_equivalent(amount: float, frequency: str | None) -> float:
+    """Normalise a recurring amount to its monthly equivalent.
+
+    Recurring billing records have historically used both ``annually`` and
+    ``yearly``.  Keeping that compatibility here prevents the Client Studio
+    from overstating annual agreements as monthly revenue.
+    """
+    cadence = str(frequency or "monthly").strip().lower()
+    if cadence == "weekly":
+        return amount * 52 / 12
+    if cadence == "fortnightly":
+        return amount * 26 / 12
+    if cadence == "quarterly":
+        return amount / 3
+    if cadence in {"annually", "annual", "yearly"}:
+        return amount / 12
+    return amount
 
 
 @router.get("/clients/{client_id}/full-profile")
@@ -64,7 +99,7 @@ async def client_full_profile(client_id: str, current_user: dict = Depends(get_c
         "pax8": bool(await db.pax8_customer_links.find_one({"client_id": client_id}, {"_id": 1})),
         "cipp": bool(await db.cipp_tenant_links.find_one({"client_id": client_id}, {"_id": 1})),
         "huntress": bool(await db.huntress_client_links.find_one({"client_id": client_id}, {"_id": 1})),
-        "unifi": bool(c.get("linked_unifi_site_id")),
+        "unifi": bool(c.get("unifi_site_id")),
         "hudu": bool(c.get("hudu_company_id")),
     }
 
@@ -166,7 +201,7 @@ async def _aggregate_subscriptions(client_id: str) -> dict:
     for ri in recurring:
         freq = ri.get("frequency", "monthly")
         amt = float(ri.get("amount", 0))
-        monthly = amt if freq == "monthly" else amt / 3 if freq == "quarterly" else amt / 12 if freq == "yearly" else amt
+        monthly = _monthly_equivalent(amt, freq)
         total_monthly += monthly
         linked_contract = contract_by_recurring.get(ri.get("id")) or fallback_contract
         subs.append({
@@ -258,8 +293,10 @@ async def _aggregate_billing(client_id: str) -> dict:
     ).sort("issue_date", -1).limit(100).to_list(100)
 
     now = datetime.now(timezone.utc)
-    open_balance = 0.0; overdue_balance = 0.0
-    aging = {"current": 0, "30": 0, "60": 0, "90+": 0}
+    open_balance = 0.0
+    overdue_balance = 0.0
+    critical_overdue_balance = 0.0
+    aging = {"current": 0, "30": 0, "60": 0, "90": 0, "90+": 0}
     for i in invs:
         if i.get("payment_status") in ("paid", "void"): continue
         bal = float(i.get("total", 0)) - float(i.get("amount_paid", 0))
@@ -270,20 +307,101 @@ async def _aggregate_billing(client_id: str) -> dict:
             if due.tzinfo is None: due = due.replace(tzinfo=timezone.utc)
             days = (now - due).days
             if days < 0: aging["current"] += bal
-            elif days <= 30: aging["30"] += bal
-            elif days <= 60: aging["60"] += bal
+            elif days == 0: aging["current"] += bal
+            elif days <= 30:
+                aging["30"] += bal
+                overdue_balance += bal
+            elif days <= 60:
+                aging["60"] += bal
+                overdue_balance += bal
+            elif days <= 90:
+                aging["90"] += bal
+                overdue_balance += bal
             else:
-                aging["90+"] += bal; overdue_balance += bal
+                aging["90+"] += bal
+                overdue_balance += bal
+                critical_overdue_balance += bal
         except Exception:
             aging["current"] += bal
 
-    # MRR projection from recurring
-    recurring = await db.recurring_invoices.find({"client_id": client_id, "status": "active"}, {"_id": 0, "amount": 1, "frequency": 1}).to_list(50)
+    # Active and paused streams are commercial commitments, not invoices.
+    # Keep delivery details deliberately summary-only: billing recipients are
+    # available through the authorised billing-profile workflow, never this
+    # broad Client 360 read.
+    recurring = await db.recurring_invoices.find(
+        {"client_id": client_id, "status": {"$in": ["active", "paused"]}},
+        {
+            "_id": 0,
+            "id": 1,
+            "description": 1,
+            "amount": 1,
+            "currency": 1,
+            "frequency": 1,
+            "status": 1,
+            "next_generation": 1,
+            "last_generated": 1,
+            "invoices_generated": 1,
+            "total_billed": 1,
+            "line_items": 1,
+            "auto_send": 1,
+            "auto_send_email": 1,
+            "include_acronis_usage": 1,
+            "include_pax8_usage": 1,
+            "contract_id": 1,
+        },
+    ).sort("next_generation", 1).to_list(50)
+    recurring_streams = []
     mrr = 0.0
     for ri in recurring:
-        amt = float(ri.get("amount", 0))
-        freq = ri.get("frequency", "monthly")
-        mrr += amt if freq == "monthly" else amt / 3 if freq == "quarterly" else amt / 12 if freq == "yearly" else amt
+        amount = float(ri.get("amount", 0) or 0)
+        monthly = _monthly_equivalent(amount, ri.get("frequency"))
+        active = ri.get("status") == "active"
+        if active:
+            mrr += monthly
+        auto_send = bool(ri.get("auto_send"))
+        recurring_streams.append({
+            "id": ri.get("id"),
+            "description": ri.get("description") or "Recurring service",
+            "amount": round(amount, 2),
+            "currency": ri.get("currency") or "AUD",
+            "frequency": ri.get("frequency") or "monthly",
+            "monthly_equivalent": round(monthly, 2),
+            "status": ri.get("status") or "active",
+            "next_generation": ri.get("next_generation"),
+            "last_generated": ri.get("last_generated"),
+            "invoices_generated": int(ri.get("invoices_generated") or 0),
+            "total_billed": round(float(ri.get("total_billed", 0) or 0), 2),
+            "line_item_count": len(ri.get("line_items") or []),
+            "delivery_state": "ready" if auto_send and ri.get("auto_send_email") else "needs_recipient" if auto_send else "not_enabled",
+            "usage_sources": [
+                source
+                for source, enabled in (("Acronis", ri.get("include_acronis_usage")), ("Pax8", ri.get("include_pax8_usage")))
+                if enabled
+            ],
+            "linked_contract": bool(ri.get("contract_id")),
+        })
+    active_streams = [stream for stream in recurring_streams if stream["status"] == "active"]
+    paused_streams = [stream for stream in recurring_streams if stream["status"] == "paused"]
+    auto_send_ready = sum(1 for stream in active_streams if stream["delivery_state"] == "ready")
+    auto_send_attention = sum(1 for stream in active_streams if stream["delivery_state"] == "needs_recipient")
+
+    client = await db.clients.find_one(
+        {"id": client_id},
+        {"_id": 0, "billing_profile": 1, "billing_email": 1, "email": 1},
+    ) or {}
+    billing_profile = client.get("billing_profile") or {}
+    explicit_billing_recipient = bool(billing_profile.get("billing_email") or client.get("billing_email"))
+    billing_recipient_state = "configured" if explicit_billing_recipient else "fallback" if client.get("email") else "missing"
+
+    # Provider subscription data is operational evidence. It is not presented
+    # as customer revenue because a provider charge may not map to a sellable
+    # or already-billed service.
+    subscription_snapshot = await _aggregate_subscriptions(client_id)
+    provider_items = [
+        item for item in subscription_snapshot.get("items", [])
+        if item.get("source") not in {"msp_contract"}
+    ]
+    provider_sources = sorted({item.get("source_label") for item in provider_items if item.get("source_label")})
 
     # LTV (sum of all paid invoices)
     ltv = 0.0
@@ -297,11 +415,35 @@ async def _aggregate_billing(client_id: str) -> dict:
     return {
         "open_balance": round(open_balance, 2),
         "overdue_balance": round(overdue_balance, 2),
+        "critical_overdue_balance": round(critical_overdue_balance, 2),
         "aging": {k: round(v, 2) for k, v in aging.items()},
         "mrr_aud": round(mrr, 2),
         "ltv_aud": round(ltv, 2),
         "recent_invoices": invs[:10],
-        "recurring_count": len(recurring),
+        "recurring_count": len(active_streams),
+        "recurring_streams": recurring_streams,
+        "recurring_summary": {
+            "active": len(active_streams),
+            "paused": len(paused_streams),
+            "mrr_aud": round(mrr, 2),
+            "next_generation": next((stream.get("next_generation") for stream in active_streams if stream.get("next_generation")), None),
+            "auto_send_ready": auto_send_ready,
+            "auto_send_attention": auto_send_attention,
+        },
+        "billing_profile": {
+            "billing_email_configured": explicit_billing_recipient,
+            "billing_email_available": billing_recipient_state != "missing",
+            "billing_recipient_state": billing_recipient_state,
+            "payment_terms_days": int(billing_profile.get("payment_terms_days", 30) or 30),
+            "purchase_order_required": bool(billing_profile.get("purchase_order_required", False)),
+            "default_payment_method": billing_profile.get("default_payment_method", "bank_transfer"),
+        },
+        "subscription_summary": {
+            "provider_records": len(provider_items),
+            "provider_sources": provider_sources,
+            "provider_monthly_cost": round(sum(float(item.get("monthly_cost", 0) or 0) for item in provider_items), 2),
+            "recurring_billing_records": len(recurring_streams),
+        },
         "payment_promises": {"kept": promises_kept, "broken": promises_broken},
     }
 

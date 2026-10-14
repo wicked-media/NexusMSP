@@ -23,6 +23,7 @@ from typing import Any
 from pymongo import ReplaceOne
 
 from app.database import db
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 
 
 CORE_SCHEMA_VERSION = 2
@@ -184,13 +185,23 @@ def core_schema() -> dict[str, Any]:
     }
 
 
-async def _rows(collection: str, limit: int = 20000) -> list[dict]:
-    return await db[collection].find({}, {"_id": 0}).limit(limit).to_list(limit)
+async def _rows(collection: str, tenant_id: str, limit: int = 20000) -> list[dict]:
+    """Load only records belonging to the requested Nexus platform tenant.
+
+    ``tenant_id`` on a client is Nexus ownership.  Provider tenant identifiers
+    (for example Microsoft Entra IDs) are separate fields and must never be
+    used as an index partition.
+    """
+    return await db[collection].find(
+        tenant_scoped_query({"tenant_id": tenant_id}),
+        {"_id": 0},
+    ).limit(limit).to_list(limit)
 
 
 async def build_core_index(*, persist: bool, actor: dict | None = None, correlation_id: str | None = None) -> dict[str, Any]:
     generation = str(uuid.uuid4())
     generated_at = _now()
+    tenant_id = platform_tenant_id(actor or {})
     source_names = [
         "clients", "network_sites", "contacts", "m365_users",
         "client_portal_users", "devices", "nexus_agents", "core_services",
@@ -198,7 +209,7 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
         "invoices", "recurring_invoices", "documentation", "kb_articles",
         "auto_generated_docs", "yeastar_pbxs", "context_relationships",
     ]
-    results = await asyncio.gather(*(_rows(name) for name in source_names))
+    results = await asyncio.gather(*(_rows(name, tenant_id) for name in source_names))
     source = dict(zip(source_names, results))
 
     entities: dict[str, dict] = {}
@@ -213,8 +224,15 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
     for item in clients:
         client_name_ids[str(item.get("name") or item.get("company_name") or "").strip().casefold()].append(_safe_id(item.get("id")))
     tenant_to_client = {}
+    client_tenants = {
+        client_id: platform_tenant_id(item)
+        for client_id, item in client_by_id.items()
+    }
     for client_id, item in client_by_id.items():
-        for field in ("cipp_tenant_id", "m365_tenant_id", "tenant_id"):
+        # ``tenant_id`` is the Nexus platform partition, not a provider
+        # identifier.  Mapping it here could attach every platform-owned row to
+        # the last client in that partition.
+        for field in ("cipp_tenant_id", "m365_tenant_id"):
             if _safe_id(item.get(field)):
                 tenant_to_client[_safe_id(item.get(field))] = client_id
 
@@ -248,7 +266,7 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
             "entity_type": entity_type,
             "entity_id": stable_id,
             "schema_version": CORE_SCHEMA_VERSION,
-            "tenant_id": "nexus-local",
+            "tenant_id": client_tenants.get(client_id, tenant_id),
             "client_id": client_id,
             "site_id": site_id,
             "name": str(name or stable_id),
@@ -285,13 +303,24 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
                 "message": f"{relation_type} could not resolve both canonical objects.",
             })
             return
+        from_tenant = entities[from_ref].get("tenant_id")
+        to_tenant = entities[to_ref].get("tenant_id")
+        if not from_tenant or from_tenant != to_tenant:
+            anomalies.append({
+                "type": "cross_tenant_relationship",
+                "severity": "high",
+                "source_collection": source_collection,
+                "source_id": source_id,
+                "message": f"{relation_type} crossed or omitted a Nexus platform boundary.",
+            })
+            return
         rid = relationship_id(relation_type, from_ref, to_ref)
         relationships[rid] = {
             "id": rid,
             "relation_type": relation_type,
             "from_ref": from_ref,
             "to_ref": to_ref,
-            "tenant_id": "nexus-local",
+            "tenant_id": from_tenant,
             "client_id": client_id,
             "evidence": evidence,
             "source": {"collection": source_collection, "id": _safe_id(source_id)},
@@ -653,6 +682,7 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
 
     integrity = {
         "id": generation,
+        "tenant_id": tenant_id,
         "schema_version": CORE_SCHEMA_VERSION,
         "generated_at": generated_at,
         "generated_by": (actor or {}).get("name") or (actor or {}).get("email") or "Nexus System",
@@ -671,31 +701,32 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
 
     if persist:
         await db.core_entities.update_many(
-            {"source.indexer": "nexus-core-rebuild"},
+            tenant_scoped_query(actor or {}, {"source.indexer": "nexus-core-rebuild"}),
             {"$set": {"active": False, "superseded_at": generated_at}},
         )
         entity_ops = []
         for item in entities.values():
             item["source"]["indexer"] = "nexus-core-rebuild"
-            entity_ops.append(ReplaceOne({"id": item["id"]}, item, upsert=True))
+            entity_ops.append(ReplaceOne({"id": item["id"], "tenant_id": tenant_id}, item, upsert=True))
         if entity_ops:
             await db.core_entities.bulk_write(entity_ops, ordered=False)
 
         await db.core_relationships.update_many(
-            {"source.indexer": "nexus-core-rebuild"},
+            tenant_scoped_query(actor or {}, {"source.indexer": "nexus-core-rebuild"}),
             {"$set": {"active": False, "superseded_at": generated_at}},
         )
         relation_ops = []
         for item in relationships.values():
             item["source"]["indexer"] = "nexus-core-rebuild"
-            relation_ops.append(ReplaceOne({"id": item["id"]}, item, upsert=True))
+            relation_ops.append(ReplaceOne({"id": item["id"], "tenant_id": tenant_id}, item, upsert=True))
         if relation_ops:
             await db.core_relationships.bulk_write(relation_ops, ordered=False)
         await db.core_integrity_runs.insert_one(dict(integrity))
         await db.core_foundation_state.update_one(
-            {"id": "nexus-core"},
+            {"id": "nexus-core", "tenant_id": tenant_id},
             {"$set": {
                 "id": "nexus-core",
+                "tenant_id": tenant_id,
                 "schema_version": CORE_SCHEMA_VERSION,
                 "last_rebuild_id": generation,
                 "last_rebuilt_at": generated_at,
@@ -709,9 +740,14 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
     return integrity
 
 
-async def core_integrity_snapshot() -> dict[str, Any]:
-    latest = await db.core_integrity_runs.find_one({}, {"_id": 0}, sort=[("generated_at", -1)])
-    state = await db.core_foundation_state.find_one({"id": "nexus-core"}, {"_id": 0}) or {}
+async def core_integrity_snapshot(actor: dict | None = None) -> dict[str, Any]:
+    scope = actor or {}
+    latest = await db.core_integrity_runs.find_one(
+        tenant_scoped_query(scope), {"_id": 0}, sort=[("generated_at", -1)]
+    )
+    state = await db.core_foundation_state.find_one(
+        tenant_scoped_query(scope, {"id": "nexus-core"}), {"_id": 0}
+    ) or {}
     if not latest:
         return {
             "status": "not_indexed",
@@ -729,19 +765,19 @@ async def core_integrity_snapshot() -> dict[str, Any]:
     return {**latest, "last_rebuilt_at": state.get("last_rebuilt_at") or latest.get("generated_at")}
 
 
-async def client_core_graph(client_id: str) -> dict[str, Any]:
+async def client_core_graph(client_id: str, actor: dict | None = None) -> dict[str, Any]:
     client_ref = core_ref("client", client_id)
     nodes = await db.core_entities.find(
-        {"active": True, "$or": [{"id": client_ref}, {"client_id": client_id}]},
+        tenant_scoped_query(actor or {}, {"active": True, "$or": [{"id": client_ref}, {"client_id": client_id}]}),
         {"_id": 0},
     ).limit(3000).to_list(3000)
     refs = {item["id"] for item in nodes}
     edges = await db.core_relationships.find(
-        {
+        tenant_scoped_query(actor or {}, {
             "active": True,
             "client_id": client_id,
             "$or": [{"from_ref": {"$in": list(refs)}}, {"to_ref": {"$in": list(refs)}}],
-        },
+        }),
         {"_id": 0},
     ).limit(5000).to_list(5000)
     return {

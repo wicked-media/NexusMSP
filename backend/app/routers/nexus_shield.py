@@ -5,7 +5,6 @@ monitoring policy.  It must never claim that a device has been remediated or
 isolated merely because a desired control is enabled in the workspace.
 """
 
-from datetime import datetime, timezone
 from typing import Any
 import uuid
 
@@ -84,8 +83,7 @@ DEFAULT_POLICIES = [
 ]
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _get_policies() -> list[dict[str, Any]]:

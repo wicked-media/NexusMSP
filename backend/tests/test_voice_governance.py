@@ -59,7 +59,7 @@ def test_extension_override_requires_technician_justification(monkeypatch):
         asyncio.run(yeastar.update_yeastar_extension_override(
             "100",
             {"extension_key": "pbx-1:100", "exclude_from_billing": True},
-            current_user={"id": "tech-1", "name": "Test Technician"},
+            current_user={"id": "tech-1", "name": "Test Technician", "is_admin": True},
         ))
 
     assert rejected.value.status_code == 400
@@ -85,7 +85,7 @@ def test_extension_override_records_reason_state_and_activity(monkeypatch):
             "exclusion_reason": "Approved test handset",
             "change_reason": "Approved test handset",
         },
-        current_user={"id": "tech-1", "name": "Test Technician", "email": "tech@example.test"},
+        current_user={"id": "tech-1", "name": "Test Technician", "email": "tech@example.test", "is_admin": True},
     ))
 
     assert result["exclude_from_billing"] is True
@@ -113,7 +113,7 @@ def test_disabling_extension_records_billing_impact(monkeypatch):
             "enabled": False,
             "change_reason": "Extension retired after staff departure",
         },
-        current_user={"id": "tech-1", "name": "Test Technician", "email": "tech@example.test"},
+        current_user={"id": "tech-1", "name": "Test Technician", "email": "tech@example.test", "is_admin": True},
     ))
 
     assert activity[0][1]["changes"]["enabled"] == {"before": True, "after": False}

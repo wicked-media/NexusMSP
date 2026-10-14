@@ -12,7 +12,7 @@ const missionControl = {
     { id: "infrastructure", count: 2, route: "/devices", metrics: [{ label: "Offline assets", value: 1 }, { label: "Failed backups", value: 1 }] },
     { id: "billing", count: 3, route: "/billing-recon", metrics: [{ label: "Overdue invoices", value: 2 }] },
     { id: "security", count: 1, route: "/security-dashboard", metrics: [{ label: "Critical alerts", value: 1 }, { label: "Open vulnerabilities", value: 0 }] },
-    { id: "client-health", count: 2, route: "/clients", metrics: [{ label: "Active clients", value: 18 }, { label: "Active tickets", value: 9 }] },
+    { id: "client-health", count: 2, route: "/clients", metrics: [{ label: "Active clients", value: 18 }, { label: "Active tickets", value: 9 }, { label: "SLA breaches", value: 2 }] },
   ],
   workstreams: [
     { id: "critical", count: 2 },
@@ -43,6 +43,7 @@ describe("Nexus Daily briefing", () => {
     expect(briefing.headline).toContain("7 items");
     expect(briefing.headline).toContain("4 evidenced actions");
     expect(briefing.sections.find(section => section.id === "finance").headline).toContain("$480");
+    expect(briefing.sections.find(section => section.id === "customers").detail).toContain("2 SLA breaches");
     expect(briefing.focus.title).toBe("Review failed backup");
   });
 });

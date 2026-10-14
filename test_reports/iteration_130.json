@@ -44,7 +44,7 @@
     "/app/backend/tests/test_iteration130_warroom.py"
   ],
   "success_rate": {"backend": "100% (28/28 tests passed)", "frontend": "100% (all UI flows verified)"},
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Test war rooms created during testing with TEST_ prefix; some resolved during testing",
   "retest_needed": false,
   "should_main_agent_self_test": false,

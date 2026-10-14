@@ -33,7 +33,7 @@ export default function BandwidthMonitorPage() {
         axios.get(`${API}/bandwidth-monitor/alerts`, { headers }),
       ]);
       setData(oRes.data);
-      setAlerts(aRes.data);
+      setAlerts(aRes.data?.alerts || []);
       setSelectedSite(current => current || oRes.data.sites?.[0]?.id || "");
     } catch (e) {
       setData(null);
@@ -54,7 +54,7 @@ export default function BandwidthMonitorPage() {
         axios.get(`${API}/bandwidth-monitor/site/${siteId}`, { headers }),
         axios.get(`${API}/bandwidth-monitor/top-talkers/${siteId}`, { headers }),
       ]);
-      setSiteData((bandwidthRes.data || []).reverse().map(item => ({ ...item, time: new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })));
+      setSiteData((bandwidthRes.data?.samples || []).reverse().map(item => ({ ...item, time: new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })));
       setTopTalkers(talkersRes.data || []);
     } catch (e) { toast.error("Failed to load selected site telemetry"); }
     finally { setSiteLoading(false); }
@@ -83,7 +83,7 @@ export default function BandwidthMonitorPage() {
     </div>
   );
 
-  const { sites } = data;
+  const { sites = [], meta } = data;
   const currentSite = sites.find(s => s.id === selectedSite);
   const currentSample = siteData[siteData.length - 1];
   const visibleAlerts = alerts.filter(alert => !selectedSite || alert.site_id === selectedSite);
@@ -94,7 +94,7 @@ export default function BandwidthMonitorPage() {
       <OperationalPageHeader
         eyebrow="Network workspace - traffic"
         title="Bandwidth monitor"
-        description="Live utilisation, connection quality and high-traffic endpoints across managed client sites."
+        description="Controller-sourced utilisation, connection quality and high-traffic endpoints across managed client sites."
         icon={Gauge}
         tone="sky"
         actions={(
@@ -107,6 +107,15 @@ export default function BandwidthMonitorPage() {
           </>
         )}
       />
+
+      {meta?.data_status === "empty" && (
+        <Card className="border-sky-500/20 bg-sky-500/[0.04]" data-testid="bandwidth-telemetry-empty">
+          <CardContent className="flex items-start gap-3 py-5 text-sm text-sky-100">
+            <Wifi className="mt-0.5 h-5 w-5 shrink-0 text-sky-300" />
+            <div><p className="font-medium">No controller telemetry has been received.</p><p className="mt-1 text-xs text-sky-200/70">Nexus will show throughput, latency and controller-created alerts only after the selected site has a connected telemetry source. No values have been estimated.</p></div>
+          </CardContent>
+        </Card>
+      )}
 
       {currentSite && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -184,7 +193,7 @@ export default function BandwidthMonitorPage() {
               <td className="py-2">{s.upload_speed_mbps} Mbps</td>
               <td className="py-2"><Badge className={s.status === "online" ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"}>{s.status}</Badge></td>
             </tr>
-          ))}</tbody>
+          ))}{sites.length === 0 && <tr><td colSpan="6" className="py-8 text-center text-muted-foreground">No authorised network sites are available.</td></tr>}</tbody>
         </table></div></CardContent>
       </Card>
     </div>

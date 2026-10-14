@@ -1,0 +1,157 @@
+@keyframes nx-weather-clear-glow {
+  0%, 100% { opacity: .36; transform: scale(.86); }
+  50% { opacity: .88; transform: scale(1.08); }
+}
+@keyframes nx-weather-cloud-drift {
+  0%, 100% { transform: translate3d(-5%, 1px, 0); opacity: .24; }
+  50% { transform: translate3d(7%, -2px, 0); opacity: .5; }
+}
+
+@keyframes nx-weather-precipitation {
+  0% { transform: translate3d(-7px, -6px, 0) rotate(18deg); opacity: 0; }
+  22% { opacity: .58; }
+  76% { opacity: .42; }
+  100% { transform: translate3d(9px, 11px, 0) rotate(18deg); opacity: 0; }
+}
+
+@keyframes nx-weather-fog-drift {
+  0%, 100% { transform: translateX(-8%) scaleX(.86); opacity: .18; }
+  50% { transform: translateX(9%) scaleX(1.05); opacity: .42; }
+}
+
+@keyframes nx-weather-storm-signal {
+  0%, 78%, 100% { opacity: .2; filter: drop-shadow(0 0 0 rgba(125,211,252,0)); }
+  84% { opacity: .82; filter: drop-shadow(0 0 9px rgba(125,211,252,.58)); }
+  88% { opacity: .35; }
+}
+
+@keyframes nx-weather-snow-float {
+  0%, 100% { transform: translate3d(-3px, -2px, 0); opacity: .28; }
+  50% { transform: translate3d(5px, 4px, 0); opacity: .68; }
+}
+
+.nx-weather-strip {
+  isolation: isolate;
+  box-shadow: 0 16px 36px -30px rgba(34, 211, 238, .42), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+.nx-weather-strip__aurora {
+  position: absolute;
+  z-index: -1;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(14px);
+}
+
+.nx-weather-strip__aurora--one {
+  top: -52px;
+  left: 12%;
+  width: 13rem;
+  height: 7rem;
+  background: rgba(14, 165, 233, .18);
+}
+
+.nx-weather-strip__aurora--two {
+  right: 19%;
+  bottom: -72px;
+  width: 15rem;
+  height: 8rem;
+  background: rgba(45, 212, 191, .11);
+}
+
+.nx-weather-strip__grid {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: .16;
+  pointer-events: none;
+  background-image: linear-gradient(90deg, rgba(125, 211, 252, .12) 1px, transparent 1px), linear-gradient(rgba(125, 211, 252, .08) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(90deg, transparent, black 18%, black 84%, transparent);
+}
+
+.nx-weather-glyph {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+.nx-weather-glyph::before,
+.nx-weather-glyph::after,
+.nx-weather-glyph__detail {
+  position: absolute;
+  z-index: -1;
+  display: block;
+  content: "";
+  pointer-events: none;
+}
+
+.nx-weather-glyph--clear::before {
+  width: 135%;
+  height: 135%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(250, 204, 21, .22) 0%, rgba(34, 211, 238, .16) 36%, transparent 70%);
+  animation: nx-weather-clear-glow 8s ease-in-out infinite;
+}
+
+.nx-weather-glyph--cloud::after {
+  right: -32%;
+  bottom: -7%;
+  width: 75%;
+  height: 36%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(186, 230, 253, .36), transparent);
+  filter: blur(2px);
+  animation: nx-weather-cloud-drift 12s ease-in-out infinite;
+}
+
+.nx-weather-glyph--precipitation .nx-weather-glyph__detail {
+  top: 66%;
+  right: -20%;
+  width: 70%;
+  height: 78%;
+  opacity: .54;
+  background: repeating-linear-gradient(115deg, transparent 0 7px, rgba(125, 211, 252, .75) 8px 9px, transparent 10px 15px);
+  mask-image: linear-gradient(180deg, black, transparent);
+  animation: nx-weather-precipitation 2.8s linear infinite;
+}
+
+.nx-weather-glyph--fog .nx-weather-glyph__detail {
+  bottom: -9%;
+  left: -34%;
+  width: 168%;
+  height: 24%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(203, 213, 225, .44), transparent);
+  filter: blur(2px);
+  animation: nx-weather-fog-drift 10s ease-in-out infinite;
+}
+
+.nx-weather-glyph--storm::before {
+  inset: 4%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(167, 139, 250, .27), transparent 68%);
+  animation: nx-weather-storm-signal 10s ease-in-out infinite;
+}
+
+.nx-weather-glyph--snow .nx-weather-glyph__detail {
+  top: 57%;
+  left: 66%;
+  width: 34%;
+  height: 34%;
+  border-radius: 999px;
+  background: rgba(224, 242, 254, .78);
+  box-shadow: -12px 7px 0 -1px rgba(224, 242, 254, .5), 6px 12px 0 -2px rgba(224, 242, 254, .62);
+  animation: nx-weather-snow-float 6.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-weather-strip *,
+  .nx-weather-strip *::before,
+  .nx-weather-strip *::after {
+    animation: none !important;
+    transition-duration: .01ms !important;
+  }
+}

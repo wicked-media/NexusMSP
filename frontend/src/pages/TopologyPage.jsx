@@ -5,11 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Network, Server, Monitor, Laptop, Wifi, Loader2, RefreshCw, Globe, Printer, HardDrive, Shield, Users, AlertTriangle } from "lucide-react";
+import { Network, Monitor, Wifi, Loader2, RefreshCw, Users, AlertTriangle } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 
-const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, router: Globe, switch: Network, firewall: Shield, printer: Printer, other: HardDrive };
 const STATUS_COLORS = { online: "#10b981", offline: "#ef4444", warning: "#f59e0b", unknown: "#6b7280" };
 
 function TopologyCanvas({ topology }) {

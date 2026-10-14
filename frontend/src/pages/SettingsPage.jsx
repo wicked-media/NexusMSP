@@ -1,5 +1,5 @@
-import { useState, useEffect, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,42 +10,41 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { RichTextEditor } from "@/components/RichTextEditor";
 import UnifiControllersManager from "@/components/unifi/UnifiControllersManager";
 import ServiceTiersSettings from "@/components/settings/ServiceTiersSettings";
 import ContractTypesSettings from "@/components/settings/ContractTypesSettings";
 import WeatherClockSettingsCard from "@/components/settings/WeatherClockSettingsCard";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import O365SetupPage from "./O365SetupPage";
 import { toast } from "sonner";
 import { 
-  User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
+  Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
   Clock, CalendarDays, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
-  Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
-  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
-  Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun
+  Trash2, Link2, TestTube, RefreshCw,
+  CheckCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
+  Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun, DatabaseBackup
 } from "lucide-react";
 
 const TABS = [
   { id: "branding", label: "Platform Branding", description: "Identity, logo, document styling, and portal appearance.", icon: Palette, group: "organisation", tone: "violet" },
   { id: "tiers", label: "Service Tiers", description: "Service levels, pricing, and response commitments.", icon: Shield, group: "organisation", tone: "emerald" },
   { id: "contract-types", label: "Contract Types", description: "Agreement defaults, billing cadence, and SLA rules.", icon: FileText, group: "organisation", tone: "amber" },
+  { id: "billing", label: "Billing & Invoicing", description: "Invoice numbering, payment terms, tax, and billing gateways.", icon: CreditCard, group: "organisation", tone: "emerald", route: "/billing-settings", routeCta: "Open billing settings" },
   { id: "white-label", label: "White Label", description: "Client-facing naming, domains, and presentation.", icon: Image, group: "organisation", tone: "cyan" },
   { id: "channel", label: "Channel / MSP Mode", description: "MSP tenancy and partner operating model.", icon: Building, group: "organisation", tone: "violet" },
-  { id: "tickets", label: "Ticket Defaults", description: "Numbering, workflows, templates, SLA, and routing.", icon: FileText, group: "operations", tone: "amber" },
+  { id: "tickets", label: "Ticket Defaults", description: "Numbering, categories, issue types, and work prefixes.", icon: FileText, group: "operations", tone: "amber" },
   { id: "ping", label: "Ping & Escalation", description: "Attention rules, sounds, and escalation signals.", icon: Activity, group: "operations", tone: "rose" },
   { id: "calendar", label: "Dispatch Calendar", description: "Microsoft 365 calendar sync, scheduling guardrails, and booking visibility.", icon: CalendarDays, group: "operations", tone: "emerald" },
   { id: "weather", label: "Weather & Local Clock", description: "Dashboard forecast, temperature units, and the office timezone.", icon: CloudSun, group: "operations", tone: "cyan" },
   { id: "mailbox", label: "Mailbox & Email", description: "Microsoft 365 inboxes, sending, intake, and delivery.", icon: Mail, group: "operations", tone: "cyan" },
-  { id: "notifications", label: "Notifications", description: "Organisation-wide notification policies and alerts.", icon: Bell, group: "operations", tone: "violet" },
+  { id: "notifications", label: "No-notes escalation", description: "Escalate unattended tickets when technician notes are missing.", icon: Bell, group: "operations", tone: "violet" },
   { id: "auth", label: "Authentication", description: "Microsoft sign-in and user provisioning controls.", icon: KeyRound, group: "security", tone: "violet" },
-  { id: "twofa", label: "2FA & Security", description: "Multi-factor authentication and protection policy.", icon: Shield, group: "security", tone: "emerald" },
-  { id: "tokens", label: "API Tokens", description: "Secure API access and integration credentials.", icon: Server, group: "security", tone: "cyan" },
-  { id: "audit", label: "Audit Trail", description: "Review recorded platform activity and accountability.", icon: ClipboardCheck, group: "security", tone: "amber", route: "/audit-trail" },
-  { id: "integrations", label: "Integrations", description: "Connected platforms, vendors, and credentials.", icon: Plug, group: "platform", tone: "cyan" },
+  { id: "api-tokens", label: "API Tokens", description: "Issue and revoke programmatic access tokens for the Nexus API.", icon: KeyRound, group: "security", tone: "cyan", route: "/settings-api-tokens", routeCta: "Manage API tokens" },
+  { id: "twofa", label: "My 2FA & Security", description: "Your authenticator, password and active session controls.", icon: Shield, group: "security", tone: "emerald", route: "/my-settings?tab=security", routeCta: "Open security settings" },
+  { id: "audit", label: "Audit Trail", description: "Review recorded platform activity and accountability.", icon: ClipboardCheck, group: "security", tone: "amber", route: "/audit-trail", routeCta: "Open audit log" },
+  { id: "integrations", label: "Integrations", description: "Connection credentials, policies, and setup ownership.", icon: Plug, group: "platform", tone: "cyan" },
+  { id: "platform-recovery", label: "Platform Backup & Recovery", description: "Nexus Core restore points, isolated recovery proof, and fresh-host cutover planning.", icon: DatabaseBackup, group: "platform", tone: "emerald", route: "/nexus-continuity", routeCta: "Open recovery console" },
   { id: "ai", label: "AI & Automation", description: "AI provider, model, and automation controls.", icon: Brain, group: "platform", tone: "violet" },
   { id: "comms", label: "Notify Channels", description: "Slack, Teams, and external notification channels.", icon: MessageSquare, group: "platform", tone: "emerald" },
   { id: "my-settings", label: "My Workspace", description: "Your profile, signature, schedule, and preferences.", icon: Settings2, group: "workspace", tone: "rose" },
@@ -64,12 +63,11 @@ const LazyTicketSettings = lazy(() => import("./TicketSettingsPage"));
 const LazyTicketPingSettings = lazy(() => import("./TicketPingSettingsPage"));
 const LazyWhiteLabel = lazy(() => import("./WhiteLabelPage"));
 const LazyChannelMode = lazy(() => import("./ChannelModePage"));
-const LazyApiTokens = lazy(() => import("./ApiTokensPage"));
-const LazySecurity2FA = lazy(() => import("./Security2FAPage"));
 const LazyNotifyChannels = lazy(() => import("./NotifyChannelsPage"));
 const LazyTechSettings = lazy(() => import("./TechSettingsPage"));
 
-// Search index: maps keywords -> (tab, card anchor, human label)
+// Search index: maps keywords -> (tab, card anchor, human label). A route is
+// used for settings that deliberately live in a technician's personal workspace.
 const SETTINGS_INDEX = [
   // Branding
   { tab: "branding", anchor: "branding-section", label: "Platform Branding", keywords: "branding logo company name colors favicon login tagline" },
@@ -79,58 +77,94 @@ const SETTINGS_INDEX = [
   { tab: "branding", anchor: "branding-section", label: "Invoice Header / Footer", keywords: "invoice pdf branding header footer" },
   // Service Tiers
   { tab: "tiers", anchor: "service-tiers-card", label: "Service Tiers", keywords: "service tier bronze silver gold platinum diamond sla msp plan level price" },
-  // Auth
+  // Billing & finance
+  { tab: "billing", route: "/billing-settings", label: "Billing & Invoicing", keywords: "billing invoice numbering sequence payment terms tax gst vat proforma receipt quote gateway surcharge late fee" },
+  { tab: "billing", route: "/billing-settings", label: "Invoice numbering & terms", keywords: "invoice number format prefix suffix {YYYY} {SEQ} payment terms due days default currency" },
+  // Auth & access
+  { tab: "api-tokens", route: "/settings-api-tokens", label: "API Tokens", keywords: "api token key programmatic access developer bearer revoke expire scope integration" },
   { tab: "auth", anchor: "auth-sso-card", label: "Microsoft SSO", keywords: "sso microsoft azure ad entra single sign on oauth" },
   // Mailbox
   { tab: "mailbox", anchor: "mailbox-o365-card", label: "Microsoft 365 Inbox", keywords: "mailbox o365 office365 inbox ticket email to ticket" },
-  { tab: "mailbox", anchor: "mailbox-signature-card", label: "Email Signature", keywords: "email signature reply template" },
+  { tab: "my-settings", route: "/my-settings?tab=signature", label: "Email Signature", keywords: "email signature reply template technician personal sign off" },
   { tab: "calendar", anchor: "dispatch-calendar-settings", label: "Dispatch Calendar", keywords: "calendar booking dispatch schedule microsoft 365 availability appointment conflict technician" },
   { tab: "weather", anchor: "weather-clock-settings-card", label: "Weather & Local Clock", keywords: "weather forecast temperature local time clock office location timezone celsius fahrenheit" },
   // Integrations
+  { tab: "integrations", route: "/integrations", label: "Integration health & activity", keywords: "integration status health diagnostics sync activity monitoring provider vendor connection" },
   { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
   { tab: "integrations", anchor: "synergy-wholesale-settings-card", label: "Synergy Wholesale", keywords: "synergy wholesale domains dns hosting cpanel wordpress ssl certificate renewal register transfer" },
   { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
-  { tab: "integrations", anchor: "microsoft365-delivery-card", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications" },
+  { tab: "mailbox", anchor: "microsoft365-outbound-role-routing", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications sender routing audit" },
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
   { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "supabase-storage-card", label: "Nexus Artifact Storage", keywords: "supabase storage private files pdf attachments reports retention" },
-  { tab: "integrations", anchor: "cipp-settings-card", label: "Nexus Control Plane (Microsoft 365)", keywords: "control plane cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
+  { tab: "integrations", anchor: "cipp-settings-card", label: "Microsoft compatibility adapter (advanced)", keywords: "control plane cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding compatibility adapter" },
   { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
   { tab: "integrations", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", keywords: "nexus agent rmm in-house windows agent patches scripts splashtop" },
   { tab: "integrations", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", keywords: "privilege elevation admin request approval uac keeper epm endpoint privilege manager" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
+  { tab: "platform-recovery", route: "/nexus-continuity", label: "Platform Backup & Recovery", keywords: "nexus backup platform restore point recovery server move fresh install migration import mongodump mongorestore continuity" },
   // AI
   { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai gpt model provider api key" },
   // Notifications
-  { tab: "notifications", anchor: "notifications-prefs-card", label: "Email Alerts & Preferences", keywords: "notification email alerts preferences sla warnings device offline" },
+  { tab: "notifications", anchor: "general-threshold-card", label: "No-notes escalation", keywords: "ticket notes escalation unattended threshold senior technician" },
 ];
+
+const findSettingAnchor = (anchor) => {
+  if (!anchor || typeof document === "undefined") return null;
+  const escapedAnchor = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(anchor)
+    : String(anchor).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  return document.querySelector(`[data-testid="${escapedAnchor}"]`);
+};
+
+const INTEGRATION_SETTING_CATEGORIES = [
+  { id: "all", label: "All connections" },
+  { id: "commercial", label: "Commercial" },
+  { id: "customer", label: "Customer services" },
+  { id: "security", label: "Security & protection" },
+  { id: "operations", label: "Operations" },
+  { id: "platform", label: "Nexus platform" },
+];
+
+const connectionState = (ready, readyLabel = "Configured") => ready
+  ? { label: readyLabel, className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" }
+  : { label: "Needs setup", className: "border-amber-500/30 bg-amber-500/10 text-amber-200" };
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState("branding");
+  const [activeGroup, setActiveGroup] = useState("all");
   const [settingSearch, setSettingSearch] = useState("");
+  const [integrationSearch, setIntegrationSearch] = useState("");
+  const [integrationCategory, setIntegrationCategory] = useState("all");
   const [highlightAnchor, setHighlightAnchor] = useState("");
-  const [loading, setLoading] = useState(false);
 
   // Honour deep-links: /settings?tab=integrations&anchor=huntress-settings-card
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const tab = params.get("tab");
     const anchor = params.get("anchor");
+    if (tab === "twofa") {
+      navigate("/my-settings?tab=security", { replace: true });
+      return undefined;
+    }
     if (tab) setActiveTab(tab);
     if (anchor) {
       setHighlightAnchor(anchor);
-      setTimeout(() => {
-        document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const timeout = setTimeout(() => {
+        findSettingAnchor(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 400);
+      return () => clearTimeout(timeout);
     }
-  }, []);
+    return undefined;
+  }, [location.search, navigate]);
   const [users, setUsers] = useState([]);
   const [branding, setBranding] = useState({
     company_name: "NexusMSP", company_logo_url: "", company_icon_url: "",
@@ -142,16 +176,6 @@ export default function SettingsPage() {
     email_sender_name: "", email_footer_text: "", favicon_url: "",
   });
   const [brandingSaving, setBrandingSaving] = useState(false);
-  const [profileData, setProfileData] = useState({
-    name: user?.name || "",
-    email: user?.email || ""
-  });
-  const [notifications, setNotifications] = useState({
-    email_alerts: true,
-    ticket_updates: true,
-    device_offline: true,
-    sla_warnings: true
-  });
   const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
   const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
   const [stripe, setStripe] = useState({ api_key: "", configured: false });
@@ -168,18 +192,10 @@ export default function SettingsPage() {
   const [huntressBusy, setHuntressBusy] = useState(false);
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
-  const [cipp, setCipp] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [cipp, setCipp] = useState({ base_url: "", api_key: "", configured: false, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [cippBusy, setCippBusy] = useState(false);
-  const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, migration_required: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [unifiBusy, setUnifiBusy] = useState(false);
-  const [trmm] = useState({ configured: false }); // legacy - TRMM removed, kept for backwards-compat with old loadAll
-  const trmmBusy = false;
-  const setTrmmBusy = () => {};
-  const trmmNotif = { configured: false, slack_webhook_url: "", teams_webhook_url: "", notify_on: "all" };
-  const trmmNotifBusy = false;
-  const setTrmm = () => {};
-  const setTrmmNotif = () => {};
-  const setTrmmNotifBusy = () => {};
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -191,34 +207,20 @@ export default function SettingsPage() {
   const [openaiForm, setOpenaiForm] = useState({ api_key: "", key_label: "NexusMSP production", organization_id: "", project_id: "" });
   const [openaiBusy, setOpenaiBusy] = useState("");
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
-  const [jobNumbering, setJobNumbering] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
-  const [jnSaving, setJnSaving] = useState(false);
-  const [emailSig, setEmailSig] = useState("");
-  const [sigSaving, setSigSaving] = useState(false);
-  const [cannedResponses, setCannedResponses] = useState([]);
-  const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [msSSO, setMsSSO] = useState({ enabled: false, tenant_id: "", client_id: "", client_secret: "", client_secret_set: false, redirect_uri: "", calendar_redirect_uri: "", auto_create_users: true, default_role: "tech" });
   const [msSSOSaving, setMsSSOSaving] = useState(false);
   // Mailbox state
   const [mailbox, setMailbox] = useState(null);
-  const [mailboxForm, setMailboxForm] = useState({
-    tenant_id: "", client_id: "", client_secret: "", redirect_uri: "", mailbox_email: "",
-    email_to_lead_enabled: true, email_to_ticket_enabled: false,
-    auto_reply_enabled: false, auto_reply_message: "Thank you for contacting us. We have received your inquiry and will respond shortly.",
-  });
-  const [mailboxSaving, setMailboxSaving] = useState(false);
-  const [mailboxTesting, setMailboxTesting] = useState(false);
-  const [emailLeads, setEmailLeads] = useState([]);
   const [calendarConnection, setCalendarConnection] = useState({ provider: "microsoft365", connected: false, calendar_name: "NexusMSP Dispatch", sync_direction: "two_way" });
   const [calendarSaving, setCalendarSaving] = useState(false);
-  const [nexusElevate, setNexusElevate] = useState({ native_enabled: true, auto_deploy_companion: true, max_duration_minutes: 15, require_justification: true, keeper_bridge_enabled: false, keeper_connector_reference: "", keeper_sync_interval_minutes: 15 });
+  const [nexusElevate, setNexusElevate] = useState({ native_enabled: true, auto_deploy_companion: true, max_duration_minutes: 15, approval_sla_minutes: 15, require_justification: true, keeper_bridge_enabled: false, keeper_connector_reference: "", keeper_sync_interval_minutes: 15 });
   const [nexusElevateSaving, setNexusElevateSaving] = useState(false);
   const [artifactStorage, setArtifactStorage] = useState({ configured: false, ready: false, detail: "Checking artifact storage…" });
   const [artifactStorageBusy, setArtifactStorageBusy] = useState(false);
   const [synergy, setSynergy] = useState({ reseller_id: "", api_key: "", api_key_set: false, wsdl: "", configured: false, readiness: "not_configured" });
   const [synergyBusy, setSynergyBusy] = useState("");
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const refreshArtifactStorage = async () => {
     setArtifactStorageBusy(true);
@@ -296,32 +298,31 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
-          axios.get(`${API}/users`, { headers }),
-          axios.get(`${API}/settings/no-notes-threshold`, { headers }),
-          axios.get(`${API}/settings/xero`, { headers }),
-          axios.get(`${API}/settings/stripe`, { headers }),
-          axios.get(`${API}/settings/suped`, { headers }),
-          axios.get(`${API}/settings/splynx`, { headers }),
-          axios.get(`${API}/settings/hudu`, { headers }),
-          axios.get(`${API}/ai/config`, { headers }),
-          axios.get(`${API}/syncro/settings`, { headers }).catch(() => ({ data: { subdomain: "", api_key: "", enabled: false } })),
-          axios.get(`${API}/settings/job-numbering`, { headers }).catch(() => ({ data: { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" } })),
-          axios.get(`${API}/settings/microsoft-sso`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/settings/o365-mailbox`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/cipp/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/unifi/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/trmm/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/trmm/notifications/settings`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/scheduling/calendar-connection`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/nexus-elevate/settings`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/settings/synergy-wholesale`, { headers }).catch(() => ({ data: null })),
+      // Settings are independent surfaces. A provider outage must not prevent the
+      // rest of the administration workspace from loading.
+      const getOptional = (url, fallback) => axios.get(url, { headers }).catch(() => ({ data: fallback }));
+      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, ssoRes, mbxRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
+          getOptional(`${API}/users`, []),
+          getOptional(`${API}/settings/no-notes-threshold`, {}),
+          getOptional(`${API}/settings/xero`, {}),
+          getOptional(`${API}/settings/stripe`, {}),
+          getOptional(`${API}/settings/suped`, {}),
+          getOptional(`${API}/settings/splynx`, {}),
+          getOptional(`${API}/settings/hudu`, {}),
+          getOptional(`${API}/ai/config`, {}),
+          getOptional(`${API}/syncro/settings`, { subdomain: "", api_key: "", enabled: false }),
+          getOptional(`${API}/settings/microsoft-sso`, {}),
+          getOptional(`${API}/settings/o365-mailbox`, null),
+          getOptional(`${API}/settings/branding`, {}),
+          getOptional(`${API}/acronis/config`, {}),
+          getOptional(`${API}/settings/sms`, null),
+          getOptional(`${API}/settings/pax8`, null),
+          getOptional(`${API}/huntress/status`, null),
+          getOptional(`${API}/cipp/status`, null),
+          getOptional(`${API}/unifi/status`, null),
+          getOptional(`${API}/scheduling/calendar-connection`, null),
+          getOptional(`${API}/nexus-elevate/settings`, null),
+          getOptional(`${API}/settings/synergy-wholesale`, null),
         ]);
         setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
         setThreshold(prev => ({ ...prev, ...(thresholdRes.data || {}) }));
@@ -333,8 +334,6 @@ export default function SettingsPage() {
         if (huntressRes?.data) setHuntress(prev => ({ ...prev, ...huntressRes.data, api_key: "", secret_key: "" }));
         if (cippRes?.data) setCipp(prev => ({ ...prev, ...cippRes.data, api_key: "" }));
         if (unifiRes?.data) setUnifi(prev => ({ ...prev, ...unifiRes.data, api_key: "" }));
-        if (trmmRes?.data) setTrmm(prev => ({ ...prev, ...trmmRes.data, api_key: "" }));
-        if (trmmNotifRes?.data) setTrmmNotif(prev => ({ ...prev, ...trmmNotifRes.data }));
         if (calendarRes?.data) setCalendarConnection(prev => ({ ...prev, ...calendarRes.data }));
         if (nexusElevateRes?.data) setNexusElevate(prev => ({ ...prev, ...nexusElevateRes.data }));
         if (synergyRes?.data) setSynergy(prev => ({ ...prev, ...synergyRes.data, api_key: "" }));
@@ -351,116 +350,14 @@ export default function SettingsPage() {
           }));
         }
         setSyncro(prev => ({ ...prev, ...(syncroRes.data || {}), subdomain: syncroRes.data?.subdomain || "", api_key: syncroRes.data?.api_key || "" }));
-        if (jnRes.data) setJobNumbering(prev => ({ ...prev, ...jnRes.data }));
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data, client_secret: "" }));
         if (brandingRes.data && brandingRes.data.company_name) setBranding(prev => ({ ...prev, ...brandingRes.data }));
-        if (mbxRes.data) {
-          setMailbox(mbxRes.data);
-          if (mbxRes.data.tenant_id) {
-            setMailboxForm(f => ({
-              ...f, tenant_id: mbxRes.data.tenant_id || "", client_id: mbxRes.data.client_id || "",
-              client_secret: mbxRes.data.client_secret_set ? "********" : "",
-              redirect_uri: mbxRes.data.redirect_uri || "", mailbox_email: mbxRes.data.mailbox_email || "",
-              email_to_lead_enabled: mbxRes.data.email_to_lead_enabled !== false,
-              email_to_ticket_enabled: mbxRes.data.email_to_ticket_enabled || false,
-              auto_reply_enabled: mbxRes.data.auto_reply_enabled || false,
-              auto_reply_message: mbxRes.data.auto_reply_message || f.auto_reply_message,
-            }));
-          }
-        }
-        setEmailLeads(leadsRes.data || []);
-        // Load email signature and canned responses
-        try {
-          const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
-          if (userRes.data?.email_signature) setEmailSig(userRes.data.email_signature);
-        } catch {}
-        try {
-          const crRes = await axios.get(`${API}/canned-responses`, { headers });
-          setCannedResponses(crRes.data);
-        } catch {}
+        if (mbxRes.data) setMailbox(mbxRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
-  }, []);
+  }, [headers, user.id]);
 
-  const handleProfileSave = async () => {
-    setLoading(true);
-    // Simulate save - in real app would call API
-    await new Promise(resolve => setTimeout(resolve, 500));
-    toast.success("Profile updated successfully");
-    setLoading(false);
-  };
-
-  const handleSaveJobNumbering = async () => {
-    setJnSaving(true);
-    try {
-      await axios.put(`${API}/settings/job-numbering`, jobNumbering, { headers });
-      toast.success("Job numbering settings saved");
-    } catch { toast.error("Failed to save job numbering"); }
-    finally { setJnSaving(false); }
-  };
-
-  // Mailbox handlers
-  const handleMailboxConnect = async () => {
-    if (!mailboxForm.tenant_id || !mailboxForm.client_id || !mailboxForm.client_secret || !mailboxForm.mailbox_email) {
-      toast.error("All Azure AD credentials and mailbox email are required"); return;
-    }
-    setMailboxSaving(true);
-    try {
-      await axios.post(`${API}/o365/connect`, mailboxForm, { headers });
-      toast.success("Office 365 mailbox connected!");
-      const [mbxRes, leadsRes] = await Promise.all([
-        axios.get(`${API}/settings/o365-mailbox`, { headers }),
-        axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
-      ]);
-      setMailbox(mbxRes.data); setEmailLeads(leadsRes.data || []);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
-    finally { setMailboxSaving(false); }
-  };
-
-  const handleMailboxDisconnect = async () => {
-    if (!window.confirm("Disconnect Office 365 mailbox?")) return;
-    try {
-      await axios.post(`${API}/o365/disconnect`, {}, { headers });
-      toast.success("Disconnected"); setMailbox(prev => ({ ...prev, connected: false }));
-    } catch { toast.error("Failed to disconnect"); }
-  };
-
-  const handleMailboxTest = async () => {
-    setMailboxTesting(true);
-    try {
-      const res = await axios.post(`${API}/o365/test-connection`, {}, { headers });
-      if (res.data.success) toast.success("Connection test passed!"); else toast.error(res.data.message);
-    } catch { toast.error("Test failed"); }
-    finally { setMailboxTesting(false); }
-  };
-
-  const handleMailboxSettingsSave = async () => {
-    setMailboxSaving(true);
-    try {
-      await axios.put(`${API}/settings/o365-mailbox`, {
-        email_to_lead_enabled: mailboxForm.email_to_lead_enabled,
-        email_to_ticket_enabled: mailboxForm.email_to_ticket_enabled,
-        auto_reply_enabled: mailboxForm.auto_reply_enabled,
-        auto_reply_message: mailboxForm.auto_reply_message,
-      }, { headers });
-      toast.success("Mailbox settings saved");
-    } catch { toast.error("Failed to save"); }
-    finally { setMailboxSaving(false); }
-  };
-
-  const handleTestIncomingEmail = async () => {
-    try {
-      await axios.post(`${API}/o365/webhook/incoming-email`, {
-        from_address: "demo@testclient.com", from_name: "Demo User",
-        subject: "Interested in your IT services",
-        body: "Hi, we are looking for a managed service provider for our office of 25 people. Can you send us a proposal?",
-      }, { headers });
-      toast.success("Test email processed - check Leads page");
-      const leadsRes = await axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] }));
-      setEmailLeads(leadsRes.data || []);
-    } catch { toast.error("Failed to process test email"); }
-  };
 
   const mailboxConnected = mailbox?.connected;
 
@@ -500,10 +397,37 @@ export default function SettingsPage() {
       ).slice(0, 8)
     : [];
 
+  const integrationConnections = [
+    { id: "artifact-storage", anchor: "supabase-storage-card", label: "Private artifact storage", description: "Private document, evidence and attachment storage.", category: "platform", icon: Cloud, state: connectionState(artifactStorage.ready, "Ready") },
+    { id: "synergy", anchor: "synergy-wholesale-settings-card", label: "Synergy Wholesale", description: "Domains, DNS, hosting and certificate lifecycle.", category: "customer", icon: Globe, state: connectionState(synergy.configured) },
+    { id: "xero", anchor: "xero-settings-card", label: "Xero", description: "Accounting credentials and invoice sync authorisation.", category: "commercial", icon: FileText, state: connectionState(xero.connected, "Connected") },
+    { id: "stripe", anchor: "stripe-settings-card", label: "Stripe", description: "Restricted payment credential for invoice checkout.", category: "commercial", icon: CreditCard, state: connectionState(stripe.configured, "Configured") },
+    { id: "microsoft365-delivery", route: "/settings?tab=mailbox&anchor=microsoft365-outbound-role-routing", label: "Microsoft 365 delivery", description: "Mailbox ownership, sender roles and delivery policies.", category: "customer", icon: Mail, state: connectionState(mailboxConnected, "Connected") },
+    { id: "sms", anchor: "sms-settings-card", label: "MobileMessage SMS", description: "Approved senders, inbound replies and delivery policy.", category: "customer", icon: Smartphone, state: connectionState(sms.enabled && sms.password_set) },
+    { id: "acronis", anchor: "acronis-settings-card", label: "Acronis", description: "Backup provider credentials and tenant access.", category: "security", icon: DatabaseBackup, state: connectionState(acronis.connected, "Connected") },
+    { id: "pax8", anchor: "pax8-settings-card", label: "Pax8", description: "CSP identity, licensing and billing connection.", category: "commercial", icon: Building, state: connectionState(pax8.enabled) },
+    { id: "huntress", anchor: "huntress-settings-card", label: "Huntress", description: "Read-only security signal access and credential policy.", category: "security", icon: ShieldCheck, state: connectionState(huntress.configured) },
+    { id: "suped", anchor: "suped-settings-card", label: "SupED", description: "DMARC and deliverability provider credential.", category: "security", icon: Shield, state: connectionState(suped.configured) },
+    { id: "cipp", anchor: "cipp-settings-card", label: "Microsoft compatibility adapter", description: "Optional CIPP execution adapter for Nexus Control Plane.", category: "operations", icon: Plug, state: connectionState(cipp.configured, "Adapter configured") },
+    { id: "unifi", anchor: "unifi-settings-card", label: "UniFi", description: "Controller access for network topology and actions.", category: "operations", icon: Wifi, state: connectionState(unifi.configured) },
+    { id: "nexus-elevate", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", description: "Privilege policy and approved elevation controls.", category: "platform", icon: ShieldCheck, state: connectionState(nexusElevate.native_enabled, "Included") },
+    { id: "nexus-agent", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", description: "Endpoint agent rollout and management policy.", category: "platform", icon: Server, state: connectionState(true, "Built in") },
+    { id: "splynx", anchor: "splynx-settings-card", label: "Splynx", description: "ISP billing and telecom provider credentials.", category: "commercial", icon: CreditCard, state: connectionState(splynx.configured) },
+    { id: "hudu", anchor: "hudu-settings-card", label: "Hudu", description: "Documentation import and knowledge connection.", category: "operations", icon: BookOpen, state: connectionState(hudu.configured) },
+    { id: "syncro", anchor: "syncro-settings-card", label: "Syncro", description: "Optional PSA/RMM migration and import connection.", category: "operations", icon: RefreshCw, state: connectionState(syncro.enabled) },
+  ];
+
+  const visibleIntegrationConnections = integrationConnections.filter((connection) => {
+    const searchTerm = integrationSearch.trim().toLowerCase();
+    const matchesCategory = integrationCategory === "all" || connection.category === integrationCategory;
+    const matchesSearch = !searchTerm || `${connection.label} ${connection.description} ${connection.category}`.toLowerCase().includes(searchTerm);
+    return matchesCategory && matchesSearch;
+  });
+
   // Apply/remove highlight CSS class to the targeted card
   useEffect(() => {
     if (!highlightAnchor) return;
-    const el = document.querySelector(`[data-testid="${highlightAnchor}"]`);
+    const el = findSettingAnchor(highlightAnchor);
     if (!el) return;
     el.setAttribute("data-settings-highlight", "true");
     const t = setTimeout(() => el.removeAttribute("data-settings-highlight"), 2200);
@@ -511,12 +435,17 @@ export default function SettingsPage() {
   }, [highlightAnchor, activeTab]);
 
   const jumpToSetting = (item) => {
-    setActiveTab(item.tab);
     setSettingSearch("");
+    if (item.route) {
+      setHighlightAnchor("");
+      navigate(item.route);
+      return;
+    }
+    setActiveTab(item.tab);
     setHighlightAnchor(item.anchor);
     // Wait for the target tab's DOM to mount, then scroll
     setTimeout(() => {
-      const el = document.querySelector(`[data-testid="${item.anchor}"]`);
+      const el = findSettingAnchor(item.anchor);
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -524,16 +453,38 @@ export default function SettingsPage() {
     }, 150);
   };
 
+  const openIntegrationConnection = (connection) => {
+    setIntegrationSearch("");
+    if (connection.route) {
+      navigate(connection.route);
+      return;
+    }
+
+    setActiveTab("integrations");
+    setHighlightAnchor(connection.anchor);
+    const params = new URLSearchParams(location.search);
+    params.set("tab", "integrations");
+    params.set("anchor", connection.anchor);
+    navigate({ pathname: location.pathname, search: `?${params.toString()}` });
+
+    setTimeout(() => {
+      findSettingAnchor(connection.anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+  };
+
   return (
     <div className="nx-page-stage max-w-6xl space-y-5" data-testid="settings-page">
-      {/* Header */}
-      <div className="nx-ambient-surface rounded-2xl border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.09] via-background to-background p-5 md:p-6" data-nx-signal="recommendation">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10"><Settings2 className="h-5 w-5 text-violet-300" /></span><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">NexusOps administration</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Settings</h1><p className="mt-1 text-sm text-muted-foreground">Configure your workspace, integrations, security, and service standards.</p></div></div>
-          <Badge variant="outline" className="w-fit border-emerald-500/25 bg-emerald-500/10 text-emerald-300">Changes save per section</Badge>
-        </div>
-        {/* Quick search */}
-        <div className="relative mt-5 w-full md:max-w-xl">
+      <OperationalPageHeader
+        eyebrow="NexusOps administration"
+        title="Settings"
+        description="Configure your workspace, integrations, security, and service standards."
+        icon={Settings2}
+        tone="violet"
+        signal="recommendation"
+        actions={<Badge variant="outline" className="w-fit border-emerald-500/25 bg-emerald-500/10 text-emerald-300">Changes save per section</Badge>}
+      />
+      <section className="relative rounded-2xl border border-violet-500/15 bg-card/55 p-3 shadow-sm" aria-label="Find a setting">
+        <div className="relative w-full md:max-w-xl">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input
             value={settingSearch}
@@ -568,11 +519,27 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-      </div>
+      </section>
+
+      {/* Quick category filter — one click to any settings area */}
+      <nav className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-card/40 p-2" aria-label="Filter settings by category" data-testid="settings-group-filter">
+        {[{ id: "all", label: "All settings" }, ...SETTINGS_GROUPS].map(g => {
+          const count = g.id === "all" ? TABS.length : TABS.filter(t => t.group === g.id).length;
+          const active = activeGroup === g.id;
+          return (
+            <button key={g.id} onClick={() => setActiveGroup(g.id)}
+              className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${active ? "border-violet-500/40 bg-violet-500/15 text-violet-200" : "border-border/70 bg-background/40 text-muted-foreground hover:border-violet-500/30 hover:text-foreground"}`}
+              data-testid={`settings-group-filter-${g.id}`}>
+              {g.label}
+              <span className={`rounded-full px-1.5 text-[10px] ${active ? "bg-violet-500/25 text-violet-100" : "bg-muted text-muted-foreground"}`}>{count}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {/* Settings directory */}
       <div className="space-y-5" data-testid="settings-tabs">
-        {SETTINGS_GROUPS.map(group => {
+        {SETTINGS_GROUPS.filter(group => activeGroup === "all" || group.id === activeGroup).map(group => {
           const groupTabs = TABS.filter(tab => tab.group === group.id);
           return (
             <section key={group.id} className="rounded-2xl border border-border/60 bg-card/40 p-4 md:p-5" data-testid={`settings-group-${group.id}`}>
@@ -602,7 +569,7 @@ export default function SettingsPage() {
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2"><span className="font-semibold text-foreground">{tab.label}</span>{isActive ? <Badge className="border-0 bg-violet-500/15 px-1.5 py-0 text-[10px] font-medium text-violet-200">Open</Badge> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-violet-300" />}</span>
                         <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{tab.description}</span>
-                        {tab.route && <span className="mt-2 block text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Open audit log</span>}
+                        {tab.route && <span className="mt-2 flex items-center gap-1 text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/80">{tab.routeCta || "Open workspace"}<ChevronRight className="h-3 w-3" /></span>}
                       </span>
                     </button>
                   );
@@ -612,30 +579,6 @@ export default function SettingsPage() {
           );
         })}
       </div>
-
-      {/* Other settings hub - quick-access cards to dedicated settings sub-pages */}
-      {false && <div className="grid grid-cols-2 gap-2 md:grid-cols-4" data-testid="settings-hub-row">
-        <button onClick={() => navigate("/tickets/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-violet-500/40 p-3 transition-all" data-testid="hub-ticket-settings">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-violet-300/80 font-mono mb-1">Ticket Settings</div>
-          <div className="text-sm font-medium">SLA · Workflows · Templates</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Configure ticket numbering, SLA tiers, workflows</div>
-        </button>
-        <button onClick={() => navigate("/ticket-ping/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-cyan-500/40 p-3 transition-all" data-testid="hub-ticket-ping">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/80 font-mono mb-1">Ticket Ping</div>
-          <div className="text-sm font-medium">Live alerts · Sound</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Notification rules &amp; sounds</div>
-        </button>
-        <button onClick={() => navigate("/tech/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-amber-500/40 p-3 transition-all" data-testid="hub-tech-settings">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-amber-300/80 font-mono mb-1">Tech Settings</div>
-          <div className="text-sm font-medium">Per-user prefs</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Density · views · personal toggles</div>
-        </button>
-        <button onClick={() => navigate("/profile")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-emerald-500/40 p-3 transition-all" data-testid="hub-tech-profile">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80 font-mono mb-1">My Profile</div>
-          <div className="text-sm font-medium">Bio · Skills · CSAT · Achievements</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Public tech profile &amp; gamification</div>
-        </button>
-      </div>}
 
       <style>{`
         [data-settings-highlight="true"] {
@@ -656,7 +599,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div><Label>Company / Platform Name</Label><Input value={branding.company_name || ""} onChange={e => setBranding(p => ({ ...p, company_name: e.target.value }))} placeholder="Your Company Name" data-testid="branding-company-name" /><p className="text-[10px] text-muted-foreground mt-1">Replaces "NexusMSP" in the sidebar, login page, and browser tab</p></div>
-              <div><Label>Email Sender Name</Label><Input value={branding.email_sender_name || ""} onChange={e => setBranding(p => ({ ...p, email_sender_name: e.target.value }))} placeholder="Your Company IT Support" /><p className="text-[10px] text-muted-foreground mt-1">Used as the "From" name in outgoing emails</p></div>
+              <div><Label>Email brand name</Label><Input value={branding.email_sender_name || ""} onChange={e => setBranding(p => ({ ...p, email_sender_name: e.target.value }))} placeholder="Your Company IT Support" /><p className="text-[10px] text-muted-foreground mt-1">Shown in the Nexus organisation footer. The actual From name stays under the Microsoft 365 mailbox profile.</p></div>
             </div>
 
             <Separator />
@@ -765,14 +708,14 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />Invoice & Email Branding</CardTitle>
-            <CardDescription>Customize text that appears on invoices and outgoing emails</CardDescription>
+            <CardDescription>Customize organisation-wide text that appears on invoices and Microsoft 365 email.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div><Label>Invoice Header Text</Label><Input value={branding.invoice_header_text || ""} onChange={e => setBranding(p => ({ ...p, invoice_header_text: e.target.value }))} placeholder="Your Company Pty Ltd | ABN 12 345 678 901" /></div>
               <div><Label>Invoice Footer Text</Label><Input value={branding.invoice_footer_text || ""} onChange={e => setBranding(p => ({ ...p, invoice_footer_text: e.target.value }))} placeholder="Payment terms: Net 30 | BSB: 123-456 | Acc: 12345678" /></div>
             </div>
-            <div><Label>Email Footer Text</Label><Input value={branding.email_footer_text || ""} onChange={e => setBranding(p => ({ ...p, email_footer_text: e.target.value }))} placeholder="Your Company | 123 Main St | support@company.com" /></div>
+            <div><Label>Email Footer Text</Label><Input value={branding.email_footer_text || ""} onChange={e => setBranding(p => ({ ...p, email_footer_text: e.target.value }))} placeholder="Your Company | 123 Main St | support@company.com" /><p className="mt-1 text-[10px] text-muted-foreground">Appended once to Microsoft 365 messages after any technician signature.</p></div>
           </CardContent>
         </Card>
 
@@ -802,317 +745,6 @@ export default function SettingsPage() {
           {brandingSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
           Save Branding Settings
         </Button>
-      </>)}
-
-      {/* Legacy general content retained temporarily for data compatibility; no longer exposed in Settings navigation. */}
-      {false && activeTab === "general" && (<>
-      <Card className="border-sky-500/20 bg-sky-500/[0.025]" data-testid="operational-defaults-overview">
-        <CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-300" />Operational defaults</CardTitle><CardDescription>Shared operational standards belong here. Personal preferences and team administration now live in their dedicated workspaces.</CardDescription></CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <button type="button" onClick={() => navigate("/my-settings")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-violet-500/30 hover:bg-violet-500/[0.04]"><p className="text-sm font-medium">My Workspace</p><p className="mt-1 text-xs text-muted-foreground">Profile, signature, notifications, schedule, and appearance.</p></button>
-          <button type="button" onClick={() => navigate("/team-hub?tab=command&view=directory")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-cyan-500/30 hover:bg-cyan-500/[0.04]"><p className="text-sm font-medium">Team & access</p><p className="mt-1 text-xs text-muted-foreground">Technicians, invitations, roles, permissions, and capacity.</p></button>
-          <button type="button" onClick={() => setActiveTab("branding")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-emerald-500/30 hover:bg-emerald-500/[0.04]"><p className="text-sm font-medium">Organisation identity</p><p className="mt-1 text-xs text-muted-foreground">Company details, branding, client-facing documents, and white label.</p></button>
-          <button type="button" onClick={() => navigate("/tickets/settings")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-amber-500/30 hover:bg-amber-500/[0.04]"><p className="text-sm font-medium">Ticket configuration</p><p className="mt-1 text-xs text-muted-foreground">Workflows, SLA policies, templates, and ticket-specific controls.</p></button>
-        </CardContent>
-      </Card>
-      <Card data-testid="general-jobnumber-card">
-        <CardHeader><div className="flex items-center gap-2"><Tag className="w-5 h-5 text-primary" /><CardTitle>Job numbering</CardTitle></div><CardDescription>Configure prefixes used across SLA, workshop, and cabling work.</CardDescription></CardHeader>
-        <CardContent className="space-y-4"><div className="grid grid-cols-1 gap-4 md:grid-cols-3"><div className="space-y-2"><Label>SLA prefix</Label><Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" /><p className="text-xs text-muted-foreground">Example: {jobNumbering.sla_prefix || "SLA-"}00001</p></div><div className="space-y-2"><Label>Workshop prefix</Label><Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" /><p className="text-xs text-muted-foreground">Example: {jobNumbering.workshop_prefix || "WS-"}00001</p></div><div className="space-y-2"><Label>Cabling / WISP prefix</Label><Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" /><p className="text-xs text-muted-foreground">Example: {jobNumbering.cabling_prefix || "CW-"}00001</p></div></div><Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">{jnSaving ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" />Saving...</> : "Save prefixes"}</Button></CardContent>
-      </Card>
-      </>)}
-
-      {false && activeTab === "general" && (<>
-
-      {/* Profile Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <User className="w-5 h-5 text-primary" />
-            <CardTitle>Profile</CardTitle>
-          </div>
-          <CardDescription>Update your personal information</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center gap-6">
-            <Avatar className="w-20 h-20">
-              <AvatarImage src={user?.avatar} alt={user?.name} />
-              <AvatarFallback className="text-xl bg-primary/20 text-primary">
-                {user?.name?.split(' ').map(n => n[0]).join('')}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="font-semibold text-lg">{user?.name}</p>
-              <Badge variant="outline" className="capitalize">{user?.role}</Badge>
-            </div>
-          </div>
-          <Separator />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                value={profileData.name}
-                onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
-                data-testid="settings-name-input"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                value={profileData.email}
-                onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                data-testid="settings-email-input"
-              />
-            </div>
-          </div>
-          <Button onClick={handleProfileSave} disabled={loading} data-testid="save-profile-button">
-            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-            Save Changes
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Email Signature & Canned Responses - Per Technician */}
-      <Card data-testid="mailbox-signature-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Mail className="w-5 h-5 text-primary" />
-            <CardTitle>Email Signature & Templates</CardTitle>
-          </div>
-          <CardDescription>Your personal email signature (rich text) auto-appended to emails sent from tickets. Also manage your canned response templates.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Rich Text Email Signature */}
-          <div className="space-y-2">
-            <Label>Email Signature (Rich Text)</Label>
-            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting, tables, and inline images. <strong>Pro tip:</strong> click the <span className="font-mono bg-muted px-1 rounded">HTML</span> toggle in the editor to paste a full raw HTML signature (e.g. exported from Outlook -> File -> Save As -> Web Page). Outlook <code>cid:</code> inline images won't render - host images on a public URL or paste them as base64 data URIs.</p>
-            <RichTextEditor content={emailSig} onChange={setEmailSig} minHeight="300px" />
-            <Button onClick={async () => {
-              setSigSaving(true);
-              try {
-                await axios.put(`${API}/users/${user.id}`, { email_signature: emailSig }, { headers });
-                toast.success("Email signature saved");
-              } catch { toast.error("Failed to save signature"); }
-              finally { setSigSaving(false); }
-            }} disabled={sigSaving} data-testid="save-signature-btn">
-              {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Signature
-            </Button>
-          </div>
-          <Separator />
-          {/* Canned Responses */}
-          <div className="space-y-3">
-            <Label>Canned Responses</Label>
-            <p className="text-xs text-muted-foreground">Quick reply templates you can use when responding to tickets.</p>
-            <div className="grid grid-cols-3 gap-2">
-              <Input value={cannedForm.title} onChange={e => setCannedForm({ ...cannedForm, title: e.target.value })} placeholder="Title" data-testid="canned-title" />
-              <Input value={cannedForm.content} onChange={e => setCannedForm({ ...cannedForm, content: e.target.value })} placeholder="Response content" className="col-span-2" data-testid="canned-content" />
-            </div>
-            <Button size="sm" onClick={async () => {
-              if (!cannedForm.title || !cannedForm.content) { toast.error("Title and content required"); return; }
-              try {
-                await axios.post(`${API}/canned-responses`, cannedForm, { headers });
-                toast.success("Canned response saved");
-                setCannedForm({ title: "", content: "", category: "general" });
-                const r = await axios.get(`${API}/canned-responses`, { headers });
-                setCannedResponses(r.data);
-              } catch { toast.error("Failed to save"); }
-            }} data-testid="add-canned-btn">Add Response</Button>
-            {cannedResponses.length > 0 && (
-              <ScrollArea className="h-[150px]">
-                {cannedResponses.map(cr => (
-                  <div key={cr.id} className="flex justify-between items-center p-2 border-b border-border/50">
-                    <div><p className="text-sm font-medium">{cr.title}</p><p className="text-xs text-muted-foreground truncate max-w-[400px]">{cr.content}</p></div>
-                    <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
-                      try {
-                        await axios.delete(`${API}/canned-responses/${cr.id}`, { headers });
-                        const r = await axios.get(`${API}/canned-responses`, { headers });
-                        setCannedResponses(r.data);
-                        toast.success("Deleted");
-                      } catch { toast.error("Failed to delete"); }
-                    }} data-testid={`delete-canned-${cr.id}`}><Trash2 className="w-3 h-3" /></Button>
-                  </div>
-                ))}
-              </ScrollArea>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Notifications */}
-      <Card data-testid="notifications-prefs-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-primary" />
-            <CardTitle>Notifications</CardTitle>
-          </div>
-          <CardDescription>Configure how you receive alerts and updates</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <SetupGuideCallout title="Configure Microsoft SSO safely" source="Create a dedicated App registration in Microsoft Entra ID, then add the NexusMSP sign-in and calendar-consent callback URLs as Web redirect URIs." steps={["Use your organisation tenant ID rather than common for production technician access.", "Grant only the delegated permissions required for sign-in and calendar consent, then approve consent.", "Set the default SSO role to Technician or Viewer unless an administrator explicitly requires more access."]} securityNote="Do not enable automatic user creation with an Admin default role. Treat the Client Secret as an Entra application credential and rotate it before expiry." />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Email Alerts</Label>
-              <p className="text-sm text-muted-foreground">Receive critical alerts via email</p>
-            </div>
-            <Switch
-              checked={notifications.email_alerts}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, email_alerts: checked })}
-              data-testid="email-alerts-switch"
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Ticket Updates</Label>
-              <p className="text-sm text-muted-foreground">Get notified when tickets are updated</p>
-            </div>
-            <Switch
-              checked={notifications.ticket_updates}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, ticket_updates: checked })}
-              data-testid="ticket-updates-switch"
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Device Offline Alerts</Label>
-              <p className="text-sm text-muted-foreground">Alert when devices go offline</p>
-            </div>
-            <Switch
-              checked={notifications.device_offline}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, device_offline: checked })}
-              data-testid="device-offline-switch"
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>SLA Warnings</Label>
-              <p className="text-sm text-muted-foreground">Notify before SLA deadlines</p>
-            </div>
-            <Switch
-              checked={notifications.sla_warnings}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, sla_warnings: checked })}
-              data-testid="sla-warnings-switch"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Team Members */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-primary" />
-            <CardTitle>Team Members</CardTitle>
-          </div>
-          <CardDescription>View and manage team access</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {users.map(teamUser => (
-              <div key={teamUser.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-smooth">
-                <div className="flex items-center gap-3">
-                  <Avatar>
-                    <AvatarImage src={teamUser.avatar} alt={teamUser.name} />
-                    <AvatarFallback className="bg-primary/20 text-primary text-sm">
-                      {teamUser.name?.split(' ').map(n => n[0]).join('')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-medium">{teamUser.name}</p>
-                    <p className="text-sm text-muted-foreground">{teamUser.email}</p>
-                  </div>
-                </div>
-                <Badge variant="outline" className="capitalize">{teamUser.role}</Badge>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Company Info */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Building className="w-5 h-5 text-primary" />
-            <CardTitle>Company Information</CardTitle>
-          </div>
-          <CardDescription>Your MSP business details</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Company Name</Label>
-              <Input defaultValue="NexusOps MSP" data-testid="company-name-input" />
-            </div>
-            <div className="space-y-2">
-              <Label>Support Email</Label>
-              <Input defaultValue="support@nexusops.io" data-testid="support-email-input" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Business Address</Label>
-            <Input defaultValue="123 Tech Lane, San Francisco, CA 94105" data-testid="business-address-input" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Appearance */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Palette className="w-5 h-5 text-primary" />
-            <CardTitle>Appearance</CardTitle>
-          </div>
-          <CardDescription>Customize the look and feel</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <Label>Theme</Label>
-              <p className="text-sm text-muted-foreground">Currently using dark theme for optimal visibility</p>
-            </div>
-            <Badge>Dark Mode</Badge>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Job Numbering - in General tab */}
-      <Card data-testid="general-jobnumber-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Tag className="w-5 h-5 text-primary" />
-            <CardTitle>Job Numbering</CardTitle>
-          </div>
-          <CardDescription>Configure the prefix for ticket numbers across different job types</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" />SLA Prefix</Label>
-              <Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.sla_prefix || "SLA-"}00001</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Workshop Prefix</Label>
-              <Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.workshop_prefix || "WS-"}00001</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Cabling / WISP Prefix</Label>
-              <Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.cabling_prefix || "CW-"}00001</p>
-            </div>
-          </div>
-          <Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">
-            {jnSaving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Saving...</> : "Save Prefixes"}
-          </Button>
-        </CardContent>
-      </Card>
       </>)}
 
       {/* ==================== AUTH TAB ==================== */}
@@ -1206,139 +838,6 @@ export default function SettingsPage() {
 
       {/* ==================== MAILBOX TAB ==================== */}
       {activeTab === "mailbox" && <O365SetupPage />}
-
-      {false && activeTab === "mailbox" && (<>
-
-      {/* Mailbox Connection Status */}
-      <Card className={mailboxConnected ? "border-emerald-500/30" : "border-amber-500/30"}>
-        <CardContent className="py-5">
-          <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${mailboxConnected ? "bg-emerald-500/10" : "bg-amber-500/10"}`}>
-              <Mail className={`w-7 h-7 ${mailboxConnected ? "text-emerald-400" : "text-amber-400"}`} />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-semibold text-lg">Office 365 Mailbox</h3>
-                {mailboxConnected ? (
-                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle className="w-3 h-3 mr-1" />Connected</Badge>
-                ) : (
-                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><XCircle className="w-3 h-3 mr-1" />Not Connected</Badge>
-                )}
-              </div>
-              {mailboxConnected ? (
-                <p className="text-sm text-muted-foreground">Connected to <span className="font-mono text-foreground">{mailbox?.mailbox_email}</span> &middot; Last sync: {mailbox?.last_sync ? new Date(mailbox.last_sync).toLocaleString() : "Never"}</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">Connect your O365 mailbox to auto-generate leads and tickets from incoming emails.</p>
-              )}
-            </div>
-            <div className="flex gap-2">
-              {mailboxConnected && (
-                <>
-                  <Button variant="outline" size="sm" onClick={async () => {
-                    try { const r = await axios.post(`${API}/o365/sync-emails`, {}, { headers }); toast.success(r.data.message); } catch { toast.error("Sync failed"); }
-                  }}><RefreshCw className="w-4 h-4 mr-1" />Sync</Button>
-                  <Button variant="outline" size="sm" onClick={handleMailboxTest} disabled={mailboxTesting}>
-                    {mailboxTesting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <TestTube className="w-4 h-4 mr-1" />}Test
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={handleMailboxDisconnect} data-testid="disconnect-mailbox-btn"><Unlink className="w-4 h-4 mr-1" />Disconnect</Button>
-                </>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {!mailboxConnected && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Connect Office 365 Mailbox</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
-              <p className="font-medium text-blue-400 mb-1">Azure AD App Registration Required</p>
-              <p>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps" target="_blank" rel="noreferrer" className="underline text-blue-400">portal.azure.com</a> &gt; App registrations &gt; New registration. Grant <span className="font-mono">Mail.Read, Mail.Send, Mail.ReadWrite</span> permissions.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Tenant ID *</Label>
-                <Input value={mailboxForm.tenant_id} onChange={e => setMailboxForm({ ...mailboxForm, tenant_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="mbx-tenant-id" />
-              </div>
-              <div className="space-y-2">
-                <Label>Client ID (Application ID) *</Label>
-                <Input value={mailboxForm.client_id} onChange={e => setMailboxForm({ ...mailboxForm, client_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="mbx-client-id" />
-              </div>
-              <div className="space-y-2">
-                <Label>Client Secret *</Label>
-                <Input type="password" value={mailboxForm.client_secret} onChange={e => setMailboxForm({ ...mailboxForm, client_secret: e.target.value })} placeholder="Enter client secret" data-testid="mbx-client-secret" />
-              </div>
-              <div className="space-y-2">
-                <Label>Mailbox Email *</Label>
-                <Input type="email" value={mailboxForm.mailbox_email} onChange={e => setMailboxForm({ ...mailboxForm, mailbox_email: e.target.value })} placeholder="support@yourdomain.com" data-testid="mbx-email" />
-              </div>
-            </div>
-            <Button onClick={handleMailboxConnect} disabled={mailboxSaving} data-testid="connect-mailbox-btn">
-              {mailboxSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Zap className="w-4 h-4 mr-1" />}Connect Mailbox
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {mailboxConnected && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base flex items-center gap-2"><UserPlus className="w-5 h-5 text-cyan-400" />Email Routing Rules</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-create leads from emails</p><p className="text-xs text-muted-foreground">New emails from unknown senders create a lead</p></div>
-                <Switch checked={mailboxForm.email_to_lead_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, email_to_lead_enabled: v })} data-testid="email-to-lead-toggle" />
-              </div>
-              <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-create tickets from emails</p><p className="text-xs text-muted-foreground">Emails from known clients create a support ticket</p></div>
-                <Switch checked={mailboxForm.email_to_ticket_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, email_to_ticket_enabled: v })} data-testid="email-to-ticket-toggle" />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-reply to incoming emails</p><p className="text-xs text-muted-foreground">Send acknowledgement through the Platform notices mailbox; automatic senders are skipped.</p></div>
-                <Switch checked={mailboxForm.auto_reply_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, auto_reply_enabled: v })} />
-              </div>
-              {mailboxForm.auto_reply_enabled && (
-                <div className="space-y-2">
-                  <Label>Auto-reply message</Label>
-                  <Textarea value={mailboxForm.auto_reply_message} onChange={e => setMailboxForm({ ...mailboxForm, auto_reply_message: e.target.value })} rows={3} />
-                </div>
-              )}
-              <Button size="sm" onClick={handleMailboxSettingsSave} disabled={mailboxSaving} data-testid="save-mailbox-settings-btn">
-                {mailboxSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}Save Settings
-              </Button>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email-Generated Leads</CardTitle>
-                <Button variant="outline" size="sm" onClick={handleTestIncomingEmail} data-testid="test-email-btn"><TestTube className="w-4 h-4 mr-1" />Send Test Email</Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {emailLeads.length > 0 ? (
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                  {emailLeads.slice(0, 10).map(lead => (
-                    <div key={lead.id} className="flex items-center justify-between p-2.5 rounded-lg bg-muted/30 border border-border/50">
-                      <div><p className="text-sm font-medium">{lead.company_name}</p><p className="text-xs text-muted-foreground">{lead.email} &middot; {lead.contact_name}</p></div>
-                      <Badge variant="outline" className="text-xs">{lead.status}</Badge>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Mail className="w-10 h-10 mx-auto opacity-30 mb-2" />
-                  <p className="text-sm">No email-generated leads yet</p>
-                  <p className="text-xs">Click "Send Test Email" to try it out</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-      </>)}
 
       {/* ==================== NOTIFICATIONS TAB ==================== */}
       {activeTab === "notifications" && (<>
@@ -1435,7 +934,80 @@ export default function SettingsPage() {
       {/* ==================== INTEGRATIONS TAB ==================== */}
       {activeTab === "integrations" && (<>
 
-      <SetupGuideCallout title="Connect integrations safely" source="Every provider has its own credential source and permission model. Use the setup guidance shown in each connection dialog, save only the required credentials, then run its connection test before enabling sync or billing automation." steps={["Create a dedicated service account or API key where the provider supports it.", "Use the minimum permissions needed for the NexusMSP workflow.", "Record the owner and renewal/expiry date in your credential process, then test the connection."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />
+      <section className="overflow-hidden rounded-2xl border border-cyan-500/25 bg-[linear-gradient(135deg,rgba(6,182,212,0.1),rgba(15,23,42,0.34)_52%,rgba(139,92,246,0.07))] shadow-[0_18px_42px_-32px_rgba(34,211,238,0.8)]" data-testid="integration-settings-overview">
+        <div className="border-b border-cyan-500/15 p-5 md:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-200">Connection configuration</Badge>
+                <span className="text-xs font-medium text-muted-foreground">Credentials · approval policy · ownership</span>
+              </div>
+              <div className="mt-3 flex items-start gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10"><Plug className="h-5 w-5 text-cyan-200" /></span>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight">Integration connections</h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">Configure the credential, sender, callback and approval rules that Nexus needs to use a provider. Live health, sync activity, incidents and operational queues stay in the Integration Centre.</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setActiveTab("mailbox")} data-testid="open-mail-delivery-settings"><Mail className="mr-2 h-4 w-4" />Email delivery</Button>
+              <Button onClick={() => navigate("/integrations")} data-testid="open-integrations-command-centre"><Activity className="mr-2 h-4 w-4" />Open Integration Centre</Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 border-b border-cyan-500/10 p-4 md:grid-cols-2 md:p-5">
+          <div className="rounded-xl border border-cyan-500/15 bg-background/40 p-4">
+            <div className="flex items-start gap-3"><Settings2 className="mt-0.5 h-4 w-4 text-cyan-300" /><div><p className="text-sm font-medium">Configure in Settings</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Provider credentials, webhook URLs, default senders, sync policy, approved scopes and commercial approval requirements.</p></div></div>
+          </div>
+          <div className="rounded-xl border border-violet-500/15 bg-background/40 p-4">
+            <div className="flex items-start gap-3"><Activity className="mt-0.5 h-4 w-4 text-violet-300" /><div><p className="text-sm font-medium">Operate in Integration Centre</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Connection health, live provider data, sync outcomes, diagnostics, activity and actions that require technician attention.</p></div></div>
+          </div>
+        </div>
+
+        <div className="space-y-4 p-4 md:p-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div className="w-full xl:max-w-md">
+              <Label htmlFor="integration-connection-search" className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Find a connection</Label>
+              <div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="integration-connection-search" value={integrationSearch} onChange={(event) => setIntegrationSearch(event.target.value)} placeholder="Search providers, billing, security or endpoint…" className="border-cyan-500/15 bg-background/65 pl-9" data-testid="integration-settings-search" /></div>
+            </div>
+            <div className="flex flex-wrap gap-2" aria-label="Filter integration connections">
+              {INTEGRATION_SETTING_CATEGORIES.map((category) => (
+                <Button key={category.id} type="button" size="sm" variant={integrationCategory === category.id ? "default" : "outline"} onClick={() => setIntegrationCategory(category.id)} aria-pressed={integrationCategory === category.id} className={integrationCategory === category.id ? "bg-cyan-500 text-slate-950 hover:bg-cyan-400" : "border-border/70 bg-background/35"}>
+                  {category.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-live="polite" data-testid="integration-settings-connection-list">
+            {visibleIntegrationConnections.map((connection) => {
+              const Icon = connection.icon;
+              const category = INTEGRATION_SETTING_CATEGORIES.find((item) => item.id === connection.category);
+              return (
+                <button key={connection.id} type="button" onClick={() => openIntegrationConnection(connection)} className="group flex min-h-32 items-start gap-3 rounded-xl border border-border/70 bg-background/35 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-cyan-500/35 hover:bg-cyan-500/[0.045]" data-testid={`integration-settings-jump-${connection.id}`}>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/[0.08]"><Icon className="h-4 w-4 text-cyan-200" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start justify-between gap-2"><span className="font-medium text-foreground">{connection.label}</span><ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-cyan-200" /></span>
+                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">{connection.description}</span>
+                    <span className="mt-2 flex flex-wrap items-center gap-1.5"><Badge variant="outline" className={connection.state.className}>{connection.state.label}</Badge><span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{category?.label}</span></span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {visibleIntegrationConnections.length === 0 && <div className="rounded-xl border border-dashed border-border/70 bg-background/25 p-5 text-sm text-muted-foreground" data-testid="integration-settings-search-empty">No connection matches this filter. Clear the search or choose <span className="font-medium text-foreground">All connections</span>.</div>}
+          <p className="text-xs text-muted-foreground">Selecting a connection updates the Settings link so the exact configuration card can be shared or revisited without searching through the page.</p>
+        </div>
+      </section>
+
+      <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-muted/[0.18] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-sm font-medium">Connection details</p><p className="mt-1 text-xs text-muted-foreground">Save and test provider credentials below. Test outcomes are evidence of a connection check, not permission to perform commercial or security-sensitive actions.</p></div>
+        <Badge variant="outline" className="w-fit border-border/70 text-muted-foreground">{integrationConnections.length} connection settings</Badge>
+      </div>
+
+      <SetupGuideCallout title="Before you save a provider" source="Each provider has its own credential source and permission model. This page stores configuration; the Integration Centre shows operational status after a connection is in place." steps={["Use a dedicated service account or API key where the provider supports it.", "Grant only the permissions needed for the NexusMSP workflow.", "Record the credential owner and renewal/expiry date, then run the connection test before enabling sync or billing automation."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />
 
       <Card id="supabase-storage-card" className="border-cyan-500/20 bg-[linear-gradient(120deg,rgba(6,182,212,0.08),transparent_55%)]" data-testid="supabase-storage-card">
         <CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2"><Cloud className="h-5 w-5 text-cyan-300" /><div><CardTitle>Private Artifact Storage</CardTitle><CardDescription className="mt-1">Nexus retains generated documents, customer files and ticket evidence privately through Supabase Storage.</CardDescription></div></div><Badge variant="outline" className={artifactStorage.ready ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}>{artifactStorage.ready ? "Ready" : artifactStorage.configured ? "Needs attention" : "Not configured"}</Badge></div></CardHeader>
@@ -1961,6 +1533,12 @@ export default function SettingsPage() {
               <Badge variant="outline" className="text-[10px]">Synced: {new Date(huntress.last_synced_at).toLocaleString()}</Badge>
             )}
           </div>
+          {unifi.migration_required && (
+            <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-100" data-testid="unifi-migration-required">
+              <p className="font-semibold">Credential re-save required</p>
+              <p className="mt-1 text-amber-100/80">This legacy UniFi Site Manager connection is not yet bound to this Nexus tenant. Re-enter its current API key and save it once to encrypt and bind it before using site data or actions.</p>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <Label>API Key</Label>
@@ -2093,27 +1671,27 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Nexus Control Plane Microsoft tenant provider */}
+      {/* Optional CIPP compatibility adapter. Nexus Control Plane is the primary technician experience. */}
       <Card id="cipp-settings-card" data-testid="cipp-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-cyan-400" />
-            <CardTitle>Nexus Control Plane · Microsoft 365 provider</CardTitle>
+            <CardTitle>Microsoft compatibility adapter · advanced</CardTitle>
           </div>
           <CardDescription>
-            Connect the Microsoft tenant provider used by Nexus Control Plane to manage tenants, users,
-            licences, security posture and offboarding from NexusMSP.
+            Use an existing CIPP deployment as an optional execution adapter while Nexus Control Plane remains the single technician workspace for tenant setup, discovery, evidence and governed actions.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SetupGuideCallout title="Connect the Microsoft tenant provider" source="Use the Azure Function base URL and a dedicated function host key from your existing hosted tenant-management provider." steps={["Confirm the provider URL ends in /api.", "Create a dedicated host key for NexusMSP instead of reusing a general administrator key.", "Save and test the connection, then confirm the expected tenant list in Nexus Control Plane before enabling technician actions."]} securityNote="This key can perform high-impact Microsoft 365 actions. Store it only in NexusMSP, restrict provider permissions, and rotate it after any suspected exposure." />
+          <div className="flex flex-col gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="text-sm font-medium">Start in Nexus Control Plane</p><p className="mt-1 text-xs text-muted-foreground">Connect Partner Center, discover tenants, confirm the client relationship, then verify GDAP or consent before turning on operational work.</p></div>
+            <Button variant="outline" size="sm" onClick={() => navigate("/control-plane?module=microsoft365&view=connections")}>Open tenant setup</Button>
+          </div>
+          <SetupGuideCallout title="Configure the optional CIPP adapter" source="Use the Azure Function base URL and a dedicated function host key from your existing hosted CIPP deployment." steps={["Confirm the provider URL ends in /api.", "Create a dedicated host key for NexusMSP instead of reusing a general administrator key.", "Save and test the adapter, then confirm the expected tenant list in Nexus Control Plane before enabling technician actions."]} securityNote="This key can perform high-impact Microsoft 365 actions. Store it only in NexusMSP, restrict provider permissions, and rotate it after any suspected exposure." />
           <div className="flex items-center gap-2 flex-wrap">
             <Badge className={cipp.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="cipp-status-badge">
               {cipp.configured ? "Configured" : "Not Configured"}
             </Badge>
-            {cipp.api_key_preview && (
-              <Badge variant="outline" className="font-mono text-[10px]">Key: {cipp.api_key_preview}</Badge>
-            )}
             {cipp.last_test_status && (
               <Badge variant="outline" className="text-[10px]">Last test: {cipp.last_test_status}</Badge>
             )}
@@ -2202,7 +1780,7 @@ export default function SettingsPage() {
                   setCippBusy(true);
                   try {
                     await axios.delete(`${API}/cipp/settings`, { headers });
-                    setCipp({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    setCipp({ base_url: "", api_key: "", configured: false, last_test_status: null, last_tested_at: null, last_synced_at: null });
                     toast.success("Microsoft tenant provider credentials removed");
                   } catch (e) { toast.error(e.response?.data?.detail || e.message); }
                   finally { setCippBusy(false); }
@@ -2292,7 +1870,7 @@ export default function SettingsPage() {
               disabled={unifiBusy}
               data-testid="unifi-save-btn"
             >
-              {unifiBusy ? "Saving..." : "Save credentials"}
+              {unifiBusy ? "Saving..." : unifi.migration_required ? "Bind and save credentials" : "Save credentials"}
             </Button>
             <Button
               variant="outline"
@@ -2320,7 +1898,7 @@ export default function SettingsPage() {
                   setUnifiBusy(true);
                   try {
                     await axios.delete(`${API}/unifi/settings`, { headers });
-                    setUnifi({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    setUnifi({ base_url: "", api_key: "", configured: false, migration_required: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
                     toast.success("UniFi credentials removed");
                   } catch (e) { toast.error(e.response?.data?.detail || e.message); }
                   finally { setUnifiBusy(false); }
@@ -2361,6 +1939,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between gap-4"><div><Label htmlFor="nexus-elevate-companion">Automatically activate on eligible agents</Label><p className="text-[11px] text-muted-foreground mt-1">When a Windows Nexus Agent enrols or checks in, Nexus automatically delivers the signed Client Chat + Elevate companion. The device shows active only after the agent verifies installation.</p></div><Switch id="nexus-elevate-companion" checked={nexusElevate.auto_deploy_companion !== false} onCheckedChange={(checked) => setNexusElevate({ ...nexusElevate, auto_deploy_companion: checked })} /></div>
             <div className="flex items-center justify-between gap-4"><div><Label htmlFor="nexus-elevate-justification">Require request justification</Label><p className="text-[11px] text-muted-foreground mt-1">Captures why elevation is needed before an approver sees it.</p></div><Switch id="nexus-elevate-justification" checked={nexusElevate.require_justification} onCheckedChange={(checked) => setNexusElevate({ ...nexusElevate, require_justification: checked })} /></div>
             <div><Label htmlFor="nexus-elevate-duration">Maximum approval duration (minutes)</Label><Input id="nexus-elevate-duration" className="mt-1" type="number" min="5" max="60" value={nexusElevate.max_duration_minutes} onChange={(event) => setNexusElevate({ ...nexusElevate, max_duration_minutes: event.target.value })} /></div>
+            <div><Label htmlFor="nexus-elevate-review-sla">Approval review SLA (minutes)</Label><Input id="nexus-elevate-review-sla" className="mt-1" type="number" min="5" max="120" value={nexusElevate.approval_sla_minutes} onChange={(event) => setNexusElevate({ ...nexusElevate, approval_sla_minutes: event.target.value })} /><p className="mt-1 text-[11px] text-muted-foreground">When overdue, Nexus alerts active tenant-scoped on-call contacts. This is routing only; approvals still require the Elevate operator permission.</p></div>
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2 text-xs text-muted-foreground"><span className="font-semibold text-emerald-200">Built-in safety:</span> a native request is bound to its endpoint, absolute executable path, argv, expiry and SHA-256. It cannot self-approve or open a command shell.</div>
           </div>
           <div className="flex flex-col gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 md:flex-row md:items-center md:justify-between"><div><p className="text-sm font-semibold text-emerald-100">Policy controls are managed in Nexus Elevate</p><p className="mt-1 text-[11px] text-muted-foreground">Create customer or endpoint-scoped rules, simulate their result, then enforce only exact executable and SHA-256 decisions. Local-admin removal remains deliberately unavailable until endpoint recovery safeguards are ready.</p></div><Button variant="outline" className="shrink-0" onClick={() => navigate("/nexus-elevate")}><ShieldCheck className="mr-2 h-4 w-4" />Manage policies</Button></div>
@@ -2371,7 +1950,7 @@ export default function SettingsPage() {
           <div className="flex gap-2 justify-end flex-wrap">
             <Button variant="outline" onClick={() => navigate("/help/nexus-elevate-setup")}><BookOpen className="mr-2 h-4 w-4" />Technician guide</Button>
             <Button variant="outline" onClick={() => navigate("/nexus-elevate")}><ShieldCheck className="mr-2 h-4 w-4" />Open approval queue</Button>
-            <Button onClick={async () => { setNexusElevateSaving(true); try { const response = await axios.put(`${API}/nexus-elevate/settings`, { ...nexusElevate, max_duration_minutes: Number(nexusElevate.max_duration_minutes), keeper_sync_interval_minutes: Number(nexusElevate.keeper_sync_interval_minutes) }, { headers }); setNexusElevate(prev => ({ ...prev, ...response.data })); toast.success("Nexus Elevate settings saved"); } catch (error) { toast.error(error.response?.data?.detail || "Could not save Nexus Elevate settings"); } finally { setNexusElevateSaving(false); } }} disabled={nexusElevateSaving} data-testid="save-nexus-elevate-settings-btn">{nexusElevateSaving ? "Saving..." : "Save elevation policy"}</Button>
+            <Button onClick={async () => { setNexusElevateSaving(true); try { const response = await axios.put(`${API}/nexus-elevate/settings`, { ...nexusElevate, max_duration_minutes: Number(nexusElevate.max_duration_minutes), approval_sla_minutes: Number(nexusElevate.approval_sla_minutes), keeper_sync_interval_minutes: Number(nexusElevate.keeper_sync_interval_minutes) }, { headers }); setNexusElevate(prev => ({ ...prev, ...response.data })); toast.success("Nexus Elevate settings saved"); } catch (error) { toast.error(error.response?.data?.detail || "Could not save Nexus Elevate settings"); } finally { setNexusElevateSaving(false); } }} disabled={nexusElevateSaving} data-testid="save-nexus-elevate-settings-btn">{nexusElevateSaving ? "Saving..." : "Save elevation policy"}</Button>
           </div>
         </CardContent>
       </Card>
@@ -2774,16 +2353,6 @@ export default function SettingsPage() {
       {activeTab === "channel" && (
         <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading channel mode...</div>}>
           <LazyChannelMode />
-        </Suspense>
-      )}
-      {activeTab === "tokens" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading API tokens...</div>}>
-          <LazyApiTokens />
-        </Suspense>
-      )}
-      {activeTab === "twofa" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading 2FA settings...</div>}>
-          <LazySecurity2FA />
         </Suspense>
       )}
       {activeTab === "comms" && (

@@ -18,6 +18,9 @@ import HeroTile from "@/components/HeroTile";
 import EventBackbonePanel from "@/components/control-plane/EventBackbonePanel";
 import MicrosoftActionCentre from "@/components/control-plane/MicrosoftActionCentre";
 import MicrosoftCapabilityMap from "@/components/control-plane/MicrosoftCapabilityMap";
+import FrictionRadarCard from "@/components/flow/FrictionRadarCard";
+import WishEngineCard from "@/components/control-plane/WishEngineCard";
+import ForgeDesignCard from "@/components/control-plane/ForgeDesignCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 
 const OPERATIONS_MODULES = [
-  { id: "microsoft365", label: "Microsoft 365", description: "Tenants, identity, Exchange, Intune, Defender, licensing and security.", icon: Cloud, route: "/control-plane?module=microsoft365", tone: "cyan" },
+  { id: "microsoft365", label: "Microsoft 365", description: "Set up customer tenants, then manage identity, Exchange, Intune, Defender, licensing and security.", icon: Cloud, route: "/control-plane?module=microsoft365&view=connections", tone: "cyan" },
   { id: "azure", label: "Azure", description: "Cloud connection readiness, tenant evidence and infrastructure operations.", icon: Server, route: "/settings?tab=integrations", tone: "sky" },
   { id: "voice", label: "Voice", description: "Yeastar PBXs, extensions, client mappings, synchronisation and billing.", icon: Phone, route: "/voice", tone: "violet" },
   { id: "backups", label: "Backups", description: "Protection coverage, restore verification, compliance and client billing.", icon: HardDrive, route: "/backup-center", tone: "emerald" },
@@ -202,10 +205,10 @@ export default function NexusControlPlanePage() {
   const stats = overview?.stats || {};
   const nextAction = !stats.m365_tenants
     ? {
-      label: "Connect the first Microsoft tenant",
-      description: "Microsoft 365 is not yet in the verified control scope, so tenant actions and identity evidence remain unavailable.",
-      route: "/settings?tab=integrations&anchor=cipp-settings-card",
-      action: "Open Microsoft connection",
+      label: "Set up Microsoft tenant operations",
+      description: "Connect Partner Center once, discover customer tenants, map them to Nexus clients, then verify least-privilege access before technician actions are enabled.",
+      route: "/control-plane?module=microsoft365&view=connections",
+      action: "Open tenant setup",
       tone: "amber",
     }
     : stats.open_tickets > 0
@@ -244,7 +247,7 @@ export default function NexusControlPlanePage() {
             <Sparkles className="mr-1.5 h-3.5 w-3.5" />Operations fabric
           </Badge>
           <Button variant="outline" size="sm" asChild>
-            <Link to="/settings?tab=integrations"><Settings className="mr-1.5 h-3.5 w-3.5" />Connections</Link>
+            <Link to="/control-plane?module=microsoft365&view=connections"><Settings className="mr-1.5 h-3.5 w-3.5" />Microsoft setup</Link>
           </Button>
           <Button variant="outline" size="sm" onClick={loadOverview} disabled={loading}>
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh
@@ -354,17 +357,17 @@ export default function NexusControlPlanePage() {
         <TabsContent value="microsoft365" className="space-y-4">
           <Card className="border-cyan-500/20 bg-cyan-500/[0.035]">
             <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-              <div><p className="text-sm font-semibold">Microsoft 365 control module</p><p className="mt-1 text-xs text-muted-foreground">Tenant administration and provider-verified security evidence now share one Microsoft workspace.</p></div>
+              <div><p className="text-sm font-semibold">Nexus 365 · one Microsoft operating surface</p><p className="mt-1 text-xs text-muted-foreground">Start with tenant setup, then move into the tenant directory, governed actions and evidence—without switching to a separate CIPP workspace.</p></div>
               <div className="flex flex-wrap rounded-lg border border-border/70 bg-black/15 p-1">
-                <Button size="sm" variant={microsoftView === "capabilities" ? "default" : "ghost"} onClick={() => selectMicrosoftView("capabilities")}>Nexus 365</Button>
-                <Button size="sm" variant={microsoftView === "tenant-operations" ? "default" : "ghost"} onClick={() => selectMicrosoftView("tenant-operations")}>Tenant operations</Button>
+                <Button size="sm" variant={microsoftView === "connections" ? "default" : "ghost"} onClick={() => selectMicrosoftView("connections")}>Tenant setup</Button>
+                <Button size="sm" variant={microsoftView === "tenant-operations" ? "default" : "ghost"} onClick={() => selectMicrosoftView("tenant-operations")}>Tenant directory</Button>
                 <Button size="sm" variant={microsoftView === "actions" ? "default" : "ghost"} onClick={() => selectMicrosoftView("actions")}>Action centre</Button>
                 <Button size="sm" variant={microsoftView === "security" ? "default" : "ghost"} onClick={() => selectMicrosoftView("security")}>Security & guardrails</Button>
-                <Button size="sm" variant={microsoftView === "connections" ? "default" : "ghost"} onClick={() => selectMicrosoftView("connections")}>Connections</Button>
+                <Button size="sm" variant={microsoftView === "capabilities" ? "default" : "ghost"} onClick={() => selectMicrosoftView("capabilities")}>Capability map</Button>
               </div>
             </CardContent>
           </Card>
-          {microsoftView === "capabilities" && <MicrosoftCapabilityMap providerConnected={Boolean(overview?.compatibility?.cipp_adapter_configured || overview?.compatibility?.m365_graph_configured)} tenantCount={stats.m365_tenants ?? 0} />}
+          {microsoftView === "capabilities" && <MicrosoftCapabilityMap partnerCenterConfigured={Boolean(overview?.compatibility?.partner_center_configured || overview?.compatibility?.m365_graph_configured)} cippAdapterConfigured={Boolean(overview?.compatibility?.cipp_adapter_configured)} tenantCount={overview?.compatibility?.m365_linked_tenant_count ?? stats.m365_tenants ?? 0} evidenceTenantCount={overview?.compatibility?.m365_evidence_tenant_count ?? 0} />}
           {microsoftView === "tenant-operations" && <CippCommandCenterPage embedded />}
           {microsoftView === "actions" && <MicrosoftActionCentre />}
           {microsoftView === "security" && <M365CommandCenter embedded initialTab="security" />}
@@ -611,7 +614,13 @@ function FoundationPanel({ data, loading, reload, rebuildCore, coreRebuilding, h
 
       <ProductRoadmapBoard roadmap={data.roadmap} />
 
+      <FrictionRadarCard headers={headers} onChanged={reload} />
+
+      <WishEngineCard headers={headers} onChanged={reload} />
+
       <IdeaVault registry={data.idea_registry} headers={headers} onChanged={reload} />
+
+      <ForgeDesignCard headers={headers} onChanged={reload} />
 
       <EventBackbonePanel contract={data.event_contract} />
 

@@ -27,7 +27,7 @@
     "backend": "100%",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required - used existing data",
   "retest_needed": false,
   "should_main_agent_self_test": false,

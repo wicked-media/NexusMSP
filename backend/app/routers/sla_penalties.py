@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends
 from app.database import db
 from app.auth import get_current_user
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/sla-penalties", tags=["SLA Penalties"])
 
 @router.get("/dashboard")
 async def get_sla_penalty_dashboard(user=Depends(get_current_user)):
-    contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(200)
     breaches = await db.sla_breaches.find({}, {"_id": 0}).sort("breached_at", -1).to_list(500)
     penalties = await db.sla_penalties.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
     

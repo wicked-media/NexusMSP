@@ -9,25 +9,58 @@ Backup/Sec:     restore drills, cyber insurance vault
 Team:           skills XP bank, 1:1 auto-agenda
 Cross-cutting:  voice morning brief (text), runbook publish
 """
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+import asyncio
 import os
 import re
 import json
 import uuid
 import httpx
+import math
 from typing import Optional
 
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_record_scope, scoped_query
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
 MODEL_PROVIDER = "openai"
 MODEL_NAME = "gpt-5.6-terra"
+
+
+async def _client_in_tenant_scope(
+    client_id: str,
+    current_user: dict,
+    operation: str,
+    projection: dict | None = None,
+) -> dict:
+    """Load one client from the caller's tenant before exposing derived insight."""
+    client = await db.clients.find_one(
+        tenant_scoped_query(current_user, {"id": str(client_id)}),
+        projection or {"_id": 0},
+    )
+    if not client:
+        raise HTTPException(404, "Client not found")
+    await assert_client_scope(
+        current_user,
+        str(client.get("id") or client_id),
+        operation=operation,
+        mask_not_found=True,
+    )
+    return client
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "mega") -> str:
@@ -70,12 +103,54 @@ def _parse_iso(s) -> Optional[datetime]:
         return None
 
 
+def _safe_number(value: object, default: float = 0.0) -> float:
+    """Return finite operational numeric data without turning one bad record into a 500."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    """Coerce historical telemetry defensively for read-only insight calculations."""
+    return int(_safe_number(value, float(default)))
+
+
+def _dedupe_team_members(records: list[dict]) -> list[dict]:
+    """Return one operational workload subject per stable Nexus technician identity.
+
+    Older seed/import paths can contain repeated user documents.  The Insights
+    read model must never make duplicated records look like separate people or
+    inflate the technician-load summary.  Sparse fields are merged without
+    mutating the persisted source documents.
+    """
+    canonical: dict[str, dict] = {}
+    order: list[str] = []
+    for record in records:
+        technician_id = str(record.get("id") or "").strip()
+        email = str(record.get("email") or "").strip().lower()
+        name = str(record.get("name") or "").strip().lower()
+        key = technician_id or email or name
+        if not key:
+            continue
+        if key not in canonical:
+            canonical[key] = dict(record)
+            order.append(key)
+            continue
+        existing = canonical[key]
+        for field, value in record.items():
+            if value not in (None, "", [], {}) and existing.get(field) in (None, "", [], {}):
+                existing[field] = value
+    return [canonical[key] for key in order]
+
+
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 1. TICKET DOPPELGÃ„NGER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.get("/tickets/{ticket_id}/doppelganger")
 async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Find similar resolved tickets within the technician's permitted scope."""
-    target = await assert_record_scope(
+    target = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -92,14 +167,15 @@ async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_c
 
     regex = "|".join(re.escape(k) for k in keywords)
     candidates = await db.tickets.find(
-        scoped_query(current_user, {
-            "id": {"$ne": ticket_id},
-            "status": {"$in": ["resolved", "closed"]},
-            "$or": [
-                {"title": {"$regex": regex, "$options": "i"}},
-                {"description": {"$regex": regex, "$options": "i"}},
-            ],
-        }),
+        scoped_query(current_user, tenant_scoped_query(current_user, {
+                "id": {"$ne": ticket_id},
+                "status": {"$in": ["resolved", "closed"]},
+                "$or": [
+                    {"title": {"$regex": regex, "$options": "i"}},
+                    {"description": {"$regex": regex, "$options": "i"}},
+                ],
+            }),
+        ),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1,
          "category": 1, "priority": 1, "resolved_at": 1, "resolution_notes": 1, "description": 1},
     ).limit(40).to_list(40)
@@ -147,12 +223,35 @@ async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_c
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 2. TICKET TIME MACHINE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+def _timeline_audit_event(entry: dict) -> dict:
+    """Present both current and legacy audit formats without inventing change data."""
+    action = str(entry.get("action") or "").strip()
+    details = str(entry.get("details") or "").strip()
+    if action:
+        return {
+            "type": "status_change" if action == "updated" and "status:" in details else "audit",
+            "icon": "shuffle",
+            "label": details or action.replace("_", " ").capitalize(),
+        }
+
+    field = str(entry.get("field") or "field")
+    return {
+        "type": "status_change" if field == "status" else "audit",
+        "icon": "shuffle",
+        "label": f"{field}: {entry.get('old_value', '—')} → {entry.get('new_value', '—')}",
+    }
+
+
 @router.get("/tickets/{ticket_id}/timeline")
 async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Aggregate notes, status changes, sentiment events, time entries into one chronological feed."""
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Ticket not found")
+    t = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.timeline.read",
+        resource_name="Ticket",
+    )
 
     events = []
 
@@ -164,8 +263,22 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
         "actor": t.get("created_by_name") or "system",
     })
 
-    notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
-    for n in notes:
+    comments, legacy_notes, audit = await asyncio.gather(
+        db.ticket_comments.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+        ).sort("created_at", 1).to_list(200),
+        db.ticket_notes.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+        ).sort("created_at", 1).to_list(200),
+        db.ticket_audit_log.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+        ).sort("created_at", 1).to_list(200),
+    )
+    notes_by_id = {
+        str(note.get("id") or f"legacy:{index}"): note
+        for index, note in enumerate([*comments, *legacy_notes])
+    }
+    for n in notes_by_id.values():
         events.append({
             "ts": n.get("created_at"),
             "type": "internal_note" if n.get("is_internal") else "comment",
@@ -174,13 +287,11 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
             "actor": n.get("author") or n.get("user_name") or "?",
         })
 
-    audit = await db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
     for a in audit:
+        presentation = _timeline_audit_event(a)
         events.append({
             "ts": a.get("created_at") or a.get("timestamp"),
-            "type": "status_change" if a.get("field") == "status" else "audit",
-            "icon": "shuffle",
-            "label": f"{a.get('field','field')}: {a.get('old_value','â€”')} â†’ {a.get('new_value','â€”')}",
+            **presentation,
             "actor": a.get("user_name") or a.get("changed_by") or "system",
         })
 
@@ -237,12 +348,36 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
 @router.post("/tickets/{ticket_id}/apology-draft")
 async def apology_draft(ticket_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     """Generate a context-aware apology + makegood email."""
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Ticket not found")
-
-    notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0, "body": 1, "author": 1}).sort("created_at", -1).limit(10).to_list(10)
-    convo = "\n".join([f"  {n.get('author','?')}: {(n.get('body') or '')[:200]}" for n in notes])
+    t = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.apology_draft.create",
+        resource_name="Ticket",
+    )
+    comments, legacy_notes = await asyncio.gather(
+        db.ticket_comments.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+            {"_id": 0, "id": 1, "content": 1, "user_name": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(10).to_list(10),
+        db.ticket_notes.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+            {"_id": 0, "id": 1, "body": 1, "author": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(10).to_list(10),
+    )
+    notes_by_id = {
+        str(note.get("id") or f"legacy:{index}"): note
+        for index, note in enumerate([*comments, *legacy_notes])
+    }
+    notes = sorted(
+        notes_by_id.values(),
+        key=lambda note: str(note.get("created_at") or ""),
+        reverse=True,
+    )[:10]
+    convo = "\n".join(
+        f"  {n.get('author') or n.get('user_name') or '?'}: {(n.get('body') or n.get('content') or '')[:200]}"
+        for n in notes
+    )
 
     breached = False
     sla_due = _parse_iso(t.get("sla_due_at"))
@@ -282,12 +417,9 @@ async def apology_draft(ticket_id: str, payload: dict = Body(default={}), curren
 
 @router.get("/team/cognitive-load")
 async def cognitive_load(current_user: dict = Depends(get_current_user)):
-    """Per-tech burnout score (0-100) based on open ticket pressure."""
-    techs = await db.users.find({"role": {"$in": ["technician", "admin", "tech", "engineer"]}},
-                                {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}).to_list(200)
-
+    """Per-tech workload score based only on tickets visible to the caller."""
     open_tx = await db.tickets.find(
-        {"status": {"$in": ["open", "in_progress", "pending", "waiting"]}},
+        scoped_query(current_user, {"status": {"$in": ["open", "in_progress", "pending", "waiting"]}}),
         {"_id": 0, "assignee_id": 1, "assignee_name": 1, "priority": 1,
          "created_at": 1, "sla_due_at": 1, "ticket_number": 1, "title": 1}
     ).to_list(2000)
@@ -298,6 +430,24 @@ async def cognitive_load(current_user: dict = Depends(get_current_user)):
             by_tech[t["assignee_id"]].append(t)
         elif t.get("assignee_name"):
             by_tech[t["assignee_name"]].append(t)
+
+    tech_query = {"role": {"$in": ["technician", "admin", "tech", "engineer"]}}
+    if effective_scope(current_user)["mode"] != "all":
+        assignee_ids = sorted({str(ticket["assignee_id"]) for ticket in open_tx if ticket.get("assignee_id")})
+        assignee_names = sorted({str(ticket["assignee_name"]) for ticket in open_tx if ticket.get("assignee_name")})
+        identity_clauses = []
+        if assignee_ids:
+            identity_clauses.append({"id": {"$in": assignee_ids}})
+        if assignee_names:
+            identity_clauses.append({"name": {"$in": assignee_names}})
+        if not identity_clauses:
+            return {"team": [], "generated_at": _now().isoformat()}
+        tech_query["$or"] = identity_clauses
+
+    techs = _dedupe_team_members(await db.users.find(
+        tech_query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1},
+    ).to_list(200))
 
     rows = []
     for tech in techs:
@@ -334,13 +484,11 @@ async def cognitive_load(current_user: dict = Depends(get_current_user)):
 @router.get("/clients/{client_id}/dna")
 async def client_dna(client_id: str, current_user: dict = Depends(get_current_user)):
     """Behavioural profile aggregated from tickets, invoices, comms history."""
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not c:
-        raise HTTPException(404, "Client not found")
+    c = await _client_in_tenant_scope(client_id, current_user, "client.dna.read")
 
-    tx = await db.tickets.find({"client_id": client_id}, {"_id": 0, "priority": 1, "category": 1,
+    tx = await db.tickets.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "priority": 1, "category": 1,
                                                           "created_at": 1, "resolved_at": 1, "title": 1}).limit(500).to_list(500)
-    inv = await db.invoices.find({"client_id": client_id}, {"_id": 0, "issue_date": 1, "due_date": 1,
+    inv = await db.invoices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "issue_date": 1, "due_date": 1,
                                                             "amount_paid": 1, "total": 1, "payments": 1, "status": 1}).limit(200).to_list(200)
 
     pay_days = []
@@ -408,20 +556,23 @@ def _dna_tags(crit_pct: int, avg_pay: Optional[float], tix: int) -> list:
 @router.get("/clients/{client_id}/ltv-forecast")
 async def ltv_forecast(client_id: str, current_user: dict = Depends(get_current_user)):
     """12-month MRR-driven LTV with churn risk weighting."""
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1, "mrr": 1})
-    if not c:
-        raise HTTPException(404, "Client not found")
+    c = await _client_in_tenant_scope(
+        client_id,
+        current_user,
+        "client.ltv_forecast.read",
+        {"_id": 0, "id": 1, "name": 1, "mrr": 1},
+    )
 
     mrr = float(c.get("mrr") or 0)
 
     last_year = (_now() - timedelta(days=365)).isoformat()
     inv = await db.invoices.find(
-        {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}},
+        tenant_scoped_query(current_user, {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}}),
         {"_id": 0, "total": 1}
     ).limit(200).to_list(200)
     annual_revenue_actual = round(sum(float(x.get("total") or 0) for x in inv), 2)
 
-    cr = await db.churn_risk.find_one({"client_id": client_id}, {"_id": 0, "score": 1}) or {}
+    cr = await db.churn_risk.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "score": 1}) or {}
     churn_score = float(cr.get("score") or 25)
     survival = max(0.0, 1 - churn_score / 100)
 
@@ -446,19 +597,17 @@ async def ltv_forecast(client_id: str, current_user: dict = Depends(get_current_
 
 @router.get("/clients/{client_id}/anniversary-draft")
 async def anniversary_draft(client_id: str, current_user: dict = Depends(get_current_user)):
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not c:
-        raise HTTPException(404, "Client not found")
+    c = await _client_in_tenant_scope(client_id, current_user, "client.anniversary_draft.read")
 
     onboarded = _parse_iso(c.get("onboarded_at") or c.get("created_at"))
     years = round((_now() - onboarded).days / 365, 1) if onboarded else 0
 
-    tickets_resolved = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["resolved", "closed"]}})
-    devices = await db.devices.count_documents({"client_id": client_id})
+    tickets_resolved = await db.tickets.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "status": {"$in": ["resolved", "closed"]}}))
+    devices = await db.devices.count_documents(tenant_scoped_query(current_user, {"client_id": client_id}))
 
     last_year = (_now() - timedelta(days=365)).isoformat()
     inv = await db.invoices.find(
-        {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}},
+        tenant_scoped_query(current_user, {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}}),
         {"_id": 0, "total": 1}
     ).limit(200).to_list(200)
     revenue_12m = round(sum(float(x.get("total") or 0) for x in inv), 2)
@@ -632,7 +781,7 @@ async def reminder_strategy(invoice_id: str, current_user: dict = Depends(get_cu
 async def aged_ar_heatmap(current_user: dict = Depends(get_current_user)):
     """Bucket every unpaid invoice by days outstanding."""
     rows = await db.invoices.find(
-        {"status": {"$in": ["sent", "overdue", "partial"]}},
+        scoped_query(current_user, {"status": {"$in": ["sent", "overdue", "partial"]}}),
         {"_id": 0, "id": 1, "invoice_number": 1, "client_id": 1, "client_name": 1,
          "due_date": 1, "issue_date": 1, "total": 1, "amount_paid": 1}
     ).limit(500).to_list(500)
@@ -643,7 +792,7 @@ async def aged_ar_heatmap(current_user: dict = Depends(get_current_user)):
 
     for r in rows:
         due = _parse_iso(r.get("due_date"))
-        balance = float(r.get("total") or 0) - float(r.get("amount_paid") or 0)
+        balance = _safe_number(r.get("total")) - _safe_number(r.get("amount_paid"))
         if balance <= 0:
             continue
         days = (now - due).days if due else 0
@@ -770,7 +919,7 @@ async def health_trajectory(client_id: Optional[str] = None, current_user: dict 
         q["client_id"] = client_id
 
     devices = await db.devices.find(
-        q,
+        scoped_query(current_user, q),
         {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1,
          "purchase_date": 1, "warranty_expiry": 1, "device_type": 1, "status": 1, "last_seen": 1, "errors_count": 1}
     ).limit(2000).to_list(2000)
@@ -782,7 +931,7 @@ async def health_trajectory(client_id: Optional[str] = None, current_user: dict 
         warranty = _parse_iso(d.get("warranty_expiry"))
         age_days = (now - purchased).days if purchased else None
         warranty_left = (warranty - now).days if warranty else None
-        errors = int(d.get("errors_count") or 0)
+        errors = _safe_int(d.get("errors_count"))
 
         score = 0
         if age_days is not None:
@@ -836,10 +985,10 @@ async def health_trajectory(client_id: Optional[str] = None, current_user: dict 
 
 @router.get("/patches/anomalies")
 async def patch_anomalies(current_user: dict = Depends(get_current_user)):
-    """Cross-tenant: which patch IDs have caused tickets at 3+ clients."""
+    """Patch IDs causing repeat tickets across clients visible to the caller."""
     since = (_now() - timedelta(days=60)).isoformat()
     tx = await db.tickets.find(
-        {"created_at": {"$gte": since}},
+        scoped_query(current_user, {"created_at": {"$gte": since}}),
         {"_id": 0, "id": 1, "title": 1, "description": 1, "client_id": 1, "client_name": 1, "ticket_number": 1, "created_at": 1}
     ).limit(2000).to_list(2000)
 
@@ -883,7 +1032,7 @@ async def patch_anomalies(current_user: dict = Depends(get_current_user)):
 async def battery_wall(current_user: dict = Depends(get_current_user)):
     """Top 20 laptops with degraded batteries."""
     devices = await db.devices.find(
-        {"$or": [{"device_type": "laptop"}, {"device_type": "notebook"}, {"form_factor": "laptop"}]},
+        scoped_query(current_user, {"$or": [{"device_type": "laptop"}, {"device_type": "notebook"}, {"form_factor": "laptop"}]}),
         {"_id": 0, "id": 1, "name": 1, "client_name": 1, "battery_health": 1, "battery_cycles": 1,
          "purchase_date": 1, "device_type": 1}
     ).limit(500).to_list(500)
@@ -892,7 +1041,7 @@ async def battery_wall(current_user: dict = Depends(get_current_user)):
     rows = []
     for d in devices:
         bh = d.get("battery_health")
-        cycles = int(d.get("battery_cycles") or 0)
+        cycles = _safe_int(d.get("battery_cycles"))
         purchased = _parse_iso(d.get("purchase_date"))
         age_days = (now - purchased).days if purchased else None
 
@@ -904,7 +1053,7 @@ async def battery_wall(current_user: dict = Depends(get_current_user)):
             bh = inferred
             inferred_flag = True
         else:
-            bh = int(bh)
+            bh = _safe_int(bh, default=100)
             inferred_flag = False
 
         if bh < 80:
@@ -1010,7 +1159,7 @@ def _insurance_metric(key: str, label: str, devices: list[dict], matcher, detail
     }
 
 
-async def _collect_insurance_evidence(client_id: Optional[str] = None) -> dict:
+async def _collect_insurance_evidence(current_user: dict, client_id: Optional[str] = None) -> dict:
     """Collect only observed evidence for a cyber-insurance review.
 
     This is deliberately an evidence-readiness snapshot, not an assertion that
@@ -1018,11 +1167,14 @@ async def _collect_insurance_evidence(client_id: Optional[str] = None) -> dict:
     """
     client = None
     if client_id:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+        client = await db.clients.find_one(
+            scoped_query(current_user, {"id": client_id}, field="id", site_field=None),
+            {"_id": 0, "id": 1, "name": 1},
+        )
         if not client:
-            raise HTTPException(status_code=404, detail="Client not found")
+            raise HTTPException(status_code=404, detail="Resource not found")
 
-    query = {"client_id": client_id} if client_id else {}
+    query = scoped_query(current_user, {"client_id": client_id} if client_id else {})
     devices = await db.devices.find(
         query,
         {"_id": 0, "id": 1, "mfa_enabled": 1, "mfa_enrolled": 1, "edr_installed": 1,
@@ -1115,7 +1267,7 @@ async def _collect_insurance_evidence(client_id: Optional[str] = None) -> dict:
 
 @router.get("/security/insurance-vault")
 async def insurance_vault(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    return await _collect_insurance_evidence(client_id)
+    return await _collect_insurance_evidence(current_user, client_id)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 18. SKILLS XP BANK â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1124,7 +1276,7 @@ async def insurance_vault(client_id: Optional[str] = None, current_user: dict = 
 async def skills_xp(current_user: dict = Depends(get_current_user)):
     """Per-tech XP per skill, computed from closed tickets."""
     closed = await db.tickets.find(
-        {"status": {"$in": ["resolved", "closed"]}},
+        scoped_query(current_user, {"status": {"$in": ["resolved", "closed"]}}),
         {"_id": 0, "assignee_id": 1, "assignee_name": 1, "category": 1, "tags": 1, "priority": 1}
     ).limit(5000).to_list(5000)
 
@@ -1210,12 +1362,16 @@ async def one_on_one_agenda(tech_id: str, current_user: dict = Depends(get_curre
 @router.post("/voice/morning-brief")
 async def morning_brief(current_user: dict = Depends(get_current_user)):
     since = (_now() - timedelta(hours=14)).isoformat()
-    new_tix = await db.tickets.count_documents({"created_at": {"$gte": since}})
-    crit_tix = await db.tickets.count_documents({"created_at": {"$gte": since}, "priority": "critical"})
+    new_tix = await db.tickets.count_documents(scoped_query(current_user, {"created_at": {"$gte": since}}))
+    crit_tix = await db.tickets.count_documents(scoped_query(current_user, {"created_at": {"$gte": since}, "priority": "critical"}))
     backup_fails = 0
     if "backup_jobs" in await db.list_collection_names():
-        backup_fails = await db.backup_jobs.count_documents({"completed_at": {"$gte": since}, "status": "failed"})
-    huntress_open = await db.huntress_alerts.count_documents({"resolved": {"$ne": True}})
+        backup_fails = await db.backup_jobs.count_documents(
+            scoped_query(current_user, {"completed_at": {"$gte": since}, "status": "failed"})
+        )
+    huntress_open = await db.huntress_alerts.count_documents(
+        scoped_query(current_user, {"resolved": {"$ne": True}})
+    )
 
     system = (
         "You are an MSP morning radio host. Deliver a 60-second spoken-word brief of the night's events. "
@@ -1239,17 +1395,52 @@ async def morning_brief(current_user: dict = Depends(get_current_user)):
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 21. RUN-BOOK PUBLISH FROM TICKET â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+async def _knowledge_runbook_in_scope(runbook_id: str, current_user: dict, operation: str) -> dict:
+    """Resolve a ticket-derived knowledge procedure without widening client scope."""
+    candidate = await db.runbooks.find_one(
+        {"id": runbook_id, "source_ticket_id": {"$exists": True}},
+        {"_id": 0},
+    )
+    if not candidate:
+        raise HTTPException(404, "Resource not found")
+    return await assert_record_scope(
+        current_user,
+        db.runbooks,
+        runbook_id,
+        operation=operation,
+        resource_name="Knowledge runbook",
+    )
+
 @router.post("/runbooks/from-ticket/{ticket_id}")
 async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     """Convert a resolved ticket into an editable, reusable runbook."""
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Ticket not found")
+    t = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="knowledge_runbook.create",
+        resource_name="Ticket",
+    )
     if t.get("status") not in ("resolved", "closed"):
         raise HTTPException(400, "Only resolved/closed tickets can become runbooks")
 
     existing = await db.runbooks.find_one({"source_ticket_id": ticket_id}, {"_id": 0})
     if existing:
+        # Safely backfill historical documents when their authoritative source
+        # ticket is being revisited. This is intentionally lazy, not a bulk
+        # migration: the stable ticket relationship proves the client binding.
+        ownership_patch = {
+            key: value
+            for key, value in {
+                "client_id": t.get("client_id"),
+                "tenant_id": t.get("tenant_id") or current_user.get("tenant_id"),
+                "record_type": "knowledge_runbook",
+            }.items()
+            if value and existing.get(key) != value
+        }
+        if ownership_patch:
+            await db.runbooks.update_one({"id": existing["id"]}, {"$set": ownership_patch})
+            existing.update(ownership_patch)
         if payload.get("publish", True) and not existing.get("published"):
             await db.runbooks.update_one({"id": existing["id"]}, {"$set": {"published": True}})
             existing["published"] = True
@@ -1282,10 +1473,10 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
         description = (t.get("description") or "").strip()
         parsed = {
             "title": t.get("title") or "Resolved ticket runbook",
-            "summary": f"Draft procedure created from resolved ticket #{t.get('ticket_number') or ''}. Review and complete it before publishing.",
+            "summary": f"Starter procedure created from resolved ticket #{t.get('ticket_number') or ''}. Validate and refine the recorded steps before relying on it in a live incident.",
             "steps": [
                 {"step": "Review the reported issue", "detail": description or "Confirm the affected service, device, and user impact."},
-                {"step": "Apply the recorded resolution", "detail": resolution or "Add the remediation that resolved this ticket before publishing."},
+                {"step": "Apply the recorded resolution", "detail": resolution or "Add the remediation that resolved this ticket, then validate it before reuse."},
                 {"step": "Validate the outcome", "detail": "Confirm the service is restored and record the validation result."},
             ],
             "tags": [t.get("category") or "service-desk"],
@@ -1301,6 +1492,9 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
         "category": parsed.get("category") or t.get("category"),
         "source_ticket_id": ticket_id,
         "source_ticket_number": t.get("ticket_number"),
+        "client_id": t.get("client_id"),
+        "tenant_id": t.get("tenant_id") or current_user.get("tenant_id"),
+        "record_type": "knowledge_runbook",
         "published": bool(payload.get("publish", True)),
         "created_by": current_user.get("name"),
         "created_at": _now().isoformat(),
@@ -1313,15 +1507,26 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
 @router.get("/ticket-runbooks/{ticket_id}")
 async def get_ticket_runbook(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Return the reusable runbook promoted from a ticket, if one exists."""
+    await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="knowledge_runbook.ticket_read",
+        resource_name="Ticket",
+    )
     return await db.runbooks.find_one({"source_ticket_id": ticket_id}, {"_id": 0})
 
 
 @router.get("/tickets/{ticket_id}/runbook-suggestions")
 async def ticket_runbook_suggestions(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Find published, proven fixes that match the ticket's category or tags."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "category": 1, "tags": 1})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="knowledge_runbook.suggest",
+        resource_name="Ticket",
+    )
 
     category = (ticket.get("category") or "").strip()
     tags = [str(tag).strip() for tag in (ticket.get("tags") or []) if str(tag).strip()]
@@ -1333,7 +1538,11 @@ async def ticket_runbook_suggestions(ticket_id: str, current_user: dict = Depend
         if tags:
             clauses.append({"tags": {"$in": tags}})
         matches = await db.runbooks.find(
-            {"published": True, "source_ticket_id": {"$ne": ticket_id}, "$or": clauses},
+            scoped_query(
+                current_user,
+                {"published": True, "source_ticket_id": {"$exists": True, "$ne": ticket_id}, "$or": clauses},
+                site_field=None,
+            ),
             {"_id": 0, "id": 1, "title": 1, "summary": 1, "steps": 1, "category": 1, "tags": 1, "source_ticket_number": 1},
         ).sort("created_at", -1).to_list(4)
     return matches
@@ -1342,8 +1551,9 @@ async def ticket_runbook_suggestions(ticket_id: str, current_user: dict = Depend
 @router.post("/knowledge-runbooks/{runbook_id}/used")
 async def record_knowledge_runbook_use(runbook_id: str, current_user: dict = Depends(get_current_user)):
     """Record that a technician applied a knowledge runbook to ticket work."""
+    await _knowledge_runbook_in_scope(runbook_id, current_user, "knowledge_runbook.use")
     result = await db.runbooks.update_one(
-        {"id": runbook_id, "published": True},
+        {"id": runbook_id, "published": True, "source_ticket_id": {"$exists": True}},
         {"$inc": {"use_count": 1}, "$set": {"last_used_at": _now().isoformat()}},
     )
     if not result.matched_count:
@@ -1354,15 +1564,25 @@ async def record_knowledge_runbook_use(runbook_id: str, current_user: dict = Dep
 @router.post("/knowledge-runbooks/{runbook_id}/helpful")
 async def mark_knowledge_runbook_helpful(runbook_id: str, current_user: dict = Depends(get_current_user)):
     """Allow each technician to mark a knowledge procedure helpful once."""
-    runbook = await db.runbooks.find_one({"id": runbook_id, "published": True}, {"_id": 0, "id": 1})
-    if not runbook:
-        raise HTTPException(404, "Knowledge runbook not found")
+    runbook = await _knowledge_runbook_in_scope(runbook_id, current_user, "knowledge_runbook.helpful")
+    if not runbook.get("published"):
+        raise HTTPException(404, "Resource not found")
     user_id = str(current_user.get("id") or current_user.get("email") or current_user.get("name") or "unknown")
     existing = await db.runbook_feedback.find_one({"runbook_id": runbook_id, "user_id": user_id}, {"_id": 0})
     if existing:
         return {"already_marked": True, "helpful_votes": (await db.runbooks.find_one({"id": runbook_id}, {"_id": 0, "helpful_votes": 1}) or {}).get("helpful_votes", 0)}
-    await db.runbook_feedback.insert_one({"id": uuid.uuid4().hex, "runbook_id": runbook_id, "user_id": user_id, "created_at": _now().isoformat()})
-    await db.runbooks.update_one({"id": runbook_id}, {"$inc": {"helpful_votes": 1}})
+    await db.runbook_feedback.insert_one({
+        "id": uuid.uuid4().hex,
+        "runbook_id": runbook_id,
+        "user_id": user_id,
+        "client_id": runbook.get("client_id"),
+        "tenant_id": runbook.get("tenant_id"),
+        "created_at": _now().isoformat(),
+    })
+    await db.runbooks.update_one(
+        {"id": runbook_id, "source_ticket_id": {"$exists": True}},
+        {"$inc": {"helpful_votes": 1}},
+    )
     updated = await db.runbooks.find_one({"id": runbook_id}, {"_id": 0, "helpful_votes": 1})
     return {"already_marked": False, "helpful_votes": (updated or {}).get("helpful_votes", 0)}
 
@@ -1370,6 +1590,7 @@ async def mark_knowledge_runbook_helpful(runbook_id: str, current_user: dict = D
 @router.put("/knowledge-runbooks/{runbook_id}")
 async def update_knowledge_runbook(runbook_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     """Refine the reusable procedure without exposing automation runbook fields."""
+    await _knowledge_runbook_in_scope(runbook_id, current_user, "knowledge_runbook.update")
     allowed = {key: payload[key] for key in ("title", "summary", "steps", "category", "tags") if key in payload}
     if not allowed:
         raise HTTPException(400, "No knowledge runbook changes supplied")
@@ -1383,14 +1604,14 @@ async def update_knowledge_runbook(runbook_id: str, payload: dict = Body(default
 
 @router.get("/runbooks")
 async def list_runbooks(q: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    qry = {"published": True}
+    qry = {"published": True, "source_ticket_id": {"$exists": True}}
     if q:
         qry["$or"] = [
             {"title": {"$regex": q, "$options": "i"}},
             {"tags": {"$regex": q, "$options": "i"}},
             {"category": {"$regex": q, "$options": "i"}},
         ]
-    rows = await db.runbooks.find(qry, {"_id": 0}).sort("created_at", -1).to_list(100)
+    rows = await db.runbooks.find(scoped_query(current_user, qry, site_field=None), {"_id": 0}).sort("created_at", -1).to_list(100)
     return rows
 
 
@@ -1429,12 +1650,18 @@ def _teams_card_for_patch(a: dict) -> dict:
     }
 
 
-@router.post("/patches/anomalies/broadcast")
-async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_user)):
-    """Detect NEW patch anomalies (3+ clients) and broadcast to Slack/Teams. Idempotent."""
+@router.post("/patches/anomalies/broadcast", dependencies=[Depends(require_action("platform.events.publish"))])
+async def broadcast_patch_anomalies(request: Request, current_user: dict = Depends(get_current_user)):
+    """Broadcast a newly detected MSP-wide patch anomaly through approved channels."""
+    await assert_global_scope(
+        current_user,
+        operation="patch_anomaly.broadcast",
+        request=request,
+    )
     since = (_now() - timedelta(days=60)).isoformat()
+    tenant_id = str(current_user.get("tenant_id") or "").strip() or None
     tx = await db.tickets.find(
-        {"created_at": {"$gte": since}},
+        scoped_query(current_user, {"created_at": {"$gte": since}}),
         {"_id": 0, "id": 1, "title": 1, "description": 1, "client_id": 1, "client_name": 1, "ticket_number": 1}
     ).limit(2000).to_list(2000)
 
@@ -1461,7 +1688,11 @@ async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_use
                 "severity": "critical" if len(e["clients"]) >= 5 else "warning",
             })
 
-    existing_rows = await db.patch_broadcasts.find({}, {"_id": 0, "patch_id": 1, "last_client_count": 1}).to_list(500)
+    broadcast_scope = {"tenant_id": tenant_id} if tenant_id else {}
+    existing_rows = await db.patch_broadcasts.find(
+        broadcast_scope,
+        {"_id": 0, "patch_id": 1, "last_client_count": 1},
+    ).to_list(500)
     existing = {r["patch_id"]: int(r.get("last_client_count") or 0) for r in existing_rows}
 
     settings_doc = await db.settings.find_one({"type": "tactical_rmm_notifications"}, {"_id": 0}) or {}
@@ -1491,9 +1722,10 @@ async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_use
 
     for a in new_or_growing:
         await db.patch_broadcasts.update_one(
-            {"patch_id": a["patch_id"]},
+            {**broadcast_scope, "patch_id": a["patch_id"]},
             {"$set": {
                 "patch_id": a["patch_id"],
+                "tenant_id": tenant_id,
                 "last_client_count": a["affected_clients"],
                 "severity": a["severity"],
                 "last_broadcast_at": _now().isoformat(),
@@ -1509,7 +1741,24 @@ async def broadcast_patch_anomalies(current_user: dict = Depends(get_current_use
             "body": f"{a['affected_clients']} clients affected, {a['tickets_seen']} tickets. Severity: {a['severity']}.",
             "ref_type": "patch",
             "ref_id": a["patch_id"],
+            "tenant_id": tenant_id,
             "read": False,
+            "created_at": _now().isoformat(),
+        })
+
+    if new_or_growing:
+        await db.audit_logs.insert_one({
+            "id": uuid.uuid4().hex,
+            "action": "patch_anomaly_broadcast",
+            "actor_id": current_user.get("id"),
+            "actor_name": current_user.get("name") or current_user.get("email"),
+            "tenant_id": tenant_id,
+            "details": {
+                "patch_ids": [item["patch_id"] for item in new_or_growing],
+                "channels_configured": bool(slack or teams),
+                "external_changes": bool(slack or teams),
+            },
+            "correlation_id": getattr(getattr(request, "state", None), "correlation_id", None),
             "created_at": _now().isoformat(),
         })
 
@@ -1534,7 +1783,7 @@ def _safe_pdf_text(s) -> str:
 async def insurance_vault_pdf(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     """Create a branded, evidence-labelled cyber-insurance review pack."""
     from fpdf import FPDF
-    evidence = await _collect_insurance_evidence(client_id)
+    evidence = await _collect_insurance_evidence(current_user, client_id)
     client_name = evidence.get("client_name")
     controls = evidence.get("controls") or {}
     metrics = evidence.get("metrics") or []

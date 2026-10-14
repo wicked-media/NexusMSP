@@ -1,36 +1,20 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends
+from datetime import datetime, timezone
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
-from app.models import *
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
+from app.services.achievement_catalog import ACHIEVEMENT_DEFINITIONS, ACHIEVEMENT_POINTS
+from app.services.achievement_engine import run_achievement_check
+from app.services.tech_rewards import award_points
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
 # ============== ACHIEVEMENT BADGE SYSTEM ==============
 
-ACHIEVEMENT_DEFINITIONS = [
-    {"id": "first_ticket", "name": "First Resolve", "description": "Closed your first ticket", "icon": "trophy", "category": "tickets", "threshold": 1, "color": "#22c55e"},
-    {"id": "ticket_10", "name": "Problem Solver", "description": "Closed 10 tickets", "icon": "target", "category": "tickets", "threshold": 10, "color": "#3b82f6"},
-    {"id": "ticket_50", "name": "Resolution Machine", "description": "Closed 50 tickets", "icon": "zap", "category": "tickets", "threshold": 50, "color": "#8b5cf6"},
-    {"id": "ticket_100", "name": "Century Club", "description": "Closed 100 tickets", "icon": "award", "category": "tickets", "threshold": 100, "color": "#f59e0b"},
-    {"id": "ticket_500", "name": "Legend", "description": "Closed 500 tickets", "icon": "crown", "category": "tickets", "threshold": 500, "color": "#ef4444"},
-    {"id": "ticket_1000", "name": "Ticket Titan", "description": "Closed 1,000 tickets", "icon": "gem", "category": "tickets", "threshold": 1000, "color": "#ec4899"},
-    {"id": "first_invoice", "name": "Revenue Starter", "description": "Created your first invoice", "icon": "dollar-sign", "category": "invoices", "threshold": 1, "color": "#22c55e"},
-    {"id": "invoice_25", "name": "Billing Pro", "description": "Created 25 invoices", "icon": "credit-card", "category": "invoices", "threshold": 25, "color": "#3b82f6"},
-    {"id": "invoice_100", "name": "Finance Wizard", "description": "Created 100 invoices", "icon": "banknote", "category": "invoices", "threshold": 100, "color": "#f59e0b"},
-    {"id": "remote_10", "name": "Remote Rookie", "description": "Completed 10 remote sessions", "icon": "monitor", "category": "remote", "threshold": 10, "color": "#06b6d4"},
-    {"id": "remote_100", "name": "Remote Hero", "description": "Completed 100 remote sessions", "icon": "wifi", "category": "remote", "threshold": 100, "color": "#8b5cf6"},
-    {"id": "tenure_1yr", "name": "Year One", "description": "1 year with the company", "icon": "calendar", "category": "tenure", "threshold": 365, "color": "#22c55e"},
-    {"id": "tenure_3yr", "name": "Veteran", "description": "3 years with the company", "icon": "shield", "category": "tenure", "threshold": 1095, "color": "#3b82f6"},
-    {"id": "tenure_5yr", "name": "Half Decade", "description": "5 years with the company", "icon": "star", "category": "tenure", "threshold": 1825, "color": "#f59e0b"},
-    {"id": "tenure_10yr", "name": "Decade Hero", "description": "10 years with the company", "icon": "crown", "category": "tenure", "threshold": 3650, "color": "#ef4444"},
-    {"id": "birthday", "name": "Birthday Star", "description": "It's your birthday!", "icon": "cake", "category": "celebration", "threshold": 0, "color": "#ec4899"},
-    {"id": "speed_demon", "name": "Speed Demon", "description": "Average ticket resolution under 2 hours", "icon": "rocket", "category": "special", "threshold": 0, "color": "#f97316"},
-    {"id": "multitasker", "name": "Multitasker", "description": "Worked on 5+ tickets in a single day", "icon": "layers", "category": "special", "threshold": 5, "color": "#14b8a6"},
-]
+# Badge definitions and category points live in app.services.achievement_catalog
+# (single source of truth shared with the technician profile surface).
 
 @router.get("/achievements")
 async def get_achievement_definitions(current_user: dict = Depends(get_current_user)):
@@ -90,7 +74,20 @@ async def award_achievement(tech_id: str, data: dict, current_user: dict = Depen
     await db.user_achievements.insert_one(entry)
     # Remove MongoDB _id before returning
     entry.pop("_id", None)
-    return {"message": "Achievement awarded", "achievement": entry}
+    # Hook the achievement into the points economy so techs can save for pets/skins.
+    definition = next((a for a in ACHIEVEMENT_DEFINITIONS if a["id"] == achievement_id), None)
+    points = int(data.get("points") or ACHIEVEMENT_POINTS.get((definition or {}).get("category", "custom"), 75))
+    ledger_entry = await award_points(
+        db,
+        user_id=tech_id,
+        tenant_id=platform_tenant_id(current_user),
+        delta=points,
+        kind="earn",
+        reason=f"Achievement unlocked: {entry['achievement_name']}",
+        actor=current_user,
+        reference_id=f"achievement:{achievement_id}",
+    )
+    return {"message": "Achievement awarded", "achievement": entry, "points_awarded": points, "points_balance": ledger_entry["balance_after"]}
 
 @router.post("/technicians/{tech_id}/achievements/check")
 async def check_achievements(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -98,63 +95,41 @@ async def check_achievements(tech_id: str, current_user: dict = Depends(get_curr
     user = await db.users.find_one({"id": tech_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Technician not found")
-    
-    earned = await db.user_achievements.find({"user_id": tech_id}, {"_id": 0}).to_list(500)
-    earned_ids = {e["achievement_id"] for e in earned}
-    newly_awarded = []
-    
-    # Count ticket closures
-    closed_tickets = await db.tickets.count_documents({"assigned_to": tech_id, "status": {"$in": ["closed", "resolved"]}})
-    for ach in ACHIEVEMENT_DEFINITIONS:
-        if ach["category"] == "tickets" and ach["id"] not in earned_ids and closed_tickets >= ach["threshold"]:
-            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {closed_tickets} tickets closed"}
-            await db.user_achievements.insert_one(entry)
-            newly_awarded.append(ach["name"])
-    
-    # Count invoices
-    invoices_created = await db.activity_logs.count_documents({"user_id": tech_id, "entity_type": "invoice", "action": "created"})
-    for ach in ACHIEVEMENT_DEFINITIONS:
-        if ach["category"] == "invoices" and ach["id"] not in earned_ids and invoices_created >= ach["threshold"]:
-            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {invoices_created} invoices created"}
-            await db.user_achievements.insert_one(entry)
-            newly_awarded.append(ach["name"])
-    
-    # Count remote sessions
-    remote_count = await db.remote_sessions.count_documents({"user_id": tech_id, "status": "ended"})
-    for ach in ACHIEVEMENT_DEFINITIONS:
-        if ach["category"] == "remote" and ach["id"] not in earned_ids and remote_count >= ach["threshold"]:
-            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {remote_count} remote sessions"}
-            await db.user_achievements.insert_one(entry)
-            newly_awarded.append(ach["name"])
-    
-    # Check tenure
-    hire_date = user.get("hire_date")
-    if hire_date:
-        try:
-            hd = datetime.fromisoformat(hire_date)
-            days_employed = (datetime.now(timezone.utc) - hd).days
-            for ach in ACHIEVEMENT_DEFINITIONS:
-                if ach["category"] == "tenure" and ach["id"] not in earned_ids and days_employed >= ach["threshold"]:
-                    entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {days_employed} days employed"}
-                    await db.user_achievements.insert_one(entry)
-                    newly_awarded.append(ach["name"])
-        except:
-            pass
-    
-    # Check birthday
-    birthday = user.get("birthday")
-    if birthday and "birthday" not in earned_ids:
-        try:
-            today = datetime.now(timezone.utc)
-            bd = datetime.fromisoformat(birthday)
-            if bd.month == today.month and bd.day == today.day:
-                entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": "birthday", "achievement_name": "Birthday Star", "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": "Happy Birthday!"}
-                await db.user_achievements.insert_one(entry)
-                newly_awarded.append("Birthday Star")
-        except:
-            pass
-    
-    return {"newly_awarded": newly_awarded, "total_earned": len(earned_ids) + len(newly_awarded)}
+    return await run_achievement_check(
+        db, user, tenant_id=platform_tenant_id(current_user), actor=current_user
+    )
+
+
+@router.post("/achievements/recompute")
+async def recompute_all_achievements(current_user: dict = Depends(get_current_user)):
+    """Retro-award sweep: run the badge engine across every team member.
+
+    Idempotent — already-earned badges are never duplicated — so it is safe for
+    schedulers and for the one-time backfill of historical work.
+    """
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    users = await db.users.find(tenant_scoped_query(current_user, {}), {"_id": 0}).to_list(2000)
+    tenant_id = platform_tenant_id(current_user)
+    per_user = []
+    totals = {"users_processed": len(users), "badges_awarded": 0, "points_earned": 0}
+    for user in users:
+        result = await run_achievement_check(db, user, tenant_id=tenant_id, actor=current_user)
+        if result["newly_awarded"]:
+            per_user.append({
+                "user_id": user["id"],
+                "name": user.get("name"),
+                "newly_awarded": result["newly_awarded"],
+                "points_earned": result["points_earned"],
+            })
+            totals["badges_awarded"] += len(result["newly_awarded"])
+            totals["points_earned"] += result["points_earned"]
+    await log_activity(
+        current_user, "achievements.recomputed", "achievement", "recompute",
+        details=f"Retro-awarded {totals['badges_awarded']} badges across {totals['users_processed']} users",
+    )
+    return {**totals, "users_with_new_awards": per_user}
 
 @router.delete("/technicians/{tech_id}/achievements/{achievement_id}")
 async def revoke_achievement(tech_id: str, achievement_id: str, current_user: dict = Depends(get_current_user)):

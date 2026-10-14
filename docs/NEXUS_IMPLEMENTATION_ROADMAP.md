@@ -25,9 +25,9 @@ Objective: safely operate a controlled internal and single-client pilot.
 | Remote security | Scoped device mapping, technician authorization, consent, ticket/time/audit lifecycle and idempotent session creation. | Sandbox relay golden workflow and cross-client remote tests pass. |
 | Billing integrity | Deterministic quantity sources, approvals, idempotent invoice/payment handoffs and durable audit. | Golden ticket-to-invoice and service-reconciliation workflows pass with provider failure scenarios. |
 | Reliability and observability | Worker leases/recovery, correlation IDs, structured logs, health/readiness, metrics/traces/alerts and owners. | Queue/provider outage drills alert the named owner and recover without false success. |
-| Delivery and recovery | Reproducible containers/agent build, CI gates, immutable releases, migrations, backups and rollback. | Timed Mongo/uploads restore and application rollback rehearsals meet recorded RPO/RTO. |
+| Delivery and recovery | Reproducible containers/agent build, CI gates, immutable releases, migrations, backups and rollback. Database data-shape changes are now ordered, recorded and either reversible-by-declaration or explicitly irreversible through the migration ledger (`backend/app/services/schema_migrations.py`), instead of unversioned work repeated on every boot. | Timed Mongo/uploads restore and application rollback rehearsals meet recorded RPO/RTO. |
 
-Release 1 exit: no open critical/high security risks; all six golden workflows in `PRODUCTION_READINESS.md` have current evidence; one controlled pilot has completed rollback and recovery drills.
+Release 1 exit: no open critical/high security risks; all eight golden workflows in `PRODUCTION_READINESS.md` have current evidence; one controlled pilot has completed rollback and recovery drills.
 
 ## Release 2 — MSP Core
 
@@ -108,13 +108,27 @@ Acceptance criteria:
 
 Gate: product-specific security/recovery reviews, signed artifacts, staged updates/rollback and controlled design-partner pilots pass.
 
+### Nexus Backup build sequence
+
+1. **Implemented control plane:** tenant/client-scoped non-secret destination attestation, backup profile and protected-workload intent; the agent reports capability inventory only and execution fails closed.
+2. **Implemented safe capability preflight:** a dedicated, lease-bound Nexus Agent protocol reports operating-system and Backup capability state plus bounded Windows VSS service/writer and fixed-volume availability posture. It is isolated from the generic command queue and cannot enumerate source paths, read files, invoke VSS snapshots, transfer bytes or restore. Capacity values and volume identities remain intentionally excluded.
+   The signed-worker source planner now resolves only narrow local Windows known-folder profiles and keeps roots local; full-device and application-aware sources remain blocked pending their dedicated engines.
+   The agent now has a tested AES-256-GCM chunk primitive with stable-ID associated-data binding and fail-closed integrity checks. Data keys remain ephemeral and no capture path may use it until tenant envelope-key wrapping, signed capture leases, resumable transfer and isolated restore-worker review are complete.
+   Resumable-manifest mechanics now validate scoped encrypted chunk descriptors and compute only unacknowledged chunk ordinals; they do not interpret a local artifact as a completed backup or call storage.
+   A future capture requires a dedicated short-lived Ed25519-signed lease pinned by Backup policy and bound to tenant, client, endpoint, job, capture ID and expiry. The lease contains no source path, vault credential or data key and does not itself enable capture.
+   The server-only S3 adapter can now write an already-encrypted chunk only under a scoped Nexus object key with AES256 and Object Lock governance retention. It issues no presigned URL and is not connected to a live capture API until the capture worker and envelope-key release are complete.
+   The agent can now RSA-OAEP-wrap an ephemeral AES data key to the dedicated Backup public envelope key pinned in policy; the private unwrap authority stays server-side. Capture-key receipt persistence and isolated restore-worker use remain unreleased.
+   The agent now has a bounded in-memory streaming encryptor that zeroes plaintext buffers after chunk encryption. It remains a library primitive until a reviewed source reader, signed capture lifecycle and immutable-transfer receipts are connected.
+3. **Narrow design-partner pilot:** one Windows file-level source, a separately approved S3-compatible Object Lock destination, envelope encryption, resumable chunk manifests/checkpoints, and isolated sandbox restore verification.
+4. **Production expansion:** signed helper release, agent update/rollback coverage, durable scheduler leases, retention/immutability verification, recovery evidence, billing reconciliation, and pilot-ring evidence before VM, database, SaaS or broad workload support.
+
 ## Immediate work queue
 
 1. [Completed 2026-08-07] Add and verify public authentication abuse protection with privacy-safe counters and proxy trust controls.
-2. Run authenticated two-client DAST over the six golden workflows and close boundary gaps.
-3. Add upload quarantine/malware-scanner interface before broad portal uploads.
-4. Connect structured metrics/traces/alerts to a production observability backend and assign owners.
-5. Rehearse Mongo/uploads restore and immutable application rollback.
+2. [Completed 2026-09-12] Run authenticated two-client DAST over the eight golden workflows and close boundary gaps. The isolated Playwright gate passed 8/8 and fixed the Microsoft Control Plane PyMongo database-selection crash; live provider-success proof remains item 6.
+3. [Completed 2026-09-12] Add upload quarantine/malware-scanner interface before broad portal uploads. Ticket attachments, inbound email evidence and client documents now stage privately, validate content signatures, require a clean ClamAV verdict, retain safe scoped disposition/audit evidence and fail closed when scanning is unavailable. The deterministic scanner is restricted to the disposable acceptance runtime.
+4. [Implemented 2026-09-12] Connect structured metrics/traces/alerts to a production observability backend and assign owners. Prometheus, OpenTelemetry, Tempo, Loki, Alertmanager and a provisioned Grafana operations dashboard are wired with low-cardinality API/worker/dependency telemetry and named escalation. Deployment plus firing/resolved on-call acknowledgement remains required evidence.
+5. [In progress 2026-10-13] Rehearse Mongo/uploads restore, immutable application rollback and database migration rollback. The capture-and-restore rehearsal exists (`scripts/Smoke-Test-NexusDockerRecovery.ps1`), the application rollback rehearsal exists (`scripts/Test-NexusApplicationRollback.ps1`), and the database-migration ledger behind a per-migration rollback now exists (`backend/app/services/schema_migrations.py`, `backend/scripts/nexus_migrate.py`, rehearsal `scripts/Test-NexusMigrationRollback.ps1`). Remaining: run both drills on the deployment Docker host and retain their evidence, record the named rollback decision owner, and rehearse a real reversible customer-data migration's rollback before the release that applies it.
 6. Execute provider sandbox acceptance for email/SMS, Microsoft, Xero, Yeastar, backup and RustDesk.
 
 New modules are deferred until the Release 1 queue is complete or a documented dependency requires them.

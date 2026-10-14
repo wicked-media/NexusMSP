@@ -21,6 +21,7 @@ node_modules/
 # Testing
 /coverage
 .pytest_cache/
+/test_reports/browser-acceptance/
 
 # Next.js
 /.next/
@@ -47,6 +48,9 @@ yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
 
+# Local runtime state written by the dev stack (service logs, PIDs).
+.local/
+
 # System files
 .DS_Store
 *.pem
@@ -66,6 +70,10 @@ chainlit.md
 .tools/
 .codex-audit/
 .codex-audits/
+.codex-qa/
+.codex-audit-*.png
+.codex-projects-audit-*.png
+login-*-implementation.png
 
 # Deployment
 .vercel
@@ -76,6 +84,7 @@ agenthub/agents/youtube/db
 /tmp/
 
 # Runtime uploads are local tenant data. Curated help-guide screenshots are source assets.
+backend/private_uploads/
 backend/uploads/*
 !backend/uploads/help/
 backend/uploads/help/*
@@ -96,85 +105,16 @@ agent/*.exe
 .cache/
 
 # Mobile development
-android-sdk/ frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/4.pack
-frontend/node_modules/.cache/default-development/5.pack
-frontend/node_modules/.cache/default-development/7.pack
-frontend/node_modules/.cache/default-development/9.pack
-frontend/node_modules/.cache/default-development/11.pack
-frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/6.pack
-frontend/node_modules/.cache/default-development/10.pack
-frontend/node_modules/.cache/default-development/12.pack
-frontend/node_modules/.cache/default-development/3.pack
-frontend/node_modules/.cache/default-development/8.pack
-frontend/node_modules/.cache/default-development/14.pack
-frontend/node_modules/.cache/default-development/15.pack
-frontend/node_modules/.cache/default-development/16.pack
-frontend/node_modules/.cache/default-development/13.pack
-frontend/node_modules/.cache/default-development/23.pack
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
-frontend/node_modules/.cache/default-development/34.pack
-frontend/node_modules/.cache/default-development/24.pack
-frontend/node_modules/.cache/default-development/26.pack
--e 
+android-sdk/
+
+# Frontend build cache
+frontend/node_modules/.cache/
+
 # Environment and credential files
 .env
 .env.*
 *.env
-credentials.json
-*.pem
 *.key
 .credentials
-frontend/node_modules/.cache/default-development/33.pack
-frontend/node_modules/.cache/default-development/52.pack
-frontend/node_modules/.cache/default-development/76.pack
-frontend/node_modules/.cache/default-development/77.pack
-frontend/node_modules/.cache/default-development/113.pack
-frontend/node_modules/.cache/default-development/100.pack
-frontend/node_modules/.cache/default-development/22.pack
-frontend/node_modules/.cache/default-development/28.pack
-frontend/node_modules/.cache/default-development/43.pack
-frontend/node_modules/.cache/default-development/47.pack
-frontend/node_modules/.cache/default-development/50.pack
-frontend/node_modules/.cache/default-development/46.pack
-frontend/node_modules/.cache/default-development/56.pack
-frontend/node_modules/.cache/default-development/61.pack
-frontend/node_modules/.cache/default-development/60.pack
-frontend/node_modules/.cache/default-development/63.pack
-frontend/node_modules/.cache/default-development/87.pack
-frontend/node_modules/.cache/default-development/112.pack
-frontend/node_modules/.cache/default-development/102.pack
-frontend/node_modules/.cache/default-development/123.pack
-frontend/node_modules/.cache/default-development/139.pack
-frontend/node_modules/.cache/default-development/151.pack
-frontend/node_modules/.cache/default-development/166.pack
-frontend/node_modules/.cache/default-development/179.pack
-frontend/node_modules/.cache/default-development/175.pack
-frontend/node_modules/.cache/default-development/187.pack
-frontend/node_modules/.cache/default-development/191.pack
-frontend/node_modules/.cache/default-development/194.pack
-frontend/node_modules/.cache/default-development/213.pack
-frontend/node_modules/.cache/default-development/119.pack
-frontend/node_modules/.cache/default-development/226.pack
-frontend/node_modules/.cache/default-development/229.pack
-frontend/node_modules/.cache/default-development/219.pack
-frontend/node_modules/.cache/default-development/230.pack
-frontend/node_modules/.cache/default-development/107.pack
-frontend/node_modules/.cache/default-development/236.pack
-frontend/node_modules/.cache/default-development/19.pack
-frontend/node_modules/.cache/default-development/27.pack
-frontend/node_modules/.cache/default-development/38.pack
-frontend/node_modules/.cache/default-development/45.pack
-frontend/node_modules/.cache/default-development/84.pack
 !.env.example
 !**/.env.example

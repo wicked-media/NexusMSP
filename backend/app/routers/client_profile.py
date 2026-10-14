@@ -15,12 +15,24 @@ Endpoints:
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone
-from typing import Optional
+from pathlib import Path
+import re
 import uuid
-from app.database import db, UPLOADS_DIR
+from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_record_scope
-from app.services.upload_security import safe_original_filename, safe_upload_extension
+from app.services.scope_permissions import assert_record_scope, platform_tenant_id, tenant_scoped_query
+from app.services.upload_quarantine import (
+    UploadQuarantineFailure,
+    discard_upload,
+    inspect_upload,
+    release_upload,
+)
+from app.services.upload_security import (
+    safe_original_filename,
+    safe_upload_extension,
+    upload_is_releasable,
+    validate_upload_signature,
+)
 from app.services.supabase_storage import archive_client_artifact, delete_artifact, read_artifact
 
 
@@ -38,12 +50,19 @@ router = APIRouter(dependencies=[Depends(_enforce_client_profile_scope)])
 
 CLIENT_ASSETS_DIR = UPLOADS_DIR / "clients"
 CLIENT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-CLIENT_DOCS_DIR = UPLOADS_DIR / "client-documents"
+# Client documents are private evidence. They must never live under the general
+# static uploads mount, even when Supabase artifact storage is not configured.
+CLIENT_DOCS_DIR = ROOT_DIR / "private_uploads" / "client_documents"
 CLIENT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+# Existing installations may have documents in the historical public upload
+# location. They remain available only through the scoped download endpoint
+# until a future migration moves them into private retention.
+LEGACY_CLIENT_DOCS_DIR = UPLOADS_DIR / "client-documents"
 
 ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
 ALLOWED_DOC_EXTS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "md", "png", "jpg", "jpeg", "webp", "gif", "zip"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+_STORED_DOCUMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 
 
 def _safe_ext(filename: str, allow: set) -> str:
@@ -53,8 +72,42 @@ def _safe_ext(filename: str, allow: set) -> str:
         raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(sorted(allow))}") from exc
 
 
+def _document_filename(document: dict) -> str | None:
+    """Return a locally retained filename without trusting a public URL."""
+    candidate = str(document.get("stored_filename") or "").strip()
+    if not candidate:
+        legacy_url = str(document.get("url") or "").strip()
+        legacy_prefix = "/api/uploads/client-documents/"
+        if legacy_url.startswith(legacy_prefix):
+            candidate = legacy_url[len(legacy_prefix):]
+    return candidate if _STORED_DOCUMENT_NAME.fullmatch(candidate) else None
+
+
+def _client_document_response(document: dict) -> dict:
+    """Return client-document metadata without exposing storage internals."""
+    response = dict(document)
+    response.pop("stored_filename", None)
+    response.pop("artifact_storage", None)
+    response.pop("url", None)
+    if response.get("kind") == "file" and response.get("id") and response.get("client_id"):
+        response["download_url"] = f"/api/clients/{response['client_id']}/documents/{response['id']}/download"
+    return response
+
+
+def _local_document_path(document: dict) -> Path | None:
+    """Locate a private or legacy local copy after the caller has scoped it."""
+    filename = _document_filename(document)
+    if not filename:
+        return None
+    for directory in (CLIENT_DOCS_DIR, LEGACY_CLIENT_DOCS_DIR):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 async def _ensure_client(client_id: str):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "artifact_storage": 1})
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "tenant_id": 1, "name": 1, "artifact_storage": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
@@ -218,8 +271,8 @@ async def update_client_profile(client_id: str, data: dict, current_user: dict =
 @router.get("/clients/{client_id}/documents")
 async def list_client_documents(client_id: str, current_user: dict = Depends(get_current_user)):
     await _ensure_client(client_id)
-    docs = await db.client_documents.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return docs
+    docs = await db.client_documents.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [_client_document_response(document) for document in docs]
 
 
 @router.post("/clients/{client_id}/documents")
@@ -230,58 +283,107 @@ async def upload_client_document(
     category: str = Form("general"),
     current_user: dict = Depends(get_current_user),
 ):
-    await _ensure_client(client_id)
+    client = await _ensure_client(client_id)
     ext = _safe_ext(file.filename, ALLOWED_DOC_EXTS)
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large (max 20MB)")
+    validate_upload_signature(content, ext)
     doc_id = str(uuid.uuid4())
     filename = f"{client_id}__{doc_id}.{ext}"
     filepath = CLIENT_DOCS_DIR / filename
-    with open(filepath, "wb") as f:
-        f.write(content)
-    artifact_path = await archive_client_artifact(
-        client_id, f"documents-{doc_id}", content, ext, file.content_type or "application/octet-stream"
-    )
+    try:
+        clean_upload = await inspect_upload(
+            database=db,
+            content=content,
+            filename=file.filename,
+            content_type=file.content_type,
+            tenant_id=client.get("tenant_id") or current_user.get("tenant_id"),
+            client_id=client_id,
+            target_type="client_document",
+            target_id=doc_id,
+            actor_id=str(current_user.get("id") or "unknown"),
+            actor_name=str(current_user.get("name") or current_user.get("email") or current_user.get("id") or "unknown"),
+        )
+    except UploadQuarantineFailure as exc:
+        if exc.rejected:
+            raise HTTPException(status_code=422, detail="Upload rejected by malware scanner") from exc
+        raise HTTPException(status_code=503, detail="Upload scanning is temporarily unavailable") from exc
+
     doc = {
         "id": doc_id,
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "kind": "file",
         "title": title or file.filename,
         "original_filename": file.filename,
         "extension": ext,
         "category": category,
         "size_bytes": len(content),
-        "url": f"/api/uploads/client-documents/{filename}",
+        "stored_filename": filename,
+        "content_type": file.content_type or "application/octet-stream",
         "uploaded_by": current_user.get("id"),
         "uploaded_by_name": current_user.get("name"),
+        "security_scan": clean_upload.metadata(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    if artifact_path:
-        doc["artifact_storage"] = {
-            "provider": "supabase",
-            "object_path": artifact_path,
-            "content_type": file.content_type or "application/octet-stream",
-            "mirrored_at": datetime.now(timezone.utc).isoformat(),
-        }
-    await db.client_documents.insert_one({**doc})
-    return doc
+    artifact_path = None
+    inserted = False
+    try:
+        filepath.write_bytes(content)
+        artifact_path = await archive_client_artifact(
+            client_id, f"documents-{doc_id}", content, ext, file.content_type or "application/octet-stream"
+        )
+        if artifact_path:
+            doc["artifact_storage"] = {
+                "provider": "supabase",
+                "object_path": artifact_path,
+                "content_type": file.content_type or "application/octet-stream",
+                "mirrored_at": datetime.now(timezone.utc).isoformat(),
+            }
+        await db.client_documents.insert_one({**doc})
+        inserted = True
+        await _write_client_audit(
+            current_user,
+            "client_document_uploaded",
+            client_id,
+            client.get("name") or "Client",
+            {"document_id": doc_id, "category": category, "size": len(content), "scan_status": "clean"},
+        )
+    except Exception:
+        filepath.unlink(missing_ok=True)
+        if artifact_path:
+            await delete_artifact(artifact_path)
+        if inserted:
+            await db.client_documents.delete_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}))
+        await discard_upload(db, clean_upload)
+        raise
+    await release_upload(db, clean_upload)
+    return _client_document_response(doc)
 
 
 @router.get("/clients/{client_id}/documents/{doc_id}/download")
 async def download_client_document(client_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
     """Return a retained client document only after client scope has been enforced."""
-    del current_user
-    doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id, "kind": "file"}, {"_id": 0})
+    doc = await db.client_documents.find_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id, "kind": "file"}), {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Client document not found")
+    if not upload_is_releasable(doc):
+        raise HTTPException(status_code=423, detail="Client document has not passed security scanning")
     object_path = (doc.get("artifact_storage") or {}).get("object_path")
-    if not object_path:
-        raise HTTPException(status_code=404, detail="Client document has not been migrated to private storage")
-    artifact = await read_artifact(object_path)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Retained client document is unavailable")
-    content, content_type = artifact
+    if object_path:
+        artifact = await read_artifact(object_path)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="Retained client document is unavailable")
+        content, content_type = artifact
+    else:
+        local_path = _local_document_path(doc)
+        if not local_path:
+            raise HTTPException(status_code=404, detail="Retained client document is unavailable")
+        if local_path.stat().st_size > MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail="Client document exceeds the allowed size")
+        content = local_path.read_bytes()
+        content_type = doc.get("content_type") or "application/octet-stream"
     filename = safe_original_filename(doc.get("original_filename") or doc.get("title"), default="client-document")
     return Response(
         content=content,
@@ -295,10 +397,11 @@ async def upsert_client_runbook(client_id: str, data: dict, current_user: dict =
     """Create or update a runbook / SOP for a client (Hudu-style rich-text doc)."""
     await _ensure_client(client_id)
     doc_id = data.get("id") or str(uuid.uuid4())
-    existing = await db.client_documents.find_one({"id": doc_id, "client_id": client_id}, {"_id": 0})
+    existing = await db.client_documents.find_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}), {"_id": 0})
     base = {
         "id": doc_id,
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "kind": "runbook",
         "title": data.get("title", "Untitled Runbook"),
         "category": data.get("category", "runbook"),
@@ -310,7 +413,7 @@ async def upsert_client_runbook(client_id: str, data: dict, current_user: dict =
         "updated_by_name": current_user.get("name"),
     }
     if existing:
-        await db.client_documents.update_one({"id": doc_id}, {"$set": base})
+        await db.client_documents.update_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}), {"$set": base})
         return {**existing, **base}
     base["created_at"] = base["updated_at"]
     base["created_by"] = current_user.get("id")
@@ -321,22 +424,22 @@ async def upsert_client_runbook(client_id: str, data: dict, current_user: dict =
 
 @router.delete("/clients/{client_id}/documents/{doc_id}")
 async def delete_client_document(client_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id}, {"_id": 0})
+    doc = await db.client_documents.find_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}), {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    # If file, remove from disk
-    if doc.get("kind") == "file" and doc.get("url"):
-        try:
-            filename = doc["url"].rsplit("/", 1)[-1]
-            filepath = CLIENT_DOCS_DIR / filename
-            if filepath.exists():
-                filepath.unlink()
-        except Exception:
-            pass
+    # Remove both the current private local copy and a legacy local copy. The
+    # filename parser rejects paths, so record data cannot escape these roots.
+    if doc.get("kind") == "file":
+        filename = _document_filename(doc)
+        if filename:
+            for directory in (CLIENT_DOCS_DIR, LEGACY_CLIENT_DOCS_DIR):
+                filepath = directory / filename
+                if filepath.is_file():
+                    filepath.unlink()
     artifact_path = (doc.get("artifact_storage") or {}).get("object_path")
     if artifact_path:
         await delete_artifact(artifact_path)
-    await db.client_documents.delete_one({"id": doc_id})
+    await db.client_documents.delete_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}))
     return {"message": "Document deleted"}
 
 

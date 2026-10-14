@@ -13,6 +13,7 @@ Endpoints:
     POST /api/chat/channels/{id}/messages â€” send message
     GET  /api/chat/channels/{id}/messages?since=iso â€” fetch recent
     POST /api/chat/channels/{id}/read   â€” mark all read for me
+    POST /api/chat/channels/{id}/mark-unread — restore the newest received post to my inbox
     GET  /api/chat/unread               â€” unread counts per channel
 
   Slash commands:
@@ -26,7 +27,8 @@ LED computation rule (frontend):
   - off_shift (white): out of tech_roster shift_start..shift_end
   - offline (grey): heartbeat > 60s ago
 """
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
+from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone, timedelta
 import asyncio, os, re, uuid
 from typing import Optional
@@ -39,9 +41,11 @@ from app.services.chat_access import (
     enrich_channels,
     ensure_default_channels,
     require_channel_access,
+    live_update_recipients,
 )
+from app.services.chat_live import publish_channel_update, stream_events
 from app.services.avatar_enrichment import attach_user_avatars
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -53,8 +57,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _now_iso() -> str:
-    return _now().isoformat()
+from app.services.time_utils import now_iso as _now_iso
+
+
+async def _record_channel_created(channel: dict, actor: dict) -> None:
+    await db.chat_channel_events.insert_one({
+        "id": uuid.uuid4().hex,
+        "tenant_id": str(actor.get("tenant_id") or "nexus-local"),
+        "channel_id": channel["id"],
+        "event_type": "channel.created",
+        "actor_id": actor.get("id"),
+        "actor_name": actor.get("name") or "Nexus operator",
+        "details": {"is_private": bool(channel.get("is_private"))},
+        "created_at": _now_iso(),
+    })
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• PRESENCE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -64,6 +80,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
     """Client calls this every 15s. Optionally include a busy_state hint
     e.g. {"busy_state": "ticket:TKT-001"} when on a ticket detail page."""
     doc = {
+        "tenant_id": platform_tenant_id(current_user),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
         "user_email": current_user.get("email"),
@@ -92,7 +109,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
                 )
                 if item:
                     next_busy_state = f"{kind}:{item.get(reference_field) or item.get('id')}"
-        previous = await db.presence_state.find_one({"user_id": doc["user_id"]}, {"_id": 0, "busy_state": 1})
+        previous = await db.presence_state.find_one(tenant_scoped_query(current_user, {"user_id": doc["user_id"]}), {"_id": 0, "busy_state": 1})
         previous_busy_state = (previous or {}).get("busy_state")
         doc["busy_state"] = next_busy_state
         # Record only transitions, not every heartbeat. This is the audit trail
@@ -100,6 +117,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
         if previous_busy_state != next_busy_state:
             await db.work_activity_audit.insert_one({
                 "id": uuid.uuid4().hex,
+                "tenant_id": platform_tenant_id(current_user),
                 "user_id": doc["user_id"],
                 "user_name": doc["user_name"],
                 "avatar_url": doc["avatar_url"],
@@ -108,7 +126,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
                 "previous_work_item": previous_busy_state,
                 "created_at": doc["last_heartbeat"],
             })
-    await db.presence_state.update_one({"user_id": doc["user_id"]}, {"$set": doc}, upsert=True)
+    await db.presence_state.update_one(tenant_scoped_query(current_user, {"user_id": doc["user_id"]}), {"$set": doc}, upsert=True)
     return {"ok": True, "ts": doc["last_heartbeat"]}
 
 
@@ -120,8 +138,8 @@ async def set_status(payload: dict = Body(...), current_user: dict = Depends(get
         raise HTTPException(400, "invalid manual_state")
     patch = {"manual_state": state or None, "manual_state_set_at": _now_iso()}
     await db.presence_state.update_one(
-        {"user_id": current_user.get("id")},
-        {"$set": patch},
+        tenant_scoped_query(current_user, {"user_id": current_user.get("id")}),
+        {"$set": patch, "$setOnInsert": {"tenant_id": platform_tenant_id(current_user), "user_id": current_user.get("id")}},
         upsert=True,
     )
     return {"ok": True}
@@ -129,7 +147,7 @@ async def set_status(payload: dict = Body(...), current_user: dict = Depends(get
 
 @router.get("/presence")
 async def list_presence(current_user: dict = Depends(get_current_user)):
-    rows = await db.presence_state.find({}, {"_id": 0}).to_list(500)
+    rows = await db.presence_state.find(tenant_scoped_query(current_user), {"_id": 0}).to_list(500)
     now = _now()
     enriched = []
     for r in rows:
@@ -178,7 +196,7 @@ async def work_activity(
     enough to show in context on a chat-linked ticket, invoice, or PO.
     """
     rows = await db.work_activity_audit.find(
-        {"work_item": work_item}, {"_id": 0}
+        tenant_scoped_query(current_user, {"work_item": work_item}), {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
     return {"work_item": work_item, "events": await attach_user_avatars(rows)}
 
@@ -189,13 +207,15 @@ async def _ensure_channel(
     name: str,
     kind: str = "team",
     member_ids: Optional[list] = None,
+    user: dict | None = None,
     **extra,
 ) -> dict:
-    existing = await db.chat_channels.find_one({"name": name, "kind": kind}, {"_id": 0})
+    existing = await db.chat_channels.find_one(tenant_scoped_query(user or {}, {"name": name, "kind": kind}), {"_id": 0})
     if existing:
         return existing
     doc = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(user or {}),
         "name": name,
         "kind": kind,
         "member_ids": member_ids or [],  # empty list = open to all staff
@@ -210,7 +230,7 @@ async def _ensure_channel(
 
 @router.get("/chat/channels")
 async def list_channels(current_user: dict = Depends(get_current_user)):
-    await ensure_default_channels()
+    await ensure_default_channels(current_user)
     rows = await db.chat_channels.find(
         channel_visibility_query(current_user),
         {"_id": 0},
@@ -223,7 +243,7 @@ async def create_channel(payload: dict = Body(...), current_user: dict = Depends
     name = re.sub(r"-+", "-", (payload.get("name") or "").strip().lower().replace(" ", "-"))
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,49}", name):
         raise HTTPException(400, "Channel names must be 2-50 letters, numbers, dashes, or underscores")
-    if await db.chat_channels.find_one({"name": name, "kind": "team"}, {"_id": 1}):
+    if await db.chat_channels.find_one(tenant_scoped_query(current_user, {"name": name, "kind": "team"}), {"_id": 1}):
         raise HTTPException(409, "A channel with that name already exists")
 
     is_private = bool(payload.get("is_private"))
@@ -234,16 +254,17 @@ async def create_channel(payload: dict = Body(...), current_user: dict = Depends
     if is_private and current_user.get("id") not in members:
         members.append(current_user.get("id"))
     if is_private:
-        valid_members = await db.users.count_documents({
+        valid_members = await db.users.count_documents(tenant_scoped_query(current_user, {
             "id": {"$in": members},
             "is_active": {"$ne": False},
-        })
+        }))
         if valid_members != len(members):
             raise HTTPException(400, "One or more selected teammates are unavailable")
 
     now = _now_iso()
     doc = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "name": name,
         "display_name": name.replace("-", " ").title(),
         "description": str(payload.get("description") or "").strip()[:240],
@@ -256,6 +277,7 @@ async def create_channel(payload: dict = Body(...), current_user: dict = Depends
         "updated_at": now,
     }
     await db.chat_channels.insert_one(dict(doc))
+    await _record_channel_created(doc, current_user)
     return (await enrich_channels([doc], current_user))[0]
 
 
@@ -266,13 +288,14 @@ async def get_or_create_dm(user_id: str, current_user: dict = Depends(get_curren
         raise HTTPException(400, "cannot DM yourself")
     pair = sorted([me, user_id])
     name = f"dm:{pair[0]}:{pair[1]}"
-    other = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "name": 1, "email": 1})
+    other = await db.users.find_one(tenant_scoped_query(current_user, {"id": user_id}), {"_id": 0, "id": 1, "name": 1, "email": 1})
     if not other:
         raise HTTPException(404, "user not found")
     doc = await _ensure_channel(
         name,
         "dm",
         pair,
+        current_user,
         is_private=True,
         is_dm=True,
         created_by=me,
@@ -295,6 +318,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
 
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "channel_id": channel_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
@@ -308,9 +332,10 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
     }
     await db.chat_messages.insert_one(dict(msg))
     await db.chat_channels.update_one(
-        {"id": channel_id},
+        tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
+    publish_channel_update(channel_id, "message.created", live_update_recipients(ch), tenant_id=platform_tenant_id(current_user))
     msg.pop("_id", None)
 
     notified_ids = set()
@@ -320,16 +345,54 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
     eligible_ids = set(ch.get("member_ids") or [])
     if not eligible_ids:
         active_users = await db.users.find(
-            {"is_active": {"$ne": False}, "archived": {"$ne": True}},
+            tenant_scoped_query(current_user, {"is_active": {"$ne": False}, "archived": {"$ne": True}}),
             {"_id": 0, "id": 1},
         ).to_list(500)
         eligible_ids = {row.get("id") for row in active_users if row.get("id")}
 
+    # Notification preferences are recipient-owned. They affect delivery only;
+    # they never change message visibility or channel membership.
+    preference_rows = await db.chat_user_preferences.find(
+        {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "channel_id": channel_id,
+            "user_id": {"$in": list(eligible_ids)},
+        },
+        {"_id": 0, "user_id": 1, "is_muted": 1, "notify_level": 1, "mute_until": 1},
+    ).to_list(500)
+    preferences_by_user = {row.get("user_id"): row for row in preference_rows if row.get("user_id")}
+    now = datetime.now(timezone.utc)
+    def notifications_muted(preference: dict) -> bool:
+        if preference.get("notify_level") == "none":
+            return True
+        mute_until = preference.get("mute_until")
+        if mute_until:
+            try:
+                return datetime.fromisoformat(str(mute_until).replace("Z", "+00:00")) > now
+            except ValueError:
+                return True
+        return bool(preference.get("is_muted"))
+
+    eligible_ids = {uid for uid in eligible_ids if not notifications_muted(preferences_by_user.get(uid) or {})}
+
     # Push notifications for explicit @user mentions
+    all_message_ids = [uid for uid in eligible_ids if (preferences_by_user.get(uid) or {}).get("notify_level") == "all"]
+    for uid in all_message_ids:
+        if uid == current_user.get("id"):
+            continue
+        notified_ids.add(uid)
+        await db.notifications.insert_one({
+            "id": uuid.uuid4().hex,
+            "tenant_id": platform_tenant_id(current_user),
+            "type": "chat_message",
+            "title": f"💬 {current_user.get('name')} posted in #{ch.get('name') or 'channel'}",
+            "body": body[:200], "message": body[:200], "ref_type": "chat_channel", "ref_id": channel_id,
+            "user_id": uid, "target_user_id": uid, "read": False, "created_at": _now_iso(),
+        })
     for m in mentions:
         handle = m.lower()
         candidates = await db.users.find(
-            {"id": {"$in": list(eligible_ids)}, "is_active": {"$ne": False}, "archived": {"$ne": True}},
+            tenant_scoped_query(current_user, {"id": {"$in": list(eligible_ids)}, "is_active": {"$ne": False}, "archived": {"$ne": True}}),
             {"_id": 0, "id": 1, "name": 1, "email": 1},
         ).to_list(500)
         # The composer inserts an email handle, which is unambiguous.  Keep a
@@ -341,6 +404,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
             notified_ids.add(u["id"])
             await db.notifications.insert_one({
                 "id": uuid.uuid4().hex,
+                "tenant_id": platform_tenant_id(current_user),
                 "type": "chat_mention",
                 "title": f"💬 {current_user.get('name')} mentioned you",
                 "body": body[:200],
@@ -361,7 +425,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         # explicit channel-wide mention wins.
         if "here" in broadcast_tokens and not ({"channel", "everyone"} & broadcast_tokens):
             presence_rows = await db.presence_state.find(
-                {"user_id": {"$in": member_ids}},
+                tenant_scoped_query(current_user, {"user_id": {"$in": member_ids}}),
                 {"_id": 0, "user_id": 1, "last_heartbeat": 1, "manual_state": 1},
             ).to_list(500)
             active_ids = set()
@@ -381,6 +445,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
             notified_ids.add(uid)
             await db.notifications.insert_one({
                 "id": uuid.uuid4().hex,
+                "tenant_id": platform_tenant_id(current_user),
                 "type": "chat_broadcast",
                 "title": f"📢 {current_user.get('name')} pinged #{ch_label}",
                 "body": body[:200],
@@ -395,10 +460,20 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
     return msg
 
 
+@router.get("/chat/events/stream")
+async def chat_event_stream(request: Request, current_user: dict = Depends(get_current_user)):
+    """Authenticated SSE invalidations; message contents remain REST-only."""
+    return StreamingResponse(
+        stream_events(request, str(current_user.get("id") or ""), platform_tenant_id(current_user)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/chat/channels/{channel_id}/messages")
 async def list_messages(channel_id: str, since: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
-    q = {"channel_id": channel_id}
+    q = tenant_scoped_query(current_user, {"channel_id": channel_id})
     if since:
         q["ts"] = {"$gt": since}
     rows = await db.chat_messages.find(q, {"_id": 0}).sort("ts", -1).limit(200).to_list(200)
@@ -411,11 +486,40 @@ async def mark_read(channel_id: str, current_user: dict = Depends(get_current_us
     await require_channel_access(channel_id, current_user)
     read_at = _now_iso()
     await db.chat_read_state.update_one(
-        {"channel_id": channel_id, "user_id": current_user.get("id")},
-        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": read_at}},
+        tenant_scoped_query(current_user, {"channel_id": channel_id, "user_id": current_user.get("id")}),
+        {"$set": {"tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": read_at}},
         upsert=True,
     )
     return {"ok": True}
+
+
+@router.post("/chat/channels/{channel_id}/mark-unread")
+async def mark_unread(channel_id: str, current_user: dict = Depends(get_current_user)):
+    """Move the newest received top-level post back into the caller's inbox."""
+    await require_channel_access(channel_id, current_user)
+    newest_received = await db.chat_messages.find_one(
+        tenant_scoped_query(current_user, {
+            "channel_id": channel_id,
+            "thread_id": {"$exists": False},
+            "user_id": {"$ne": current_user.get("id")},
+            "deleted": {"$ne": True},
+        }),
+        {"_id": 0, "ts": 1},
+        sort=[("ts", -1)],
+    )
+    if not newest_received or not newest_received.get("ts"):
+        return {"ok": False, "reason": "no_received_message"}
+    try:
+        marker = datetime.fromisoformat(str(newest_received["ts"]).replace("Z", "+00:00")) - timedelta(microseconds=1)
+        last_read_at = marker.isoformat()
+    except (TypeError, ValueError):
+        raise HTTPException(409, "The newest message does not have a valid timestamp")
+    await db.chat_read_state.update_one(
+        tenant_scoped_query(current_user, {"channel_id": channel_id, "user_id": current_user.get("id")}),
+        {"$set": {"tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": last_read_at}},
+        upsert=True,
+    )
+    return {"ok": True, "last_read_at": last_read_at}
 
 
 @router.get("/chat/channels/{channel_id}/read-receipts")
@@ -423,10 +527,10 @@ async def channel_read_receipts(channel_id: str, current_user: dict = Depends(ge
     """Read cursors for a conversation, used to render per-message receipts."""
     await require_channel_access(channel_id, current_user)
     rows = await db.chat_read_state.find(
-        {"channel_id": channel_id}, {"_id": 0, "user_id": 1, "last_read_at": 1}
+        tenant_scoped_query(current_user, {"channel_id": channel_id}), {"_id": 0, "user_id": 1, "last_read_at": 1}
     ).to_list(200)
     user_ids = [row.get("user_id") for row in rows if row.get("user_id")]
-    users = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "name": 1, "avatar": 1}).to_list(200)
+    users = await db.users.find(tenant_scoped_query(current_user, {"id": {"$in": user_ids}}), {"_id": 0, "id": 1, "name": 1, "avatar": 1}).to_list(200)
     users_by_id = {user.get("id"): user for user in users}
     return [
         {
@@ -440,9 +544,9 @@ async def channel_read_receipts(channel_id: str, current_user: dict = Depends(ge
 
 @router.get("/chat/unread")
 async def unread_counts(current_user: dict = Depends(get_current_user)):
-    await ensure_default_channels()
+    await ensure_default_channels(current_user)
     uid = current_user.get("id")
-    reads = await db.chat_read_state.find({"user_id": uid}, {"_id": 0}).to_list(200)
+    reads = await db.chat_read_state.find(tenant_scoped_query(current_user, {"user_id": uid}), {"_id": 0}).to_list(200)
     last_read_by_ch = {r["channel_id"]: r.get("last_read_at") for r in reads}
     channels = await db.chat_channels.find(
         channel_visibility_query(current_user),
@@ -451,12 +555,12 @@ async def unread_counts(current_user: dict = Depends(get_current_user)):
     async def _count(ch: dict) -> tuple[str, int]:
         cid = ch["id"]
         last = last_read_by_ch.get(cid)
-        q = {
+        q = tenant_scoped_query(current_user, {
             "channel_id": cid,
             "user_id": {"$ne": uid},
             "thread_id": {"$exists": False},
             "deleted": {"$ne": True},
-        }
+        })
         if last:
             q["ts"] = {"$gt": last}
         return cid, await db.chat_messages.count_documents(q)
@@ -525,7 +629,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         # /assign @bob TKT-001
         who = args[0].lstrip("@")
         ticket_no = args[1]
-        u = await db.users.find_one({"$or": [{"name": {"$regex": who, "$options": "i"}}, {"email": {"$regex": who, "$options": "i"}}]}, {"_id": 0})
+        u = await db.users.find_one(tenant_scoped_query(current_user, {"$or": [{"name": {"$regex": who, "$options": "i"}}, {"email": {"$regex": who, "$options": "i"}}]}), {"_id": 0})
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if u and t:
             await assert_client_scope(current_user, t.get("client_id"), operation="chat:assign_ticket", mask_not_found=True)
@@ -537,7 +641,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             }})
             await ticket_audit(t["id"], current_user, "assigned", f"Assigned to {u.get('name')} from Team Chat")
             return await _post_system_msg(channel_id, f"✅ {ticket_no} assigned to {u.get('name')}")
-        return await _post_system_msg(channel_id, f"❌ Couldn't assign — user or ticket not found")
+        return await _post_system_msg(channel_id, "❌ Couldn't assign — user or ticket not found")
 
     if cmd == "ticket" and len(args) >= 3:
         # /ticket TKT-001 status closed     |   /ticket TKT-001 priority high
@@ -625,7 +729,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
 
     if cmd == "summarize":
         # AI summary of recent channel messages
-        msgs = await db.chat_messages.find({"channel_id": channel_id}, {"_id": 0}).sort("ts", -1).limit(40).to_list(40)
+        msgs = await db.chat_messages.find(tenant_scoped_query(current_user, {"channel_id": channel_id}), {"_id": 0}).sort("ts", -1).limit(40).to_list(40)
         if not msgs:
             return await _post_system_msg(channel_id, "Nothing to summarize.")
         msgs.reverse()
@@ -649,6 +753,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         sev = args[0].lower()
         await db.notifications.insert_one({
             "id": uuid.uuid4().hex,
+            "tenant_id": platform_tenant_id(current_user),
             "type": "chat_page",
             "title": f"📟 PAGE ({sev.upper()})",
             "body": f"{current_user.get('name')} paged the team in chat",
@@ -678,8 +783,13 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
 
 
 async def _post_system_msg(channel_id: str, body: str) -> dict:
+    # Slash commands are only reached after channel access has been checked.
+    # Derive the partition from that durable parent so system posts stay with
+    # the initiating conversation instead of falling into another tenant.
+    channel = await db.chat_channels.find_one({"id": channel_id}, {"_id": 0, "tenant_id": 1}) or {}
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": str(channel.get("tenant_id") or "nexus-local"),
         "channel_id": channel_id,
         "user_id": "system",
         "user_name": "Nexus Automation",

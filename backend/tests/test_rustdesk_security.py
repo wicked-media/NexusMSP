@@ -163,22 +163,24 @@ def test_new_registry_password_is_encrypted_at_rest_and_redacted(monkeypatch):
     assert result["credential_configured"] is True
 
 
-def test_connection_masks_foreign_record_and_migrates_legacy_secret(monkeypatch):
-    fake_db = _install_db(monkeypatch)
+def test_legacy_connection_routes_are_retired_before_secret_or_session_access(monkeypatch):
+    class _NoLegacyDatabase:
+        def __getattr__(self, name):
+            raise AssertionError(f"retired connection must not access db.{name}")
 
-    with pytest.raises(HTTPException) as exc:
+    monkeypatch.setattr(rustdesk, "db", _NoLegacyDatabase())
+
+    with pytest.raises(HTTPException) as managed:
         asyncio.run(rustdesk.initiate_rustdesk_connection(
-            "rd-b", _request("POST"), _tech("client-a")
+            "rd-a", _request("POST"), _tech("client-a")
         ))
-    assert exc.value.status_code == 404
+    assert managed.value.status_code == 410
 
-    result = asyncio.run(rustdesk.initiate_rustdesk_connection(
-        "rd-a", _request("POST"), _tech("client-a")
-    ))
-    stored = fake_db.rustdesk_devices.rows[0]
-    assert result["rustdesk_password"] == "legacy-secret"
-    assert stored.get("rustdesk_password") in (None, "")
-    assert decrypt_secret(stored["rustdesk_password_encrypted"]) == "legacy-secret"
+    with pytest.raises(HTTPException) as quick:
+        asyncio.run(rustdesk.quick_connect(
+            {"rustdesk_id": "100-200"}, _request("POST"), _tech("client-a")
+        ))
+    assert quick.value.status_code == 410
 
 
 def test_all_devices_is_scoped_and_never_returns_passwords(monkeypatch):

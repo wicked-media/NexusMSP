@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import uuid
@@ -12,7 +11,14 @@ import struct
 import time
 import qrcode
 from app.database import db
-from app.auth import cache_busted_avatar_url, get_current_user, hash_password, verify_password, password_policy_error
+from app.auth import (
+    cache_busted_avatar_url,
+    get_current_user,
+    hash_password,
+    password_policy_error,
+    revoke_all_user_sessions,
+    verify_password,
+)
 
 router = APIRouter()
 
@@ -71,8 +77,15 @@ async def change_password(data: dict, current_user: dict = Depends(get_current_u
     user = await db.users.find_one({"id": current_user["id"]})
     if not user or not verify_password(current_pw, user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    await db.users.update_one({"id": current_user["id"]}, {"$set": {"password_hash": hash_password(new_pw)}})
-    return {"message": "Password changed successfully"}
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {"$set": {"password_hash": hash_password(new_pw)}},
+    )
+    await revoke_all_user_sessions(current_user["id"])
+    return {
+        "message": "Password changed. All active sessions were revoked; sign in again to continue.",
+        "sessions_revoked": True,
+    }
 
 # ============== 2FA / TOTP ==============
 
@@ -132,7 +145,11 @@ async def disable_2fa(data: dict, current_user: dict = Depends(get_current_user)
     if not user or not verify_password(password, user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Password is incorrect")
     await db.user_2fa.delete_one({"user_id": current_user["id"]})
-    return {"message": "2FA disabled"}
+    await revoke_all_user_sessions(current_user["id"])
+    return {
+        "message": "2FA disabled. All active sessions were revoked; sign in again to continue.",
+        "sessions_revoked": True,
+    }
 
 # ============== FIDO2 / SECURITY KEYS ==============
 
@@ -288,3 +305,174 @@ async def update_display_prefs(data: dict, current_user: dict = Depends(get_curr
         upsert=True
     )
     return {"message": "Display preferences updated"}
+
+# ============== WEB STUDIO PREFERENCES ==============
+#
+# Web Studio defaults belong to the technician, but an organisation may cap
+# which update policy a technician may choose. This endpoint stores the
+# technician's preference; it never grants a permission, so a technician cannot
+# raise their own authority by editing these fields.
+
+WEB_STUDIO_PREF_DEFAULTS = {
+    "default_view": "fleet",
+    "default_update_policy": "manual",
+    "show_only_attention": False,
+    "confirm_destructive": True,
+    "inventory_refresh_hours": 24,
+}
+_WEB_STUDIO_VIEWS = {"fleet", "portfolio", "plugins", "updates"}
+_UPDATE_POLICIES = {"manual", "assisted", "policy_driven"}
+_INVENTORY_REFRESH_HOURS = {1, 4, 12, 24}
+
+
+async def _load_user_settings(current_user: dict) -> dict:
+    return await db.user_settings.find_one({"user_id": current_user["id"]}, {"_id": 0}) or {}
+
+
+def _validate_web_studio_prefs(data: dict) -> dict:
+    """Return only known, valid keys. Unknown keys are dropped, not stored."""
+    clean: dict = {}
+    if "default_view" in data:
+        if data["default_view"] not in _WEB_STUDIO_VIEWS:
+            raise HTTPException(status_code=400, detail="Choose a valid Web Studio view")
+        clean["default_view"] = data["default_view"]
+    if "default_update_policy" in data:
+        if data["default_update_policy"] not in _UPDATE_POLICIES:
+            raise HTTPException(status_code=400, detail="Choose a valid update policy")
+        clean["default_update_policy"] = data["default_update_policy"]
+    if "show_only_attention" in data:
+        clean["show_only_attention"] = bool(data["show_only_attention"])
+    if "confirm_destructive" in data:
+        clean["confirm_destructive"] = bool(data["confirm_destructive"])
+    if "inventory_refresh_hours" in data:
+        try:
+            hours = int(data["inventory_refresh_hours"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Choose a valid inventory refresh interval")
+        if hours not in _INVENTORY_REFRESH_HOURS:
+            raise HTTPException(status_code=400, detail="Choose a valid inventory refresh interval")
+        clean["inventory_refresh_hours"] = hours
+    return clean
+
+
+@router.get("/user-settings/web-studio")
+async def get_web_studio_prefs(current_user: dict = Depends(get_current_user)):
+    settings = await _load_user_settings(current_user)
+    stored = settings.get("web_studio_prefs") or {}
+    return {**WEB_STUDIO_PREF_DEFAULTS, **stored, "prefs_version": settings.get("prefs_version", 0)}
+
+
+@router.put("/user-settings/web-studio")
+async def update_web_studio_prefs(data: dict, current_user: dict = Depends(get_current_user)):
+    """Save Web Studio preferences with optimistic concurrency protection.
+
+    A browser tab that sends a stale ``expected_version`` is refused with 409 so
+    one tab cannot silently overwrite a change made in another tab.
+    """
+    clean = _validate_web_studio_prefs(data)
+    if not clean:
+        raise HTTPException(status_code=400, detail="No Web Studio preference values were supplied")
+    settings = await _load_user_settings(current_user)
+    stored = settings.get("web_studio_prefs") or {}
+    expected = data.get("expected_version")
+    current_version = settings.get("prefs_version", 0)
+    if expected is not None and int(expected) != int(current_version):
+        raise HTTPException(status_code=409, detail="These settings changed in another session. Reload before saving.")
+    merged = {**stored, **clean}
+    next_version = current_version + 1
+    await db.user_settings.update_one(
+        {"user_id": current_user["id"]},
+        {"$set": {"web_studio_prefs": merged, "prefs_version": next_version, "user_id": current_user["id"]}},
+        upsert=True
+    )
+    return {"message": "Web Studio preferences updated", "web_studio_prefs": {**WEB_STUDIO_PREF_DEFAULTS, **merged}, "prefs_version": next_version}
+
+# ============== WORKSPACE PORTABILITY ==============
+#
+# A technician's workspace layout follows them to any workstation because it is
+# stored against the technician identity, not the browser.
+
+WORKSPACE_PREF_DEFAULTS = {
+    "landing_route": "/",
+    "pinned_modules": [],
+    "table_density": "normal",
+    "default_page_size": 25,
+    "remote_default_view": "devices",
+    "shortcuts": {},
+}
+_WORKSPACE_LANDING_ROUTES = {"/", "/tickets", "/devices", "/clients", "/web-studio", "/control-plane", "/team-hub"}
+_WORKSPACE_DENSITIES = {"normal", "compact", "comfortable"}
+_WORKSPACE_PAGE_SIZES = {10, 25, 50, 100}
+_WORKSPACE_REMOTE_VIEWS = {"devices", "sessions", "connection"}
+_SHORTCUT_ACTIONS = {"command_palette", "new_ticket", "search", "toggle_sidebar", "new_web_update_plan"}
+
+
+@router.get("/user-settings/workspace")
+async def get_workspace_prefs(current_user: dict = Depends(get_current_user)):
+    settings = await _load_user_settings(current_user)
+    stored = settings.get("workspace_prefs") or {}
+    return {**WORKSPACE_PREF_DEFAULTS, **stored, "prefs_version": settings.get("prefs_version", 0)}
+
+
+@router.put("/user-settings/workspace")
+async def update_workspace_prefs(data: dict, current_user: dict = Depends(get_current_user)):
+    clean: dict = {}
+    if "landing_route" in data:
+        if data["landing_route"] not in _WORKSPACE_LANDING_ROUTES:
+            raise HTTPException(status_code=400, detail="Choose a valid landing route")
+        clean["landing_route"] = data["landing_route"]
+    if "pinned_modules" in data:
+        pinned = data["pinned_modules"]
+        if not isinstance(pinned, list) or not all(isinstance(item, str) for item in pinned):
+            raise HTTPException(status_code=400, detail="Pinned modules must be a list of names")
+        clean["pinned_modules"] = [item.strip() for item in pinned[:12] if item.strip()]
+    if "table_density" in data:
+        if data["table_density"] not in _WORKSPACE_DENSITIES:
+            raise HTTPException(status_code=400, detail="Choose a valid table density")
+        clean["table_density"] = data["table_density"]
+    if "default_page_size" in data:
+        try:
+            size = int(data["default_page_size"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Choose a valid page size")
+        if size not in _WORKSPACE_PAGE_SIZES:
+            raise HTTPException(status_code=400, detail="Choose a valid page size")
+        clean["default_page_size"] = size
+    if "remote_default_view" in data:
+        if data["remote_default_view"] not in _WORKSPACE_REMOTE_VIEWS:
+            raise HTTPException(status_code=400, detail="Choose a valid remote view")
+        clean["remote_default_view"] = data["remote_default_view"]
+    if "shortcuts" in data:
+        shortcuts = data["shortcuts"]
+        if not isinstance(shortcuts, dict):
+            raise HTTPException(status_code=400, detail="Shortcuts must be a map of action to key")
+        clean_shortcuts = {}
+        seen_keys: dict[str, str] = {}
+        for action, key in shortcuts.items():
+            if action not in _SHORTCUT_ACTIONS:
+                continue
+            key_value = str(key or "").strip()
+            if not key_value:
+                continue
+            canonical = key_value.lower()
+            if canonical in seen_keys:
+                raise HTTPException(status_code=400, detail=f"{key_value} is already assigned to {seen_keys[canonical]}")
+            seen_keys[canonical] = action
+            clean_shortcuts[action] = key_value
+        clean["shortcuts"] = clean_shortcuts
+    if not clean:
+        raise HTTPException(status_code=400, detail="No workspace preference values were supplied")
+    settings = await _load_user_settings(current_user)
+    stored = settings.get("workspace_prefs") or {}
+    expected = data.get("expected_version")
+    current_version = settings.get("prefs_version", 0)
+    if expected is not None and int(expected) != int(current_version):
+        raise HTTPException(status_code=409, detail="These settings changed in another session. Reload before saving.")
+    merged = {**stored, **clean}
+    next_version = current_version + 1
+    await db.user_settings.update_one(
+        {"user_id": current_user["id"]},
+        {"$set": {"workspace_prefs": merged, "prefs_version": next_version, "user_id": current_user["id"]}},
+        upsert=True
+    )
+    return {"message": "Workspace preferences updated", "workspace_prefs": {**WORKSPACE_PREF_DEFAULTS, **merged}, "prefs_version": next_version}

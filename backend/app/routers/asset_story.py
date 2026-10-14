@@ -36,34 +36,13 @@ USEFUL_LIFE_MONTHS = {
 }
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
-def _number(value: Any) -> float | None:
-    if value in (None, "") or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+from app.services.number_utils import float_or_none as _number
 
 
-def _parse_date(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        text = str(value or "").strip()
-        if not text:
-            return None
-        try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
-            try:
-                parsed = datetime.strptime(text[:10], "%Y-%m-%d")
-            except ValueError:
-                return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+from app.services.time_utils import parse_datetime_tolerant as _parse_date
 
 
 def _add_months(value: datetime, months: int) -> datetime:

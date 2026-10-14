@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/getlantern/systray"
-	"nexusagent/internal/config"
 )
 
-const consoleAddress = "127.0.0.1:5968"
+const (
+	brokerAddress  = "127.0.0.1:5968"
+	consoleAddress = "127.0.0.1:5969"
+)
 
 type localStatus struct {
 	Agent struct {
@@ -51,7 +53,6 @@ type localStatus struct {
 }
 
 var (
-	cfg           *config.Config
 	lastStatus    localStatus
 	lastErr       string
 	statusMu      sync.RWMutex
@@ -59,11 +60,6 @@ var (
 )
 
 func main() {
-	var err error
-	cfg, err = config.LoadOrInit("")
-	if err != nil || cfg.AgentToken == "" {
-		return
-	}
 	go startConsole()
 	systray.Run(onReady, func() {
 		if consoleServer != nil {
@@ -159,11 +155,10 @@ func refreshStatus(brand, item *systray.MenuItem) {
 
 func getStatus() (localStatus, error) {
 	var status localStatus
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(cfg.ServerURL, "/")+"/api/nexus-agent/local/status", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://"+brokerAddress+"/status", nil)
 	if err != nil {
 		return status, err
 	}
-	req.Header.Set("X-Agent-Token", cfg.AgentToken)
 	client := &http.Client{Timeout: 8 * time.Second}
 	res, err := client.Do(req)
 	if err != nil {

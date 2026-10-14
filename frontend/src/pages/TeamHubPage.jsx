@@ -26,7 +26,7 @@ export default function TeamHubPage() {
   }, [searchParams, setSearchParams]);
 
   return (
-    <Suspense fallback={<div className="p-12 text-sm text-muted-foreground">Loading Team Command…</div>}>
+    <Suspense fallback={<div className="p-12 text-sm text-muted-foreground">Loading Team Hub…</div>}>
       <TechCommandCenter />
     </Suspense>
   );

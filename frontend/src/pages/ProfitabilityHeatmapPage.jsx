@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, Loader2, RefreshCw, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function ProfitabilityHeatmapPage() {
   const { token } = useAuth();
@@ -33,10 +34,7 @@ export default function ProfitabilityHeatmapPage() {
 
   return (
     <div className="space-y-5" data-testid="profitability-page">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><DollarSign className="w-6 h-6 text-emerald-400" />Client Profitability</h1><p className="text-muted-foreground mt-1">Revenue vs cost analysis per client</p></div>
-        <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-      </div>
+      <OperationalPageHeader eyebrow="Portfolio economics · margin evidence" title="Client Profitability" description="Compare client revenue with delivery cost and surface the accounts that need commercial review." icon={DollarSign} tone="emerald" signal={summary.unprofitable > 0 ? "attention" : "ready"} actions={<Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>} />
 
       <div className="grid grid-cols-5 gap-3">
         {[

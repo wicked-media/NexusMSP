@@ -11,13 +11,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Eye, FileText, GitBranch, History, Loader2, MoreHorizontal, Play, Plus, RefreshCw, RotateCcw, Snowflake, BellOff, XCircle } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { CheckCircle2, ClipboardCheck, Clock3, Eye, FileText, GitBranch, History, Loader2, Play, Plus, RefreshCw, RotateCcw, XCircle } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import WorkspaceToolsMenu from "@/components/WorkspaceToolsMenu";
 
 const EMPTY_FORM = { title: "", description: "", category: "standard", risk_level: "medium", impact: "", rollback_plan: "", client_id: "", scheduled_date: "", maintenance_window: "" };
 const STATUS_STYLE = {
@@ -35,7 +35,6 @@ const displayDate = (value) => value ? new Date(value).toLocaleString() : "Not r
 
 export default function ChangeManagementPage() {
   const { token } = useAuth();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [changes, setChanges] = useState([]);
@@ -151,7 +150,7 @@ export default function ChangeManagementPage() {
         icon={GitBranch}
         tone="indigo"
         actions={<>
-          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="gap-1.5" data-testid="change-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />Workspace<ChevronDown className="h-3 w-3" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-56"><DropdownMenuItem onClick={() => navigate("/change-freezes")}><Snowflake className="mr-2 h-4 w-4" />Change freeze calendar</DropdownMenuItem><DropdownMenuItem onClick={() => navigate("/alert-rules")}><BellOff className="mr-2 h-4 w-4" />Alert rules engine</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+          <WorkspaceToolsMenu workspace="changeManagement" testId="change-workspace-tools" />
           <Button variant="outline" size="sm" onClick={() => fetchData()} disabled={loading}><RefreshCw className={`mr-1 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-1 h-4 w-4" />New change</Button>
         </>}

@@ -2,7 +2,12 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, CheckCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Eye, Users, Terminal, Cloud, Sparkles, BarChart3, Zap, Flame, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, CheckCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Edit, Radar, Eye, Users, Cloud, Sparkles, BarChart3, Zap, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock, CircleAlert, CircleCheck, Clock3 } from "lucide-react";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+import { canExecuteAgentCommands } from "@/lib/nexusAgentHelpers";
+import DeviceWorkspaceTabs from "@/components/devices/DeviceWorkspaceTabs";
+import ManagedAssetToolsMenu from "@/components/devices/ManagedAssetToolsMenu";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -13,23 +18,22 @@ import { Dialog } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import DeviceCommandStrip from "../components/devices/DeviceCommandStrip";
 import DeviceBulkBar from "../components/devices/DeviceBulkBar";
 import DeviceMapView from "../components/devices/DeviceMapView";
 import DevicesSmartBar from "../components/devices/DevicesSmartBar";
 import FleetPulseWall from "../components/devices/FleetPulseWall";
-import TopRisksStrip from "../components/devices/TopRisksStrip";
 import ActivityTicker from "../components/devices/ActivityTicker";
 import TopTalkersPanel from "../components/devices/TopTalkersPanel";
 import OfflineWatch from "../components/devices/OfflineWatch";
 import SavedViewsBar from "../components/devices/SavedViewsBar";
 import QuickScriptDialog from "../components/devices/QuickScriptDialog";
+import AppUpdatesDialog from "../components/devices/AppUpdatesDialog";
 import RiskHeatmapCanvas from "../components/devices/RiskHeatmapCanvas";
 import LifecycleTimeline from "../components/devices/LifecycleTimeline";
 import AnomalyInbox from "../components/devices/AnomalyInbox";
-import Sparkline from "../components/devices/Sparkline";
 import StatusOrb from "../components/devices/StatusOrb";
 import DeviceThumbnail from "../components/devices/DeviceThumbnail";
 import { toast } from "sonner";
@@ -41,7 +45,8 @@ import WorkspaceControlBar from "@/components/WorkspaceControlBar";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
-const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
+const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20", archived: "bg-zinc-500/10 text-zinc-500 border-zinc-500/20" };
+const effectiveDeviceStatus = device => (device.archived || device.status === "archived") ? "archived" : device.status;
 const ELEVATE_STATE_META = {
   active: { label: "Elevate active", className: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300" },
   deploying: { label: "Elevate deploying", className: "border-sky-500/30 bg-sky-500/15 text-sky-300" },
@@ -51,15 +56,57 @@ const ELEVATE_STATE_META = {
   unsupported_platform: { label: "Elevate unsupported", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-400" },
   paused: { label: "Elevate paused", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-400" },
 };
-const MANAGED_ASSET_TOOLS = [
-  { path: "/nexus-agent", label: "NexusOps Agent", icon: Terminal },
-  { path: "/maintenance-scheduler", label: "Maintenance", icon: CalendarClock },
-  { path: "/patch-tuesday", label: "Patch Tuesday", icon: Shield },
-];
+function toPercentage(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : null;
+}
 
 function UsagePill({ value, thresholds = [70, 90] }) {
-  const color = value >= thresholds[1] ? "text-red-500" : value >= thresholds[0] ? "text-amber-500" : "text-emerald-500";
-  return <span className={`font-mono text-xs font-medium ${color}`}>{Math.round(value)}%</span>;
+  const percentage = toPercentage(value);
+  if (percentage === null) return <span className="font-mono text-xs font-medium text-zinc-500">—</span>;
+  const color = percentage >= thresholds[1] ? "text-red-500" : percentage >= thresholds[0] ? "text-amber-500" : "text-emerald-500";
+  return <span className={`font-mono text-xs font-medium ${color}`}>{Math.round(percentage)}%</span>;
+}
+
+function observationLabel(value, { prefix = true } = {}) {
+  if (!value) return "No check-in recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Check-in timestamp unavailable";
+  const relative = formatDistanceToNow(date, { addSuffix: true });
+  return prefix ? `Observed ${relative}` : relative;
+}
+
+function telemetryState(device) {
+  const timestamp = device.last_heartbeat || device.last_seen || device.telemetry_at || device.observed_at;
+  if (!timestamp) return "not_collected";
+  const observed = new Date(timestamp);
+  if (Number.isNaN(observed.getTime())) return "not_collected";
+  return Date.now() - observed.getTime() <= 15 * 60 * 1000 ? "observed" : "stale";
+}
+
+function MetricMeter({ label, value, thresholds = [70, 90] }) {
+  const percentage = toPercentage(value);
+  const color = percentage === null
+    ? "bg-zinc-700"
+    : percentage >= thresholds[1]
+      ? "bg-red-500"
+      : percentage >= thresholds[0]
+        ? "bg-amber-500"
+        : "bg-emerald-500";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between"><span className="text-[10px] text-muted-foreground">{label}</span><UsagePill value={percentage} thresholds={thresholds} /></div>
+      {percentage === null ? (
+        <div className="h-1.5 rounded-full bg-muted/80" title={`${label} has not been reported by the device`} />
+      ) : (
+        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+          <div className={`h-full rounded-full ${color} transition-[width] duration-500`} style={{ width: `${percentage}%` }} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 const emptyForm = { name: "", client_id: "", device_type: "workstation", os: "Windows 11", ip_address: "", serial_number: "", mac_address: "", manufacturer: "", model: "", processor: "", ram_gb: "", storage_total_gb: "", location: "", assigned_user: "", tags: "", notes: "" };
@@ -67,7 +114,10 @@ const emptyForm = { name: "", client_id: "", device_type: "workstation", os: "Wi
 export default function DevicesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  // Which managed-asset view and which desk tool this technician (and the team)
+  // actually opens. A deliberate choice is the evidence.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.DEVICES);
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -89,20 +139,20 @@ export default function DevicesPage() {
   const [selectedDiscovered, setSelectedDiscovered] = useState([]);
   const [importLoading, setImportLoading] = useState(false);
   const [deviceViewers, setDeviceViewers] = useState({});
-  const [rdStatusMap, setRdStatusMap] = useState({});
-  const [activeProviders, setActiveProviders] = useState([]);
   const [liveChatBusy, setLiveChatBusy] = useState({});
   const [siteMap, setSiteMap] = useState([]);
   const [tab, setTab] = useState("pulse");
   const [density, setDensity] = useState("comfortable"); // comfortable | compact | dense
   const [quickScriptOpen, setQuickScriptOpen] = useState(false);
+  const [appUpdatesDevice, setAppUpdatesDevice] = useState(null);
   const [pulseCount, setPulseCount] = useState(0);
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
   const [isLinkingAcronis, setIsLinkingAcronis] = useState(false);
   const [maintenanceWindow, setMaintenanceWindow] = useState(null);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Applying a pending application update runs an audited command on a customer
+  // endpoint, so the control is gated on the same permission as every other agent action.
+  const canRunAgentCommands = canExecuteAgentCommands(user);
   const filterSource = searchParams.get("source");
   const maintenanceWindowId = searchParams.get("maintenanceWindow");
 
@@ -114,6 +164,7 @@ export default function DevicesPage() {
       setSearch(requestedSearch);
       setTab("directory");
     }
+    if (searchParams.get("source")) setTab("directory");
   }, [searchParams]);
 
   useEffect(() => {
@@ -154,7 +205,7 @@ export default function DevicesPage() {
     setLoading(true);
     try {
       const [devRes, clientRes] = await Promise.all([
-        axios.get(`${API}/devices`, { headers }),
+        axios.get(`${API}/devices?include_archived=true`, { headers }),
         axios.get(`${API}/clients`, { headers }),
       ]);
       setDevices(devRes.data);
@@ -164,16 +215,6 @@ export default function DevicesPage() {
         const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
         setDeviceViewers(vRes.data);
       } catch { setDeviceViewers({}); }
-      // Fetch RustDesk live status
-      try {
-        const rdRes = await axios.get(`${API}/rustdesk/live/status-map`, { headers });
-        if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
-      } catch {}
-      // Fetch active remote providers (TRMM/RustDesk/etc.) once per page load
-      try {
-        const pRes = await axios.get(`${API}/remote-providers/active`, { headers });
-        setActiveProviders(pRes.data || []);
-      } catch { setActiveProviders([]); }
       // Site map data
       try {
         const sRes = await axios.get(`${API}/devices/sites-map`, { headers });
@@ -207,24 +248,37 @@ export default function DevicesPage() {
   };
 
 
-  // Poll for active remote viewers and RustDesk status every 15 seconds
+  // Poll the Nexus-owned active-viewer evidence every 15 seconds.
   useEffect(() => {
     const poll = setInterval(async () => {
       try {
-        const [vRes, rdRes] = await Promise.all([
-          axios.get(`${API}/devices/active-remote-viewers`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/rustdesk/live/status-map`, { headers }).catch(() => ({ data: {} })),
-        ]);
+        const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers }).catch(() => ({ data: {} }));
         setDeviceViewers(vRes.data);
-        if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
       } catch {}
     }, 15000);
     return () => clearInterval(poll);
   }, [headers]);
 
+  const activeDevices = devices.filter((device) => !device.archived && device.status !== "archived");
+  const fleetEvidence = useMemo(() => {
+    const current = activeDevices.filter((device) => telemetryState(device) === "observed").length;
+    const stale = activeDevices.filter((device) => telemetryState(device) === "stale").length;
+    const attention = activeDevices.filter((device) => {
+      const status = effectiveDeviceStatus(device);
+      return ["offline", "warning", "critical", "needs_attention", "degraded"].includes(String(status || "").toLowerCase());
+    }).length;
+    return {
+      current,
+      stale,
+      awaitingTelemetry: Math.max(0, activeDevices.length - current - stale),
+      attention,
+    };
+  }, [activeDevices]);
   const filtered = devices.filter(d => {
     if (filterSource && d.source !== filterSource) return false;
-    if (filterStatus !== "all" && d.status !== filterStatus) return false;
+    const status = effectiveDeviceStatus(d);
+    if (filterStatus === "all" && status === "archived") return false;
+    if (filterStatus !== "all" && status !== filterStatus) return false;
     if (filterType !== "all" && d.device_type !== filterType) return false;
     if (filterClient !== "all" && d.client_id !== filterClient) return false;
     if (search) {
@@ -233,13 +287,20 @@ export default function DevicesPage() {
     }
     return true;
   });
-  const fleetSignal = devices.some(device => device.status === "offline")
+  const fleetSignal = activeDevices.some(device => device.status === "offline")
     ? "critical"
-    : devices.some(device => device.status === "warning" || device.elevate_state === "deployment_failed" || device.elevate_state === "requires_agent_update")
+    : fleetEvidence.stale > 0 || fleetEvidence.awaitingTelemetry > 0 || activeDevices.some(device => device.status === "warning" || device.elevate_state === "deployment_failed" || device.elevate_state === "requires_agent_update")
       ? "attention"
-      : devices.some(device => device.status === "online")
+      : activeDevices.some(device => device.status === "online")
         ? "healthy"
         : "recommendation";
+  const fleetOrbStatus = fleetSignal === "critical"
+    ? "critical"
+    : fleetSignal === "attention"
+      ? "warning"
+      : fleetSignal === "healthy"
+        ? "online"
+        : "offline";
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setIsFormOpen(true); };
   const handleAutoLinkAcronis = async () => {
@@ -277,18 +338,6 @@ export default function DevicesPage() {
     } catch (e) { toast.error("Save failed"); }
   };
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleteBusy(true);
-    try {
-      await axios.delete(`${API}/devices/${deleteTarget.id}`, { headers });
-      toast.success("Device deleted");
-      setDeleteTarget(null);
-      fetchData();
-    } catch (e) { toast.error("Delete failed"); }
-    finally { setDeleteBusy(false); }
-  };
-
   const toggleSelectDevice = (id) => {
     setSelectedDevices(prev => prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id]);
   };
@@ -312,10 +361,13 @@ export default function DevicesPage() {
 
   const handleImportDiscovered = async () => {
     if (!selectedDiscovered.length) { toast.error("Select devices to import"); return; }
+    if (!discoveryResults?.scan_id) { toast.error("Run a Nexus discovery scan before importing endpoints"); return; }
     setImportLoading(true);
     try {
-      const devicesToImport = discoveryResults.devices.filter(d => selectedDiscovered.includes(d.id));
-      const res = await axios.post(`${API}/devices/import-discovered`, { client_id: discoveryClientId, devices: devicesToImport }, { headers });
+      const res = await axios.post(`${API}/devices/import-discovered`, {
+        scan_id: discoveryResults.scan_id,
+        device_ids: selectedDiscovered,
+      }, { headers });
       toast.success(res.data.message);
       setSelectedDiscovered([]);
       fetchData();
@@ -389,119 +441,117 @@ export default function DevicesPage() {
 
   return (
     <PageShell className="nx-page-stage" data-testid="devices-page">
-      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+      <div className="nx-fleet-page flex-1 overflow-y-auto space-y-5">
 
-      {/* Header — matches Team Command Center pattern */}
-      <div className="nx-ambient-surface flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-sky-500/20 bg-gradient-to-r from-sky-500/[0.10] via-card to-cyan-500/[0.05] p-5 flex-wrap" data-nx-signal={fleetSignal}>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-cyan-300" />Managed Assets
-          </h1>
-          <p className="text-sm text-zinc-500">{devices.length} managed endpoints · live telemetry · fan-out actions · site map</p>
+      <section className="nx-fleet-cockpit-header nx-ambient-surface" data-nx-signal={fleetSignal} data-testid="fleet-cockpit-header">
+        <div className="nx-fleet-cockpit-header__identity">
+          <div className="nx-fleet-cockpit-header__mark" aria-hidden="true">
+            <Monitor />
+            <span><StatusOrb status={fleetOrbStatus} size={10} /></span>
+          </div>
+          <div className="min-w-0">
+            <p className="nx-fleet-cockpit-header__eyebrow">Endpoint operations</p>
+            <h1>Devices &amp; RMM</h1>
+            <div className="nx-fleet-cockpit-header__facts">
+              <span><Server />{activeDevices.length} managed assets</span>
+              <span><CircleCheck />{fleetEvidence.current} current</span>
+              <span><Clock3 />{fleetEvidence.stale + fleetEvidence.awaitingTelemetry} need check-in</span>
+            </div>
+          </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="gap-1.5" data-testid="device-asset-actions">
-                <MoreHorizontal className="h-3.5 w-3.5" />Asset actions<ChevronDown className="h-3 w-3 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onSelect={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }}>
-                <Radar className="mr-2 h-3.5 w-3.5" />Discover network assets
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={handleAutoLinkAcronis} disabled={isLinkingAcronis} data-testid="auto-link-acronis-btn">
-                {isLinkingAcronis ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Cloud className="mr-2 h-3.5 w-3.5" />}
-                {isLinkingAcronis ? "Reconciling Acronis..." : "Reconcile Acronis backups"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
-                <BarChart3 className="mr-2 h-3.5 w-3.5" />Compare healthy devices
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button size="sm" variant="success" onClick={openCreate} data-testid="add-device-btn">
-            <Plus className="w-4 h-4 mr-1" />Add managed asset
-          </Button>
-          <Button size="icon" variant="outline" className="h-9 w-9" onClick={fetchData} data-testid="devices-refresh-btn" title="Refresh fleet data" aria-label="Refresh fleet data">
-            <RefreshCw className="w-4 h-4" />
-          </Button>
+
+        <div className="nx-fleet-cockpit-header__state">
+          <div className="nx-fleet-cockpit-header__state-copy">
+            <span className={`is-${fleetSignal}`}><Radar /></span>
+            <div>
+              <p>{fleetEvidence.attention ? `${fleetEvidence.attention} fleet signal${fleetEvidence.attention === 1 ? "" : "s"} need attention` : "Fleet evidence is clear"}</p>
+              <small>{fleetEvidence.current ? `${fleetEvidence.current} endpoint${fleetEvidence.current === 1 ? " is" : "s are"} reporting current telemetry.` : "Verify stale endpoints before high-impact work."}</small>
+            </div>
+          </div>
+          <div className="nx-fleet-cockpit-header__actions">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-1.5" data-testid="device-asset-actions">
+                  <MoreHorizontal className="h-3.5 w-3.5" />Asset actions<ChevronDown className="h-3 w-3 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onSelect={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }}>
+                  <Radar className="mr-2 h-3.5 w-3.5" />Discover network assets
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleAutoLinkAcronis} disabled={isLinkingAcronis} data-testid="auto-link-acronis-btn">
+                  {isLinkingAcronis ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Cloud className="mr-2 h-3.5 w-3.5" />}
+                  {isLinkingAcronis ? "Reconciling Acronis..." : "Reconcile Acronis backups"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
+                  <BarChart3 className="mr-2 h-3.5 w-3.5" />Compare healthy devices
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button size="sm" variant="success" onClick={openCreate} data-testid="add-device-btn">
+              <Plus className="mr-1 h-4 w-4" />Add managed asset
+            </Button>
+            <Button size="icon" variant="outline" className="h-9 w-9" onClick={fetchData} data-testid="devices-refresh-btn" title="Refresh fleet data" aria-label="Refresh fleet data">
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
-      </div>
-
-      {/* HeroTile metric strip + Smart Inbox (shared across tabs) */}
-      <DeviceCommandStrip headers={headers} API={API} />
-
-      {/* Live activity ticker */}
-      <ActivityTicker />
-
-      {/* AI Top Risks strip */}
-      <TopRisksStrip onApplyFilter={(f) => {
-        if (f.key === "status") setFilterStatus(f.value);
-        setTab("directory");
-      }} />
+      </section>
 
       {/* Bulk Actions Bar — appears whenever rows are selected */}
       <DeviceBulkBar selectedIds={selectedDevices} onClear={() => setSelectedDevices([])} headers={headers} devices={devices} />
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
-        <div className="flex items-center border-b border-zinc-800">
-          <TabsList className="h-auto flex-1 justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0">
-            {[
-              { v: "pulse",     l: "Fleet Pulse", Icon: Flame },
-              { v: "directory", l: "Directory",   Icon: List },
-              { v: "insights",  l: "Insights",    Icon: BarChart3 },
-              { v: "map",       l: "Site Map",    Icon: Cloud },
-            ].map(t => (
-              <TabsTrigger key={t.v} value={t.v}
-                className="data-[state=active]:bg-cyan-500/[0.08] data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 data-[state=active]:text-cyan-100 text-muted-foreground rounded-none py-2 px-3 text-xs uppercase tracking-wider whitespace-nowrap"
-                data-testid={`devices-tab-${t.v}`}>
-                <t.Icon className="w-3 h-3 mr-1" />{t.l}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-9 shrink-0 gap-1.5 px-3 text-xs text-zinc-400 hover:bg-cyan-500/[0.08] hover:text-cyan-100" data-testid="managed-assets-more">
-                <MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              {MANAGED_ASSET_TOOLS.map(tool => {
-                const Icon = tool.icon;
-                return <DropdownMenuItem key={tool.path} onSelect={() => navigate(tool.path)}><Icon className="mr-2 h-3.5 w-3.5" />{tool.label}</DropdownMenuItem>;
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <div className="nx-fleet-workspace-tabs">
+          <DeviceWorkspaceTabs
+            personal={learning.personal}
+            team={learning.team}
+            onRecordAction={learning.record}
+          />
+          <ManagedAssetToolsMenu
+            personal={learning.personal}
+            team={learning.team}
+            onRecordAction={learning.record}
+            onForgetLearning={learning.forget}
+          />
         </div>
 
         {/* Fleet Pulse */}
-        <TabsContent value="pulse" className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+        <TabsContent value="pulse" className="nx-fleet-pulse mt-4 space-y-4">
+          <DeviceCommandStrip headers={headers} API={API} devices={activeDevices} telemetry={fleetEvidence} />
+
+          <div className="nx-fleet-command-layout">
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="relative flex-1 max-w-sm">
+              <div className="nx-fleet-filterbar">
+                <div className="relative min-w-0 flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input className="pl-9" placeholder="Filter pulse wall…" value={search} onChange={e => setSearch(e.target.value)} data-testid="pulse-search" />
+                  <Input className="pl-9" placeholder="Search device, client, IP, OS or serial…" value={search} onChange={e => setSearch(e.target.value)} data-testid="pulse-search" />
                 </div>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-[138px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="online">Online</SelectItem>
                     <SelectItem value="offline">Offline</SelectItem>
                     <SelectItem value="warning">Warning</SelectItem>
+                    <SelectItem value="archived">Archived</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="text-xs text-zinc-500" data-testid="pulse-count">{pulseCount} tiles</span>
+                <span className="nx-fleet-filterbar__count" data-testid="pulse-count">{pulseCount} assets</span>
               </div>
               <FleetPulseWall filterStatus={filterStatus} search={search} onCount={setPulseCount} />
             </div>
-            <div className="space-y-3">
+            <aside className="nx-fleet-attention-rail" aria-label="Fleet attention rail">
+              <div className="nx-fleet-attention-rail__heading">
+                <span><CircleAlert /></span>
+                <div><p>Priority signals</p><small>Recorded exceptions that need a technician decision.</small></div>
+              </div>
               <OfflineWatch />
               <AnomalyInbox />
-            </div>
+            </aside>
           </div>
+          <ActivityTicker />
         </TabsContent>
 
         {/* Insights */}
@@ -591,6 +641,7 @@ export default function DevicesPage() {
             <SelectItem value="online">Online</SelectItem>
             <SelectItem value="offline">Offline</SelectItem>
             <SelectItem value="warning">Warning</SelectItem>
+            <SelectItem value="archived">Archived</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterType} onValueChange={setFilterType}>
@@ -679,16 +730,17 @@ export default function DevicesPage() {
                   <TableHead className="text-center">RAM</TableHead>
                   <TableHead className="text-center">Disk</TableHead>
                   <TableHead>Compliance</TableHead>
-                  <TableHead>Last Seen</TableHead>
-                  <TableHead></TableHead>
+                  <TableHead>Observed</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.length === 0 ? (
-                  <TableRow><TableCell colSpan={11} className="text-center py-12 text-muted-foreground">No devices found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={12} className="text-center py-12 text-muted-foreground">No devices found</TableCell></TableRow>
                 ) : filtered.map(d => {
                   const viewers = deviceViewers[d.id] || [];
-                  const isRemoted = viewers.length > 0;
+                  const displayStatus = effectiveDeviceStatus(d);
+                  const isRemoted = displayStatus !== "archived" && viewers.length > 0;
                   const rowDensity = density === "dense" ? "h-8 text-[11px]" : density === "compact" ? "h-10 text-xs" : "";
                   return (
                     <TableRow
@@ -702,7 +754,7 @@ export default function DevicesPage() {
                         <div className="relative">
                           <DeviceThumbnail type={d.device_type} os={d.os} size={28} />
                           <div className="absolute -bottom-0.5 -right-0.5">
-                            <StatusOrb status={d.status} size={9} />
+                            <StatusOrb status={displayStatus} size={9} />
                           </div>
                           {isRemoted && (
                             <div className="absolute -top-2 -right-2" title={`${viewers.length} tech${viewers.length > 1 ? "s" : ""} remoted: ${viewers.map(v => v.user_name).join(", ")}`}>
@@ -730,18 +782,7 @@ export default function DevicesPage() {
                               </Badge>
                             )}
                             <ElevatePill device={d} />
-                            {(() => {
-                              const rdLive = d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null;
-                              const effectiveStatus = rdLive || d.status;
-                              return (
-                                <>
-                                  <Badge className={STATUS_COLORS[effectiveStatus] + " border text-[9px] capitalize px-1.5"}>{effectiveStatus}</Badge>
-                                  {rdLive && rdLive !== d.status && (
-                                    <span className="text-[9px] px-1 rounded bg-blue-500/10 text-blue-400">RD</span>
-                                  )}
-                                </>
-                              );
-                            })()}
+                            <Badge className={STATUS_COLORS[displayStatus] + " border text-[9px] capitalize px-1.5"}>{displayStatus}</Badge>
                             {isRemoted && (
                               <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
                                 style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}
@@ -753,29 +794,17 @@ export default function DevicesPage() {
                             )}
                           </div>
                           <div className="text-xs text-muted-foreground">{d.manufacturer} {d.model}</div>
+                          <div className="mt-0.5 flex items-center gap-1 text-[10px] text-zinc-500" title={observationLabel(d.last_seen)}>
+                            <Clock3 className="h-2.5 w-2.5" />{observationLabel(d.last_seen)}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-sm">{d.client_name}</TableCell>
                       <TableCell className="text-sm">{d.os} <span className="text-xs text-muted-foreground">{d.os_version || ""}</span></TableCell>
                       <TableCell className="font-mono text-xs">{d.ip_address || "-"}</TableCell>
-                      <TableCell className="text-center">
-                        <div className="inline-flex items-center gap-1.5">
-                          <Sparkline data={Array.from({ length: 12 }, (_, i) => Math.max(5, Math.min(98, (d.cpu_usage || 30) + ((d.id?.charCodeAt(i % (d.id?.length || 1)) || 0) % 25) - 12))) } width={32} height={14} color={(d.cpu_usage || 0) > 80 ? "#ef4444" : (d.cpu_usage || 0) > 60 ? "#fbbf24" : "#a78bfa"} />
-                          <UsagePill value={d.cpu_usage || 0} />
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="inline-flex items-center gap-1.5">
-                          <Sparkline data={Array.from({ length: 12 }, (_, i) => Math.max(10, Math.min(95, (d.memory_usage || 40) + ((d.id?.charCodeAt(i % (d.id?.length || 1)) || 0) % 20) - 10))) } width={32} height={14} color={(d.memory_usage || 0) > 80 ? "#ef4444" : (d.memory_usage || 0) > 60 ? "#fbbf24" : "#34d399"} />
-                          <UsagePill value={d.memory_usage || 0} />
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <div className="inline-flex items-center gap-1.5">
-                          <Sparkline data={Array.from({ length: 12 }, (_, i) => Math.max(20, Math.min(99, (d.disk_usage || 50) + ((d.id?.charCodeAt(i % (d.id?.length || 1)) || 0) % 12) - 6))) } width={32} height={14} color={(d.disk_usage || 0) > 85 ? "#ef4444" : (d.disk_usage || 0) > 70 ? "#fbbf24" : "#22d3ee"} />
-                          <UsagePill value={d.disk_usage || 0} />
-                        </div>
-                      </TableCell>
+                      <TableCell className="text-center"><UsagePill value={d.cpu_usage} /></TableCell>
+                      <TableCell className="text-center"><UsagePill value={d.memory_usage} /></TableCell>
+                      <TableCell className="text-center"><UsagePill value={d.disk_usage} thresholds={[70, 85]} /></TableCell>
                       <TableCell>
                         {d.compliance_score != null ? (
                           <Badge className={`${d.compliance_score >= 90 ? "bg-emerald-500/10 text-emerald-500" : d.compliance_score >= 70 ? "bg-amber-500/10 text-amber-500" : "bg-red-500/10 text-red-500"} text-[10px]`}>
@@ -783,17 +812,16 @@ export default function DevicesPage() {
                           </Badge>
                         ) : "-"}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{d.last_seen ? formatDistanceToNow(new Date(d.last_seen), { addSuffix: true }) : "-"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground" title={observationLabel(d.last_seen)}>{observationLabel(d.last_seen, { prefix: false })}</TableCell>
                       <TableCell>
-                        <div className="flex gap-1 items-center" onClick={e => e.stopPropagation()}>
-                          {d.nexus_agent_id && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200" title="Start live chat" onClick={() => startLiveChatForDevice(d)} disabled={!!liveChatBusy[d.id]} data-testid={`row-live-chat-${d.id}`}>
+                        <div className="flex justify-end gap-1 items-center" onClick={e => e.stopPropagation()}>
+                          {displayStatus !== "archived" && d.nexus_agent_id && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200" title="Start live chat" onClick={() => startLiveChatForDevice(d)} disabled={!!liveChatBusy[d.id]} data-testid={`row-live-chat-${d.id}`}>
                             {liveChatBusy[d.id] ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageSquare className="h-3 w-3" />}
                           </Button>}
                           <RemoteAccessButton
                             device={d}
-                            status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
+                            status={displayStatus}
                             compact
-                            providersOverride={activeProviders}
                             testid={`row-remote-${d.id}`}
                           />
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-fuchsia-500/15" title="AI Diagnose"
@@ -806,8 +834,12 @@ export default function DevicesPage() {
                             data-testid={`row-diagnose-${d.id}`}>
                             <Sparkles className="w-3 h-3 text-fuchsia-400" />
                           </Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(d)}><Edit className="w-3 h-3" /></Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setDeleteTarget(d)} aria-label={`Delete ${d.name}`}><Trash2 className="w-3 h-3" /></Button>
+                          {d.nexus_agent_id && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200" title="Pending application updates (winget)" aria-label={`Pending application updates for ${d.name}`} onClick={() => setAppUpdatesDevice(d)} data-testid={`row-app-updates-${d.id}`}>
+                              <Download className="h-3 w-3" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit asset identity" onClick={() => openEdit(d)}><Edit className="w-3 h-3" /></Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -827,13 +859,14 @@ export default function DevicesPage() {
           ) : filtered.map(d => {
             const DevIcon = DEVICE_ICONS[d.device_type] || Monitor;
             const viewers = deviceViewers[d.id] || [];
-            const isRemoted = viewers.length > 0;
+            const displayStatus = effectiveDeviceStatus(d);
+            const isRemoted = displayStatus !== "archived" && viewers.length > 0;
             return (
               <Card key={d.id} className={`cursor-pointer hover:border-primary/30 transition-colors group ${isRemoted ? "border-cyan-500/30 bg-cyan-500/[0.02]" : ""}`} onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-card-${d.id}`}>
                 <CardContent className="pt-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
-                      <div className={`relative w-10 h-10 rounded-lg flex items-center justify-center ${STATUS_COLORS[d.rustdesk_id && rdStatusMap[d.rustdesk_id] ? rdStatusMap[d.rustdesk_id] : d.status]}`}>
+                      <div className={`relative w-10 h-10 rounded-lg flex items-center justify-center ${STATUS_COLORS[displayStatus]}`}>
                         <DevIcon className="w-5 h-5" />
                         {isRemoted && (
                           <div className="absolute -top-2 -right-2">
@@ -851,8 +884,8 @@ export default function DevicesPage() {
                         <p className="text-xs text-muted-foreground">{d.client_name}</p>
                       </div>
                     </div>
-                    <Badge className={STATUS_COLORS[d.rustdesk_id && rdStatusMap[d.rustdesk_id] ? rdStatusMap[d.rustdesk_id] : d.status] + " border text-[9px] capitalize"}>
-                      {d.rustdesk_id && rdStatusMap[d.rustdesk_id] ? rdStatusMap[d.rustdesk_id] : d.status}
+                    <Badge className={STATUS_COLORS[displayStatus] + " border text-[9px] capitalize"}>
+                      {displayStatus}
                     </Badge>
                   </div>
                   {isRemoted && (
@@ -871,24 +904,9 @@ export default function DevicesPage() {
                     <div><span className="block text-[10px]">Model</span><span className="text-foreground truncate">{d.model || d.manufacturer || "-"}</span></div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between"><span className="text-[10px] text-muted-foreground">CPU</span><UsagePill value={d.cpu_usage || 0} /></div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className={`h-full rounded-full ${d.cpu_usage >= 90 ? "bg-red-500" : d.cpu_usage >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${d.cpu_usage || 0}%` }} />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between"><span className="text-[10px] text-muted-foreground">RAM</span><UsagePill value={d.memory_usage || 0} /></div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className={`h-full rounded-full ${d.memory_usage >= 90 ? "bg-red-500" : d.memory_usage >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${d.memory_usage || 0}%` }} />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between"><span className="text-[10px] text-muted-foreground">Disk</span><UsagePill value={d.disk_usage || 0} /></div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className={`h-full rounded-full ${d.disk_usage >= 90 ? "bg-red-500" : d.disk_usage >= 70 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${d.disk_usage || 0}%` }} />
-                      </div>
-                    </div>
+                    <MetricMeter label="CPU" value={d.cpu_usage} />
+                    <MetricMeter label="RAM" value={d.memory_usage} />
+                    <MetricMeter label="Disk" value={d.disk_usage} thresholds={[70, 85]} />
                   </div>
                   {(d.tags || []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-3">
@@ -897,18 +915,20 @@ export default function DevicesPage() {
                     </div>
                   )}
                   <div className="flex items-center justify-between mt-3 pt-2 border-t text-[10px] text-muted-foreground">
-                    <span>Last seen: {d.last_seen ? formatDistanceToNow(new Date(d.last_seen), { addSuffix: true }) : "N/A"}</span>
+                    <span title={observationLabel(d.last_seen)}>{observationLabel(d.last_seen)}</span>
                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                      {d.nexus_agent_id && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200" onClick={() => startLiveChatForDevice(d)} disabled={!!liveChatBusy[d.id]} data-testid={`card-live-chat-${d.id}`}>
+                      {displayStatus !== "archived" && d.nexus_agent_id && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-emerald-300 hover:bg-emerald-500/15 hover:text-emerald-200" onClick={() => startLiveChatForDevice(d)} disabled={!!liveChatBusy[d.id]} data-testid={`card-live-chat-${d.id}`}>
                         {liveChatBusy[d.id] ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <MessageSquare className="mr-1 h-3 w-3" />} Chat
                       </Button>}
                       <RemoteAccessButton
                         device={d}
-                        status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
+                        status={displayStatus}
                         compact
-                        providersOverride={activeProviders}
                         testid={`card-remote-${d.id}`}
                       />
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200" title="Pending application updates (winget)" onClick={() => setAppUpdatesDevice(d)} data-testid={`card-app-updates-${d.id}`}>
+                        <Download className="mr-1 h-3 w-3" />Apps
+                      </Button>
                       <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </div>
@@ -997,23 +1017,17 @@ export default function DevicesPage() {
         </NexusWorkflowDialog>
       </Dialog>
 
-      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <NexusWorkflowDialog
-          eyebrow="Managed asset lifecycle"
-          title="Delete managed asset?"
-          description={`Remove ${deleteTarget?.name || "this asset"} from the Nexus asset register. This cannot be undone.`}
-          icon={Trash2}
-          tone="amber"
-          className="max-w-lg"
-          data-testid="delete-device-workflow"
-          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>Keep asset</Button><Button variant="destructive" onClick={handleDelete} disabled={deleteBusy}>{deleteBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}Delete asset</Button></>}
-        >
-          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">Delete only when this record is erroneous or no longer belongs in the managed estate. Archive or update the asset when historic operational context should remain visible.</div>
-        </NexusWorkflowDialog>
-      </Dialog>
-
       {/* Quick Script bulk dialog */}
       <QuickScriptDialog open={quickScriptOpen} onClose={() => setQuickScriptOpen(false)} deviceIds={selectedDevices} />
+
+      {/* Pending application updates (winget) for one endpoint. The dialog reads the
+          agent's last reported scan and queues an audited upgrade command. */}
+      <AppUpdatesDialog
+        open={Boolean(appUpdatesDevice)}
+        onOpenChange={(next) => { if (!next) setAppUpdatesDevice(null); }}
+        device={appUpdatesDevice}
+        canExecute={canRunAgentCommands}
+      />
 
       {/* Cmd+K command palette */}
       </div>

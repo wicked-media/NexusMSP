@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 import uuid
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.activity import ticket_audit
+from app.services.scope_permissions import (
+    assert_client_scope, assert_record_scope, assert_tenant_record_scope,
+    platform_tenant_id, scoped_query, tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -20,7 +24,7 @@ async def _estimate_or_404(estimate_id: str, current_user: dict) -> dict:
 
 
 async def _ticket_or_404(ticket_id: str, current_user: dict) -> dict:
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -143,7 +147,7 @@ async def update_estimate(estimate_id: str, data: dict, current_user: dict = Dep
 
 @router.put("/estimates/{estimate_id}/status")
 async def update_estimate_status(estimate_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    est = await _estimate_or_404(estimate_id, current_user)
+    await _estimate_or_404(estimate_id, current_user)
     new_status = data.get("status")
     valid = {"draft", "published", "sent", "approved", "declined", "expired", "converted"}
     if new_status not in valid:
@@ -220,7 +224,9 @@ async def _log_estimate_audit(estimate_id: str, action: str, details: str, user:
 @router.get("/tickets/{ticket_id}/worksheet")
 async def get_ticket_worksheet(ticket_id: str, current_user: dict = Depends(get_current_user)):
     await _ticket_or_404(ticket_id, current_user)
-    ws = await db.ticket_worksheets.find_one({"ticket_id": ticket_id}, {"_id": 0})
+    ws = await db.ticket_worksheets.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    )
     if not ws:
         return []
     return ws.get("items", [])
@@ -231,7 +237,9 @@ async def add_worksheet_item(ticket_id: str, data: dict, current_user: dict = De
     item_text = data.get("item", "").strip()
     if not item_text:
         raise HTTPException(status_code=400, detail="Item text required")
-    ws = await db.ticket_worksheets.find_one({"ticket_id": ticket_id}, {"_id": 0})
+    ws = await db.ticket_worksheets.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    )
     items = ws.get("items", []) if ws else []
     new_item = {
         "id": str(uuid.uuid4())[:8],
@@ -246,11 +254,12 @@ async def add_worksheet_item(ticket_id: str, data: dict, current_user: dict = De
     items.append(new_item)
     completed = sum(1 for i in items if i.get("checked"))
     await db.ticket_worksheets.update_one(
-        {"ticket_id": ticket_id},
-        {"$set": {"ticket_id": ticket_id, "items": items, "completed": completed, "total": len(items),
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"$set": {"tenant_id": platform_tenant_id(current_user), "ticket_id": ticket_id, "items": items, "completed": completed, "total": len(items),
                   "updated_by": current_user.get("name", ""), "updated_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True
     )
+    await ticket_audit(ticket_id, current_user, "worksheet_item_added", f"Added worksheet task: {item_text}")
     return new_item
 
 @router.put("/tickets/{ticket_id}/worksheet")
@@ -259,35 +268,76 @@ async def update_ticket_worksheet(ticket_id: str, data: dict, current_user: dict
     items = data.get("items", [])
     completed = sum(1 for i in items if i.get("checked"))
     ws = {
-        "ticket_id": ticket_id, "items": items,
+        "tenant_id": platform_tenant_id(current_user), "ticket_id": ticket_id, "items": items,
         "completed": completed, "total": len(items),
         "updated_by": current_user.get("name", ""),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.ticket_worksheets.update_one({"ticket_id": ticket_id}, {"$set": ws}, upsert=True)
+    await db.ticket_worksheets.update_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"$set": ws}, upsert=True
+    )
     return {"message": "Worksheet updated", "completed": completed, "total": len(items)}
 
 @router.post("/tickets/{ticket_id}/worksheet/check")
 async def check_worksheet_item(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     await _ticket_or_404(ticket_id, current_user)
-    ws = await db.ticket_worksheets.find_one({"ticket_id": ticket_id}, {"_id": 0})
+    ws = await db.ticket_worksheets.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    )
     if not ws:
         raise HTTPException(status_code=404, detail="Worksheet not found")
     item_id = data.get("item_id")
     checked = data.get("checked", True)
     items = ws.get("items", [])
+    updated_item = None
     for i in items:
         if i.get("id") == item_id:
             i["checked"] = checked
             i["checked_by_name"] = current_user.get("name", "")
             i["checked_at"] = datetime.now(timezone.utc).isoformat()
+            updated_item = i
             break
+    if not updated_item:
+        raise HTTPException(status_code=404, detail="Worksheet item not found")
     completed = sum(1 for i in items if i.get("checked"))
-    await db.ticket_worksheets.update_one({"ticket_id": ticket_id}, {"$set": {
+    await db.ticket_worksheets.update_one(tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"$set": {
         "items": items, "completed": completed, "total": len(items),
         "updated_by": current_user.get("name", ""), "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
+    item_label = str(updated_item.get("item") or "Worksheet task")
+    await ticket_audit(
+        ticket_id,
+        current_user,
+        "worksheet_item_completed" if checked else "worksheet_item_reopened",
+        f"{'Completed' if checked else 'Reopened'} worksheet task: {item_label}",
+    )
     return {"message": "Item updated", "completed": completed, "total": len(items)}
+
+
+@router.delete("/tickets/{ticket_id}/worksheet/{item_id}")
+async def remove_worksheet_item(ticket_id: str, item_id: str, current_user: dict = Depends(get_current_user)):
+    await _ticket_or_404(ticket_id, current_user)
+    ws = await db.ticket_worksheets.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    )
+    if not ws:
+        raise HTTPException(status_code=404, detail="Worksheet not found")
+    items = list(ws.get("items") or [])
+    remaining = [item for item in items if item.get("id") != item_id]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="Worksheet item not found")
+    completed = sum(1 for item in remaining if item.get("checked"))
+    await db.ticket_worksheets.update_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"$set": {
+            "items": remaining, "completed": completed, "total": len(remaining),
+            "updated_by": current_user.get("name", ""),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    removed_label = next((str(item.get("item") or "Worksheet task") for item in items if item.get("id") == item_id), "Worksheet task")
+    await ticket_audit(ticket_id, current_user, "worksheet_item_removed", f"Removed worksheet task: {removed_label}")
+    return {"message": "Worksheet item removed", "completed": completed, "total": len(remaining)}
 
 @router.get("/worksheet-templates")
 async def get_worksheet_templates(current_user: dict = Depends(get_current_user)):

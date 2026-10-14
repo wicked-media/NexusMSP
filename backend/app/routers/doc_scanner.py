@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
-import uuid, os, json, base64
+import uuid, os, json
 from app.database import db
 from app.auth import get_current_user
 

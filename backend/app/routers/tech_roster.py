@@ -4,7 +4,7 @@ Each technician has:
   - basic identity (name, email, role, active)
   - contact channels (mobile, slack_handle, teams_email)
   - escalation_tier (1 | 2 | 3) — auto-escalation waterfall
-  - on_call (bool) — quick filter when paging
+  - on_call (derived bool) — current state from time-bound on-call shifts
   - preferred_channels (array) — which channels the tech wants pages on
 
 This router powers the War Room "Page Team" flow and any future on-call rotation.
@@ -15,7 +15,9 @@ import uuid
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
 from app.services.activity import log_activity
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -49,19 +51,27 @@ async def list_technicians(active_only: bool = False, on_call_only: bool = False
     q = {}
     if active_only:
         q["active"] = True
+    techs = await db.tech_roster.find(tenant_scoped_query(current_user, q), {"_id": 0, "tenant_id": 0}).sort("escalation_tier", 1).to_list(500)
+    now = datetime.now(timezone.utc).isoformat()
+    active_shifts = await db.on_call_roster.find(tenant_scoped_query(current_user, {
+        "start_time": {"$lte": now}, "end_time": {"$gte": now}, "status": {"$ne": "cancelled"},
+    }), {"_id": 0, "tech_id": 1}).to_list(500)
+    active_ids = {shift.get("tech_id") for shift in active_shifts}
+    for tech in techs:
+        tech["on_call"] = tech.get("id") in active_ids
     if on_call_only:
-        q["on_call"] = True
-    techs = await db.tech_roster.find(q, {"_id": 0}).sort("escalation_tier", 1).to_list(500)
+        techs = [tech for tech in techs if tech["on_call"]]
     return techs
 
 
 @router.post("/tech-roster")
-async def create_technician(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_technician(data: dict, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
     if not (data.get("name") or "").strip():
         raise HTTPException(400, "name required")
     clean = _sanitize(data)
     doc = {
         "id": f"tech-{uuid.uuid4().hex[:10]}",
+        "tenant_id": platform_tenant_id(current_user),
         "active": True,
         "on_call": False,
         "escalation_tier": 2,
@@ -77,20 +87,22 @@ async def create_technician(data: dict, current_user: dict = Depends(get_current
         metadata={"tier": doc.get("escalation_tier"), "on_call": doc.get("on_call"), "channels": doc.get("preferred_channels", [])},
     )
     doc.pop("_id", None)
+    doc.pop("tenant_id", None)
     return doc
 
 
 @router.put("/tech-roster/{tech_id}")
-async def update_technician(tech_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+async def update_technician(tech_id: str, data: dict, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
     clean = _sanitize(data)
     if not clean:
         return {"success": True, "no_change": True}
-    before = await db.tech_roster.find_one({"id": tech_id}, {"_id": 0})
+    query = tenant_scoped_query(current_user, {"id": tech_id})
+    before = await db.tech_roster.find_one(query, {"_id": 0})
     if not before:
         raise HTTPException(404, "Tech not found")
     clean["updated_at"] = datetime.now(timezone.utc).isoformat()
-    res = await db.tech_roster.update_one({"id": tech_id}, {"$set": clean})
-    doc = await db.tech_roster.find_one({"id": tech_id}, {"_id": 0})
+    await db.tech_roster.update_one(query, {"$set": clean})
+    doc = await db.tech_roster.find_one(query, {"_id": 0, "tenant_id": 0})
     changed = {key: value for key, value in clean.items() if key != "updated_at" and before.get(key) != value}
     if changed:
         await log_activity(
@@ -101,11 +113,12 @@ async def update_technician(tech_id: str, data: dict, current_user: dict = Depen
 
 
 @router.delete("/tech-roster/{tech_id}")
-async def delete_technician(tech_id: str, current_user: dict = Depends(get_current_user)):
-    target = await db.tech_roster.find_one({"id": tech_id}, {"_id": 0})
+async def delete_technician(tech_id: str, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    query = tenant_scoped_query(current_user, {"id": tech_id})
+    target = await db.tech_roster.find_one(query, {"_id": 0})
     if not target:
         raise HTTPException(404, "Tech not found")
-    res = await db.tech_roster.delete_one({"id": tech_id})
+    await db.tech_roster.delete_one(query)
     await log_activity(
         current_user, "roster_contact_removed", "tech_roster", tech_id, target.get("name", "Roster contact"),
         "Removed contact from on-call coverage.",

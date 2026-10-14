@@ -10,6 +10,7 @@ const STATUS_COLOR = {
   "refresh-soon": "bg-sky-400",
   "due-now": "bg-amber-400",
   overdue: "bg-red-500",
+  not_assessed: "bg-zinc-600",
 };
 
 export default function LifecycleTimeline() {
@@ -30,20 +31,22 @@ export default function LifecycleTimeline() {
   if (loading) return <div className="flex items-center justify-center py-12 gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" />Computing lifecycle…</div>;
   if (data.devices.length === 0) return <div className="py-12 text-center text-muted-foreground text-sm">No devices to plot.</div>;
 
-  const maxYears = Math.max(7, ...data.devices.map(d => d.age_years));
+  const assessedDevices = data.devices.filter(d => Number.isFinite(d.age_years) && d.status !== "not_assessed");
+  const maxYears = Math.max(7, ...assessedDevices.map(d => d.age_years));
   const buckets = [0, 1, 2, 3, 4, 5, 6, 7].filter(y => y <= maxYears).map(y => ({
     year: y,
-    devices: data.devices.filter(d => Math.floor(d.age_years) === y),
+    devices: assessedDevices.filter(d => Math.floor(d.age_years) === y),
   }));
 
   return (
     <div className="space-y-4" data-testid="lifecycle-timeline">
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {[
           { label: "Overdue", count: data.summary.overdue || 0, color: "border-red-500/40 bg-red-500/10 text-red-300" },
           { label: "Due Now", count: data.summary.due_now || 0, color: "border-amber-500/40 bg-amber-500/10 text-amber-300" },
           { label: "Refresh Soon", count: data.summary.refresh_soon || 0, color: "border-sky-500/40 bg-sky-500/10 text-sky-300" },
           { label: "OK", count: data.summary.ok || 0, color: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" },
+          { label: "Evidence gap", count: data.summary.not_assessed || 0, color: "border-zinc-700 bg-zinc-900/60 text-zinc-300" },
         ].map(s => (
           <div key={s.label} className={`text-center p-2 rounded border ${s.color}`} data-testid={`lifecycle-summary-${s.label.toLowerCase().replace(' ', '-')}`}>
             <p className="text-lg font-mono font-bold">{s.count}</p>
@@ -51,7 +54,7 @@ export default function LifecycleTimeline() {
           </div>
         ))}
       </div>
-      <div className="relative">
+      {assessedDevices.length > 0 ? <div className="relative">
         <div className="flex border-b border-zinc-800 pb-1 mb-2">
           {buckets.map(b => (
             <div key={b.year} className="flex-1 text-center text-[10px] text-zinc-500">{b.year}y</div>
@@ -63,7 +66,7 @@ export default function LifecycleTimeline() {
               {b.devices.slice(0, 30).map(d => (
                 <button
                   key={d.id}
-                  title={`${d.name} · ${d.age_years}y · ${d.days_to_eol > 0 ? `${d.days_to_eol}d to EOL` : `${Math.abs(d.days_to_eol)}d overdue`}`}
+                  title={`${d.name} · ${d.age_years}y · ${d.days_to_eol > 0 ? `${d.days_to_eol}d to lifecycle target` : `${Math.abs(d.days_to_eol)}d past lifecycle target`}`}
                   onClick={() => navigate(`/devices/${d.id}`)}
                   className={`w-2 h-4 rounded-sm ${STATUS_COLOR[d.status] || "bg-zinc-600"} hover:scale-125 transition-transform`}
                   data-testid={`lifecycle-pip-${d.id}`}
@@ -75,7 +78,11 @@ export default function LifecycleTimeline() {
             </div>
           ))}
         </div>
-      </div>
+      </div> : <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/30 px-4 py-8 text-center">
+        <p className="text-sm font-medium text-zinc-200">Lifecycle evidence has not been recorded yet.</p>
+        <p className="mt-1 text-xs text-zinc-500">Add a verified purchase date and lifecycle target to an asset story before Nexus calculates refresh timing.</p>
+      </div>}
+      {(data.summary.not_assessed || 0) > 0 && <p className="text-center text-[11px] text-zinc-500">Nexus will not estimate end-of-life from a record creation date.</p>}
     </div>
   );
 }

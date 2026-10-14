@@ -18,9 +18,10 @@ import SignatureManager from "@/components/email/SignatureManager";
 import {
   User, Lock, Mail, Shield, Bell, Clock, Palette, Globe, Award, Trophy,
   Star, Zap, Eye, EyeOff,
-  CheckCircle, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
-  Upload, Image, RefreshCw, ShieldCheck
+  CheckCircle, Loader2, ChevronRight, Settings, Moon,
+  Upload, Image, RefreshCw, ShieldCheck, LogOut
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const BADGES = [
   { id: "first_ticket", label: "First Blood", description: "Resolved first ticket", icon: "ticket", color: "#3b82f6" },
@@ -47,13 +48,16 @@ const SETTINGS_SECTIONS = [
   { key: "notifications", icon: Bell, label: "Notifications", description: "Choose which updates reach you" },
   { key: "schedule", icon: Clock, label: "Availability", description: "Working hours, on-call and auto-assignment" },
   { key: "display", icon: Palette, label: "Appearance", description: "Theme, density and local workspace preferences" },
+  { key: "webstudio", icon: Globe, label: "Web Studio", description: "Website and Safe Update Engine defaults" },
+  { key: "workspace", icon: Zap, label: "Workspace", description: "Landing view, tables and personal shortcuts" },
   { key: "badges", icon: Trophy, label: "Achievements", description: "Progress, badges and recent contribution" },
 ];
 
 export default function TechSettingsPage() {
-  const { user, token, refreshUser } = useAuth();
+  const { user, token, refreshUser, logout } = useAuth();
   const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, motion, setMotion, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
   const headers = { Authorization: `Bearer ${token}` };
+  const canManageBranding = user?.is_admin === true || user?.is_admin === 1 || String(user?.role || "").toLowerCase() === "admin";
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [profile, setProfile] = useState(null);
@@ -82,6 +86,8 @@ export default function TechSettingsPage() {
   const [verifyCode, setVerifyCode] = useState("");
   const [disablePw, setDisablePw] = useState("");
   const [showDisable2FA, setShowDisable2FA] = useState(false);
+  const [showRevokeSessions, setShowRevokeSessions] = useState(false);
+  const [revokingSessions, setRevokingSessions] = useState(false);
 
   // Notifications
   const [notifPrefs, setNotifPrefs] = useState({});
@@ -91,6 +97,11 @@ export default function TechSettingsPage() {
 
   // Display
   const [displayPrefs, setDisplayPrefs] = useState({});
+
+  // Web Studio + workspace portability (canonical, server-stored)
+  const [webStudioPrefs, setWebStudioPrefs] = useState(null);
+  const [workspacePrefs, setWorkspacePrefs] = useState(null);
+  const [savingPrefs, setSavingPrefs] = useState("");
 
   // Login Wallpaper
   const [wallpaperType, setWallpaperType] = useState("default");
@@ -125,6 +136,8 @@ export default function TechSettingsPage() {
         axios.get(`${API}/user-settings/notifications`, { headers }),
         axios.get(`${API}/user-settings/working-hours`, { headers }),
         axios.get(`${API}/user-settings/display`, { headers }),
+        axios.get(`${API}/user-settings/web-studio`, { headers }),
+        axios.get(`${API}/user-settings/workspace`, { headers }),
       ]);
       const dataAt = (index, fallback) => results[index]?.status === "fulfilled" ? results[index].value.data : fallback;
       const profileData = dataAt(0, { name: user?.name || "", email: user?.email || "", role: user?.role || "technician" });
@@ -132,6 +145,8 @@ export default function TechSettingsPage() {
       const notificationData = dataAt(2, {});
       const hoursData = dataAt(3, null);
       const displayData = dataAt(4, {});
+      const webStudioData = dataAt(5, null);
+      const workspaceData = dataAt(6, null);
 
       setProfile(profileData);
       setProfileForm({
@@ -146,6 +161,8 @@ export default function TechSettingsPage() {
       setNotifPrefs(notificationData);
       setWorkHours(hoursData);
       setDisplayPrefs(displayData);
+      setWebStudioPrefs(webStudioData);
+      setWorkspacePrefs(workspaceData);
       if (displayData.theme && displayData.theme !== theme) toggleTheme();
       if (displayData.preset && THEME_PRESETS?.[displayData.preset]) setPreset(displayData.preset);
       if (displayData.accent && ACCENT_COLORS?.[displayData.accent]) setAccent(displayData.accent);
@@ -172,6 +189,32 @@ export default function TechSettingsPage() {
       } catch {}
     } catch { toast.error("Failed to load settings"); }
     finally { setLoading(false); }
+  };
+
+  const saveWebStudioPrefs = async () => {
+    if (!webStudioPrefs) return;
+    setSavingPrefs("webstudio");
+    try {
+      const { prefs_version, ...values } = webStudioPrefs;
+      const response = await axios.put(`${API}/user-settings/web-studio`, { ...values, expected_version: prefs_version }, { headers });
+      setWebStudioPrefs(response.data.web_studio_prefs ? { ...response.data.web_studio_prefs, prefs_version: response.data.prefs_version } : webStudioPrefs);
+      toast.success("Web Studio preferences saved");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to save Web Studio preferences");
+    } finally { setSavingPrefs(""); }
+  };
+
+  const saveWorkspacePrefs = async () => {
+    if (!workspacePrefs) return;
+    setSavingPrefs("workspace");
+    try {
+      const { prefs_version, ...values } = workspacePrefs;
+      const response = await axios.put(`${API}/user-settings/workspace`, { ...values, expected_version: prefs_version }, { headers });
+      setWorkspacePrefs(response.data.workspace_prefs ? { ...response.data.workspace_prefs, prefs_version: response.data.prefs_version } : workspacePrefs);
+      toast.success("Workspace preferences saved");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to save workspace preferences");
+    } finally { setSavingPrefs(""); }
   };
 
   const saveProfile = async () => {
@@ -223,9 +266,14 @@ export default function TechSettingsPage() {
     if (pwForm.new_password !== pwForm.confirm_password) return toast.error("Passwords don't match");
     if (pwForm.new_password.length < 12) return toast.error("Use at least 12 characters");
     try {
-      await axios.post(`${API}/user-settings/change-password`, { current_password: pwForm.current_password, new_password: pwForm.new_password }, { headers });
-      toast.success("Password changed");
+      const response = await axios.post(`${API}/user-settings/change-password`, { current_password: pwForm.current_password, new_password: pwForm.new_password }, { headers });
       setPwForm({ current_password: "", new_password: "", confirm_password: "" });
+      if (response.data?.sessions_revoked) {
+        toast.success("Password changed. All devices have been signed out.");
+        window.setTimeout(logout, 500);
+      } else {
+        toast.success("Password changed");
+      }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to change password"); }
   };
 
@@ -249,13 +297,32 @@ export default function TechSettingsPage() {
 
   const disable2FA = async () => {
     try {
-      await axios.post(`${API}/user-settings/2fa/disable`, { password: disablePw }, { headers });
-      toast.success("2FA disabled");
+      const response = await axios.post(`${API}/user-settings/2fa/disable`, { password: disablePw }, { headers });
       setShowDisable2FA(false);
       setDisablePw("");
-      const res = await axios.get(`${API}/user-settings/2fa`, { headers });
-      setTwoFA(res.data);
+      if (response.data?.sessions_revoked) {
+        toast.success("2FA disabled. All devices have been signed out.");
+        window.setTimeout(logout, 500);
+      } else {
+        toast.success("2FA disabled");
+        const res = await axios.get(`${API}/user-settings/2fa`, { headers });
+        setTwoFA(res.data);
+      }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const revokeAllSessions = async () => {
+    setRevokingSessions(true);
+    try {
+      const response = await axios.post(`${API}/auth/sessions/revoke-all`, {}, { headers });
+      setShowRevokeSessions(false);
+      toast.success(response.data?.message || "All active sessions have been revoked. Sign in again to continue.");
+      window.setTimeout(logout, 500);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to revoke active sessions");
+    } finally {
+      setRevokingSessions(false);
+    }
   };
 
   const saveNotifications = async () => {
@@ -313,28 +380,11 @@ export default function TechSettingsPage() {
 
   return (
     <div className="mx-auto max-w-[1440px] space-y-4 pb-8" data-testid="tech-settings-page">
-      <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_8%_0%,hsl(var(--primary)/0.22),transparent_38%),linear-gradient(110deg,hsl(var(--card)),hsl(var(--background)))] p-4 shadow-[0_16px_48px_-28px_hsl(var(--primary)/0.55)] md:px-6 md:py-5">
-        <div className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-primary/20 blur-3xl" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
-            <Button variant="ghost" size="icon" className="mt-0.5 shrink-0" onClick={() => window.history.back()} data-testid="settings-back" title="Go back">
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div>
-              <div className="mb-2 flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight md:text-2xl">My Workspace</h1>
-                {profile?.role === "admin" && <Badge className="border-primary/20 bg-primary/10 text-primary"><ShieldCheck className="mr-1 h-3.5 w-3.5" />Administrator</Badge>}
-              </div>
-              <p className="max-w-xl text-sm text-muted-foreground">Your technician command centre for profile, security, communications, availability, and workspace preferences.</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-background/60 p-1.5 backdrop-blur-sm">
+      <OperationalPageHeader eyebrow="Personal workspace · technician controls" title="My Workspace" description="Manage your profile, security, communications, availability and Nexus experience." icon={User} tone="violet" meta={profile?.role === "admin" ? ["Administrator"] : []} actions={<>
             <Button variant="outline" size="sm" onClick={() => selectTab("security")}><ShieldCheck className="mr-1.5 h-4 w-4" />Security</Button>
             <Button variant="outline" size="sm" onClick={() => selectTab("notifications")}><Bell className="mr-1.5 h-4 w-4" />Alerts</Button>
             <Button size="sm" onClick={fetchAll}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
-          </div>
-        </div>
-      </section>
+          </>} />
 
       <div className="space-y-4">
         <Card className="border-primary/15 bg-gradient-to-b from-card to-muted/20 shadow-[0_12px_30px_-24px_hsl(var(--foreground)/0.7)]">
@@ -495,6 +545,19 @@ export default function TechSettingsPage() {
                       <Button variant="outline" className="text-destructive" onClick={() => setShowDisable2FA(true)} data-testid="disable-2fa-btn">Disable 2FA</Button>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-rose-500/20" data-testid="settings-session-security-panel">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><LogOut className="h-5 w-5 text-rose-400" />Active Sessions</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">End every current Nexus session</p>
+                    <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Use this if a device is lost, a browser was left signed in, or you want to force a fresh sign-in everywhere. Nexus records the action and immediately invalidates all existing tokens.</p>
+                  </div>
+                  <Button variant="outline" className="shrink-0 border-rose-500/30 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300" onClick={() => setShowRevokeSessions(true)} data-testid="revoke-all-sessions-btn"><LogOut className="mr-1.5 h-4 w-4" />Sign out all devices</Button>
                 </CardContent>
               </Card>
 
@@ -770,6 +833,7 @@ export default function TechSettingsPage() {
                 <Separator />
 
                 {/* Login Wallpaper */}
+                {canManageBranding ? (
                 <div data-testid="wallpaper-section">
                   <Label className="text-sm font-medium flex items-center gap-2"><Image className="w-4 h-4" />Login Page Wallpaper</Label>
                   <p className="text-xs text-muted-foreground mb-3">Upload a custom 1920x1080 image or choose a template for the login page background</p>
@@ -875,12 +939,184 @@ export default function TechSettingsPage() {
                     </div>
                   )}
                 </div>
+                ) : (
+                  <div data-testid="wallpaper-section" className="rounded-xl border border-border/70 bg-muted/[0.18] p-4">
+                    <Label className="flex items-center gap-2 text-sm font-medium"><Image className="h-4 w-4" />Login page visual</Label>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">This is organisation-wide branding. A Nexus administrator can manage the login experience from Platform Branding; your workspace appearance remains personal.</p>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
                   <div><p className="text-sm font-semibold">Save workspace appearance</p><p className="mt-1 text-xs text-muted-foreground">Keep this theme, motion level, accent and font when you sign in on another browser.</p></div>
                   <Button onClick={saveDisplay} data-testid="save-display-preferences"><CheckCircle className="mr-1.5 h-4 w-4" />Save appearance</Button>
                 </div>
 
+              </CardContent>
+            </Card>
+          )}
+
+          {/* WEB STUDIO TAB */}
+          {activeTab === "webstudio" && (
+            <Card data-testid="settings-webstudio-panel">
+              <CardHeader><CardTitle className="flex items-center gap-2"><Globe className="w-5 h-5" />Web Studio preferences</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {!webStudioPrefs ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading Web Studio preferences…</div>
+                ) : (
+                  <>
+                    <p className="text-xs leading-5 text-muted-foreground">These defaults follow you to any workstation because they are stored against your Nexus identity. They never change what you are permitted to do; approval and policy still decide that.</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Default view</Label>
+                        <Select value={webStudioPrefs.default_view} onValueChange={(default_view) => setWebStudioPrefs((p) => ({ ...p, default_view }))}>
+                          <SelectTrigger data-testid="webstudio-default-view"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="fleet">Fleet command centre</SelectItem>
+                            <SelectItem value="portfolio">Client portfolio</SelectItem>
+                            <SelectItem value="plugins">Plugin intelligence</SelectItem>
+                            <SelectItem value="updates">Update plans</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Default update policy</Label>
+                        <Select value={webStudioPrefs.default_update_policy} onValueChange={(default_update_policy) => setWebStudioPrefs((p) => ({ ...p, default_update_policy }))}>
+                          <SelectTrigger data-testid="webstudio-update-policy"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="manual">Manual — a technician applies each update</SelectItem>
+                            <SelectItem value="assisted">Assisted — Nexus prepares the plan for approval</SelectItem>
+                            <SelectItem value="policy_driven">Policy-driven — low-risk updates may run within limits</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Organisation policy overrides this default where updates are restricted.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Inventory refresh interval</Label>
+                        <Select value={String(webStudioPrefs.inventory_refresh_hours)} onValueChange={(value) => setWebStudioPrefs((p) => ({ ...p, inventory_refresh_hours: Number(value) }))}>
+                          <SelectTrigger data-testid="webstudio-refresh-hours"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">Every hour</SelectItem>
+                            <SelectItem value="4">Every 4 hours</SelectItem>
+                            <SelectItem value="12">Every 12 hours</SelectItem>
+                            <SelectItem value="24">Daily</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-3 pt-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <div><Label>Show only sites needing attention</Label><p className="text-xs text-muted-foreground">Open the fleet already filtered to work that needs a technician.</p></div>
+                          <Switch checked={Boolean(webStudioPrefs.show_only_attention)} onCheckedChange={(show_only_attention) => setWebStudioPrefs((p) => ({ ...p, show_only_attention }))} data-testid="webstudio-only-attention" />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div><Label>Confirm destructive website actions</Label><p className="text-xs text-muted-foreground">Keep a confirmation step before archiving or updating a site.</p></div>
+                          <Switch checked={Boolean(webStudioPrefs.confirm_destructive)} onCheckedChange={(confirm_destructive) => setWebStudioPrefs((p) => ({ ...p, confirm_destructive }))} data-testid="webstudio-confirm-destructive" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button onClick={saveWebStudioPrefs} disabled={savingPrefs === "webstudio"} data-testid="webstudio-save">
+                        {savingPrefs === "webstudio" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-1.5 h-4 w-4" />}Save Web Studio preferences
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Saved to your Nexus profile (version {webStudioPrefs.prefs_version ?? 0}).</span>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* WORKSPACE TAB */}
+          {activeTab === "workspace" && (
+            <Card data-testid="settings-workspace-panel">
+              <CardHeader><CardTitle className="flex items-center gap-2"><Zap className="w-5 h-5" />Workspace portability</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {!workspacePrefs ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading workspace preferences…</div>
+                ) : (
+                  <>
+                    <p className="text-xs leading-5 text-muted-foreground">Your landing view, table density and shortcuts travel with your technician identity, so signing in on another workstation feels the same.</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Landing route</Label>
+                        <Select value={workspacePrefs.landing_route} onValueChange={(landing_route) => setWorkspacePrefs((p) => ({ ...p, landing_route }))}>
+                          <SelectTrigger data-testid="workspace-landing-route"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="/">Dashboard</SelectItem>
+                            <SelectItem value="/tickets">Tickets</SelectItem>
+                            <SelectItem value="/devices">Managed assets</SelectItem>
+                            <SelectItem value="/clients">Clients</SelectItem>
+                            <SelectItem value="/web-studio">Web Studio</SelectItem>
+                            <SelectItem value="/control-plane">Control Plane</SelectItem>
+                            <SelectItem value="/team-hub">Team Hub</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Table density</Label>
+                        <Select value={workspacePrefs.table_density} onValueChange={(table_density) => setWorkspacePrefs((p) => ({ ...p, table_density }))}>
+                          <SelectTrigger data-testid="workspace-table-density"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="normal">Normal</SelectItem>
+                            <SelectItem value="compact">Compact</SelectItem>
+                            <SelectItem value="comfortable">Comfortable</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Default page size</Label>
+                        <Select value={String(workspacePrefs.default_page_size)} onValueChange={(value) => setWorkspacePrefs((p) => ({ ...p, default_page_size: Number(value) }))}>
+                          <SelectTrigger data-testid="workspace-page-size"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="10">10 rows</SelectItem>
+                            <SelectItem value="25">25 rows</SelectItem>
+                            <SelectItem value="50">50 rows</SelectItem>
+                            <SelectItem value="100">100 rows</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Remote default view</Label>
+                        <Select value={workspacePrefs.remote_default_view} onValueChange={(remote_default_view) => setWorkspacePrefs((p) => ({ ...p, remote_default_view }))}>
+                          <SelectTrigger data-testid="workspace-remote-view"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="devices">Devices</SelectItem>
+                            <SelectItem value="sessions">Sessions</SelectItem>
+                            <SelectItem value="connection">Connection</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Personal shortcuts</Label>
+                      <p className="text-xs text-muted-foreground">Conflicts are refused by the server, so two actions can never share the same key.</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {[
+                          ["command_palette", "Command palette"],
+                          ["new_ticket", "New ticket"],
+                          ["search", "Search"],
+                          ["toggle_sidebar", "Toggle sidebar"],
+                          ["new_web_update_plan", "New Web Studio update plan"],
+                        ].map(([action, label]) => (
+                          <div key={action} className="flex items-center gap-2">
+                            <Label className="w-44 shrink-0 text-xs">{label}</Label>
+                            <Input
+                              value={(workspacePrefs.shortcuts || {})[action] || ""}
+                              onChange={(event) => setWorkspacePrefs((p) => ({ ...p, shortcuts: { ...(p.shortcuts || {}), [action]: event.target.value } }))}
+                              placeholder="e.g. Ctrl+K"
+                              data-testid={`workspace-shortcut-${action}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button onClick={saveWorkspacePrefs} disabled={savingPrefs === "workspace"} data-testid="workspace-save">
+                        {savingPrefs === "workspace" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-1.5 h-4 w-4" />}Save workspace preferences
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Saved to your Nexus profile (version {workspacePrefs.prefs_version ?? 0}).</span>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           )}
@@ -998,6 +1234,15 @@ export default function TechSettingsPage() {
             <p className="text-sm font-medium text-foreground">Confirm your identity</p>
             <p className="text-sm leading-6 text-muted-foreground">Enter your password to continue. Nexus records this security change in the audit trail.</p>
             <Input type="password" value={disablePw} onChange={e => setDisablePw(e.target.value)} placeholder="Enter password" data-testid="disable-2fa-password" autoComplete="current-password" />
+          </section>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={showRevokeSessions} onOpenChange={setShowRevokeSessions}>
+        <NexusWorkflowDialog eyebrow="Account security" title="Sign out all active sessions" description="This immediately invalidates this account's active Nexus sessions, including this browser. You will need to sign in again." icon={LogOut} tone="rose" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setShowRevokeSessions(false)} disabled={revokingSessions}>Cancel</Button><Button variant="destructive" onClick={revokeAllSessions} disabled={revokingSessions} data-testid="confirm-revoke-all-sessions">{revokingSessions ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <LogOut className="mr-1.5 h-4 w-4" />}Sign out everywhere</Button></>}>
+          <section className="space-y-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-4">
+            <p className="text-sm font-medium text-foreground">You are about to end all active sessions</p>
+            <p className="text-sm leading-6 text-muted-foreground">The current browser is included. Existing API tokens stop working on their next request; no password or customer data is changed.</p>
           </section>
         </NexusWorkflowDialog>
       </Dialog>

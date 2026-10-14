@@ -9,15 +9,17 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, Edit, Trash2, Building2,
+  Plus, Search, Edit, Trash2, Building2,
   RefreshCw, ArrowLeft, ChevronRight, ShoppingCart,
   MapPin, CreditCard, ExternalLink, Users
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const CATEGORIES = [
   { value: "general", label: "General" },
@@ -49,6 +51,7 @@ export default function VendorsPage() {
   const { token } = useAuth();
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("all");
   const [formOpen, setFormOpen] = useState(false);
@@ -58,13 +61,17 @@ export default function VendorsPage() {
 
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchVendors = async () => {
-    setLoading(true);
+  const fetchVendors = async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const res = await axios.get(`${API}/vendors`, { headers });
       setVendors(res.data);
-    } catch { toast.error("Failed to load vendors"); }
-    finally { setLoading(false); }
+    } catch { toast.error(quiet ? "Could not refresh vendors. Your current list is still available." : "Failed to load vendors"); }
+    finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   };
 
   useEffect(() => { fetchVendors(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -96,7 +103,7 @@ export default function VendorsPage() {
         await axios.post(`${API}/vendors`, form, { headers });
         toast.success("Vendor created");
       }
-      setFormOpen(false); fetchVendors();
+      setFormOpen(false); fetchVendors({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save vendor"); }
   };
 
@@ -105,7 +112,7 @@ export default function VendorsPage() {
       await axios.delete(`${API}/vendors/${id}`, { headers });
       toast.success("Vendor deleted");
       if (viewVendor?.id === id) setViewVendor(null);
-      fetchVendors();
+      fetchVendors({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to delete"); }
   };
 
@@ -120,7 +127,7 @@ export default function VendorsPage() {
     .filter(v => catFilter === "all" || v.category === catFilter)
     .filter(v => !search || v.name?.toLowerCase().includes(search.toLowerCase()) || v.contact_name?.toLowerCase().includes(search.toLowerCase()) || v.email?.toLowerCase().includes(search.toLowerCase()));
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading vendors" />;
 
   // ============ VENDOR DETAIL VIEW ============
   if (viewVendor) {
@@ -208,16 +215,10 @@ export default function VendorsPage() {
   // ============ MAIN LIST ============
   return (
     <div className="space-y-6" data-testid="vendors-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Vendors</h1>
-          <p className="text-muted-foreground">Manage your suppliers and vendor relationships</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchVendors}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={openAdd} data-testid="add-vendor-btn"><Plus className="w-4 h-4 mr-1" />Add Vendor</Button>
-        </div>
-      </div>
+      <OperationalPageHeader eyebrow="Procurement · supplier relationships" title="Vendors" description="Manage supplier contacts, purchasing routes and the commercial relationships behind client delivery." icon={Building2} tone="violet" signal={vendors.length ? "ready" : undefined} actions={<>
+          <Button variant="outline" size="sm" onClick={() => fetchVendors({ quiet: true })} disabled={refreshing}><RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+          <Button onClick={openAdd} data-testid="add-vendor-btn"><Plus className="w-4 h-4 mr-1" />Add vendor</Button>
+        </>} />
 
       {/* Filter Bar */}
       <div className="flex items-center gap-3">

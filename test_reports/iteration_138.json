@@ -1,5 +1,5 @@
 {
-  "summary": "Mega Features Bundle (21 endpoints) - All backend APIs passing (22/22 tests). Frontend components verified: Insights Hub (9 tabs), Ticket AI Bundle (Doppelgänger, Apology, Timeline), Client AI Bundle (DNA, LTV, Anniversary), Invoice AI Bundle (Pre-bill Audit, Smart Reminder), Estimate AI Bundle (Win Probability, Pricing Flags). All AI integrations use real Claude Sonnet via Emergent LLM key.",
+  "summary": "Mega Features Bundle (21 endpoints) - All backend APIs passing (22/22 tests). Frontend components verified: Insights Hub (9 tabs), Ticket AI Bundle (DoppelgÃ¤nger, Apology, Timeline), Client AI Bundle (DNA, LTV, Anniversary), Invoice AI Bundle (Pre-bill Audit, Smart Reminder), Estimate AI Bundle (Win Probability, Pricing Flags). All AI integrations use real Claude Sonnet via Emergent LLM key.",
   "backend_issues": {
     "critical": [],
     "minor": []
@@ -22,11 +22,11 @@
     "backend": "100% (22/22 tests passed)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required - used existing data",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Mega Features Bundle fully tested. All 21 backend endpoints working. Frontend components verified: (1) Insights Hub at /insights with 9 tabs (Tech Load, Patch Anomalies, Device Trajectory, Battery Wall, Aged AR, Skills XP, Insurance Vault, Voice Brief, Runbooks), (2) Ticket AI Bundle with Doppelgänger/Apology/Runbook buttons and Time Machine tab, (3) Client AI Bundle with DNA/LTV cards and Anniversary AI, (4) Invoice AI Bundle with Pre-bill Audit and Smart Reminder, (5) Estimate AI Bundle with Win Probability and Pricing Flags. All AI integrations use real Claude Sonnet via Emergent LLM key - no mocks.",
+  "context_for_next_testing_agent": "Mega Features Bundle fully tested. All 21 backend endpoints working. Frontend components verified: (1) Insights Hub at /insights with 9 tabs (Tech Load, Patch Anomalies, Device Trajectory, Battery Wall, Aged AR, Skills XP, Insurance Vault, Voice Brief, Runbooks), (2) Ticket AI Bundle with DoppelgÃ¤nger/Apology/Runbook buttons and Time Machine tab, (3) Client AI Bundle with DNA/LTV cards and Anniversary AI, (4) Invoice AI Bundle with Pre-bill Audit and Smart Reminder, (5) Estimate AI Bundle with Win Probability and Pricing Flags. All AI integrations use real Claude Sonnet via Emergent LLM key - no mocks.",
   "features_tested": {
     "backend_apis": {
       "GET /api/tickets/{id}/doppelganger": "PASS - Returns similar resolved tickets with similarity scores",
@@ -65,7 +65,7 @@
       "Tab: Insurance Vault": "PASS - Shows insurance-vault-card with score/tier",
       "Tab: Voice Brief": "PASS - Shows voice-brief-card with AI-generated script",
       "Tab: Runbooks": "PASS - Shows runbooks-card with search",
-      "Ticket AI Bundle": "PASS - Doppelgänger button (data-testid='ai-doppelganger-btn'), Apology AI button (data-testid='ai-apology-btn'), To Runbook button (data-testid='ai-runbook-btn' on resolved tickets), Time Machine tab (data-testid='timeline-tab')",
+      "Ticket AI Bundle": "PASS - DoppelgÃ¤nger button (data-testid='ai-doppelganger-btn'), Apology AI button (data-testid='ai-apology-btn'), To Runbook button (data-testid='ai-runbook-btn' on resolved tickets), Time Machine tab (data-testid='timeline-tab')",
       "Client AI Bundle": "PASS - DNA card, LTV Forecast card, Anniversary AI button (data-testid='anniversary-btn') with dialog",
       "Invoice AI Bundle": "PASS - Pre-bill Audit button (data-testid='audit-btn-*'), Smart Reminder button (data-testid='reminder-strategy-btn-*') with dialogs",
       "Estimate AI Bundle": "PASS - Win Probability badge (data-testid='winprob-badge'), Competitive Pricing card with flags"

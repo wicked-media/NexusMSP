@@ -545,8 +545,8 @@ function PauseDialog({ open, onOpenChange, paused, onComplete }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent className="flex h-[min(620px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="autopilot-kill-switch-dialog">
+        <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
           <DialogTitle>{paused ? "Resume Nexus Autopilot" : "Activate the kill switch"}</DialogTitle>
           <DialogDescription>
             {paused
@@ -554,7 +554,7 @@ function PauseDialog({ open, onOpenChange, paused, onComplete }) {
               : "Effective autonomy returns to Level 0 immediately. Queued evidence and audit history are preserved."}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-2">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-5">
           <Label htmlFor="autopilot-decision-reason">Decision reason</Label>
           <Textarea
             id="autopilot-decision-reason"
@@ -564,7 +564,7 @@ function PauseDialog({ open, onOpenChange, paused, onComplete }) {
           />
           <p className="text-[11px] text-muted-foreground">Recorded with technician identity, timestamp, and correlation evidence.</p>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button variant={paused ? "default" : "destructive"} onClick={submit} disabled={saving || reason.trim().length < (paused ? 12 : 8)}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : paused ? <PlayCircle className="mr-2 h-4 w-4" /> : <PauseCircle className="mr-2 h-4 w-4" />}

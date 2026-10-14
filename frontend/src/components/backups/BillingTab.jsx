@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
@@ -21,17 +22,20 @@ export default function BillingTab({ token, onOpenTenants }) {
   const [fxUpdatedAt, setFxUpdatedAt] = useState(null);
   const [billingPreview, setBillingPreview] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [refreshingFx, setRefreshingFx] = useState(false);
   const [savingPricing, setSavingPricing] = useState(false);
   const [syncingBilling, setSyncingBilling] = useState(false);
   const [autoBillBusy, setAutoBillBusy] = useState(null);
   const [autoBillDialog, setAutoBillDialog] = useState(null);
+  const [autoBillDisableDialog, setAutoBillDisableDialog] = useState(null);
   const [autoBillFrequency, setAutoBillFrequency] = useState("monthly");
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
 
   const fetchBilling = useCallback(async () => {
     const headers = { Authorization: `Bearer ${token}` };
     setLoading(true);
+    setLoadError("");
     try {
       const [priceRes, previewRes] = await Promise.all([
         axios.get(`${API}/acronis/pricing`, { headers }),
@@ -42,7 +46,11 @@ export default function BillingTab({ token, onOpenTenants }) {
       setFxRate(priceRes.data?.fx_rate_from_usd || 1.0);
       setFxUpdatedAt(priceRes.data?.fx_updated_at || null);
       setBillingPreview(previewRes.data);
-    } catch { toast.error("Failed to load billing data"); }
+    } catch (error) {
+      const message = error.response?.data?.detail || "Failed to load billing data. Existing results have been kept where available.";
+      setLoadError(message);
+      toast.error(message);
+    }
     finally { setLoading(false); }
   }, [token]);
 
@@ -97,7 +105,7 @@ export default function BillingTab({ token, onOpenTenants }) {
   };
 
   const handleToggleAutoBill = (row) => {
-    if (row.auto_bill_recurring) disableAutoBill(row.client_id);
+    if (row.auto_bill_recurring) setAutoBillDisableDialog(row);
     else if ((row.active_recurring_invoices || []).length > 0) enableAutoBill(row.client_id, false);
     else { setAutoBillDialog(row); setAutoBillFrequency("monthly"); }
   };
@@ -122,12 +130,15 @@ export default function BillingTab({ token, onOpenTenants }) {
     try {
       const res = await axios.post(`${API}/acronis/billing/client/${clientId}/unlink-recurring`, {}, { headers });
       toast.success(`Auto-bill disabled on ${res.data.disabled_on} recurring invoice(s)`);
-      fetchBilling();
+      setAutoBillDisableDialog(null);
+      await fetchBilling();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to unlink"); }
     finally { setAutoBillBusy(null); }
   };
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+  if (loading && !billingPreview) {
+    return <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground" role="status"><Loader2 className="h-5 w-5 animate-spin" />Loading billing reconciliation…</div>;
+  }
 
   return (
     <div className="space-y-4" data-testid="bcc-billing-tab">
@@ -166,6 +177,18 @@ export default function BillingTab({ token, onOpenTenants }) {
           </Button>
         </div>
       </div>
+
+      {loadError && (
+        <Card className="border-amber-400/25 bg-amber-400/[0.045]" data-testid="backup-billing-load-warning">
+          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-amber-400/20 bg-amber-400/10"><AlertTriangle className="h-3.5 w-3.5 text-amber-300" /></span>
+              <div><p className="text-xs font-semibold text-amber-100">Billing data needs attention</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">{loadError}</p></div>
+            </div>
+            <Button size="sm" variant="outline" onClick={fetchBilling} disabled={loading} className="shrink-0 border-amber-400/30 hover:bg-amber-400/10"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry</Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <HeroTile label="Linked clients" value={billingPreview?.linked_clients || 0} icon={Users} glow="cyan" subtitle="Tenant mappings ready" />
@@ -216,11 +239,10 @@ export default function BillingTab({ token, onOpenTenants }) {
                       />
                     </TableCell>
                     <TableCell className="text-center">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={cfg.enabled !== false}
-                        onChange={e => handlePriceChange(code, "enabled", e.target.checked)}
-                        className="h-4 w-4"
+                        onCheckedChange={value => handlePriceChange(code, "enabled", value === true)}
+                        aria-label={`Enable ${cfg.label || code} pricing`}
                       />
                     </TableCell>
                   </TableRow>
@@ -241,7 +263,14 @@ export default function BillingTab({ token, onOpenTenants }) {
           <CardTitle className="text-sm">Per-Client Billing Preview ({billingPreview?.period || "—"})</CardTitle>
         </CardHeader>
         <CardContent>
-          {(billingPreview?.results || []).length === 0 ? (
+          {!billingPreview ? (
+            <div className="py-8 text-center">
+              <AlertTriangle className="mx-auto h-9 w-9 text-amber-300/75" />
+              <p className="mt-3 text-sm font-medium">Billing preview is currently unavailable</p>
+              <p className="mx-auto mt-1 max-w-xl text-xs text-muted-foreground">NexusMSP has not confirmed whether tenant usage is ready to reconcile. Retry the billing data request before changing pricing or applying line items.</p>
+              <Button className="mt-4" size="sm" variant="outline" onClick={fetchBilling} disabled={loading}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry billing data</Button>
+            </div>
+          ) : billingPreview.results?.length === 0 ? (
             <div className="py-8 text-center">
               <Users className="mx-auto h-9 w-9 text-sky-300/70" />
               <p className="mt-3 text-sm font-medium">No Acronis tenants are linked to NexusMSP clients</p>
@@ -382,6 +411,39 @@ export default function BillingTab({ token, onOpenTenants }) {
                   <SelectItem value="annually">Annually</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={!!autoBillDisableDialog} onOpenChange={v => !v && !autoBillBusy && setAutoBillDisableDialog(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Recurring billing"
+          title="Disable automatic Acronis billing?"
+          description={`Stop automatically attaching Acronis usage for ${autoBillDisableDialog?.client_name || "this client"} to its recurring invoice.`}
+          icon={XCircle}
+          tone="amber"
+          className="max-w-xl"
+          footer={<>
+            <Button variant="outline" onClick={() => setAutoBillDisableDialog(null)} disabled={autoBillBusy === autoBillDisableDialog?.client_id}>Keep auto-bill</Button>
+            <Button
+              variant="destructive"
+              onClick={() => disableAutoBill(autoBillDisableDialog.client_id)}
+              disabled={autoBillBusy === autoBillDisableDialog?.client_id}
+              data-testid="confirm-disable-auto-bill"
+            >
+              {autoBillBusy === autoBillDisableDialog?.client_id && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Disable auto-bill
+            </Button>
+          </>}
+        >
+          <div className="space-y-3 text-sm">
+            <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-3">
+              <p className="font-semibold text-amber-100">This affects future billing cycles only.</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Existing billable line items and invoices are left unchanged. A technician can link this client again at any time.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg border border-border/70 bg-muted/15 p-3"><p className="text-muted-foreground">Client</p><p className="mt-1 font-semibold text-foreground">{autoBillDisableDialog?.client_name || "—"}</p></div>
+              <div className="rounded-lg border border-border/70 bg-muted/15 p-3"><p className="text-muted-foreground">Recurring invoices</p><p className="mt-1 font-semibold text-foreground">{autoBillDisableDialog?.active_recurring_invoices?.length || 0}</p></div>
             </div>
           </div>
         </NexusWorkflowDialog>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
   Loader2, Save, Bell, Clock, AlertTriangle, Users, Shield, ArrowUp, RefreshCw
 } from "lucide-react";
@@ -28,9 +29,9 @@ export default function TicketPingSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [sRes, mRes] = await Promise.all([
@@ -41,29 +42,27 @@ export default function TicketPingSettingsPage() {
       setMappings(mRes.data);
     } catch { toast.error("Failed to fetch settings"); }
     finally { setLoading(false); }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleSaveSettings = async () => {
+  const handleSaveAll = async () => {
     setSaving(true);
+    let pingSettingsSaved = false;
     try {
       await axios.put(`${API}/settings/ticket-ping`, settings, { headers });
-      toast.success("Ping settings saved");
-    } catch { toast.error("Failed to save"); }
-    finally { setSaving(false); }
-  };
-
-  const handleSaveMappings = async () => {
-    setSaving(true);
-    try {
+      pingSettingsSaved = true;
       await axios.put(`${API}/settings/ticket-ping/team-mappings`, {
         category_teams: mappings.category_teams,
         sla_teams: mappings.sla_teams,
         escalation_contacts: mappings.escalation_contacts,
       }, { headers });
-      toast.success("Team mappings saved");
-    } catch { toast.error("Failed to save mappings"); }
+      toast.success("Ping settings and team mappings saved");
+    } catch {
+      toast.error(pingSettingsSaved
+        ? "Ping settings saved, but team mappings could not be saved. Please retry."
+        : "Ping settings could not be saved. No team mappings were changed.");
+    }
     finally { setSaving(false); }
   };
 
@@ -111,20 +110,21 @@ export default function TicketPingSettingsPage() {
 
   return (
     <div className="space-y-6" data-testid="ticket-ping-settings-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Ticket Ping & Escalation</h1>
-          <p className="text-muted-foreground">Auto-notify teams when tickets are created and escalate unassigned tickets</p>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader
+        eyebrow="Service desk automation"
+        title="Ticket Ping & Escalation"
+        description="Define ownership notifications and escalation boundaries so unassigned work cannot quietly stall."
+        icon={Bell}
+        tone="violet"
+        actions={<div className="flex gap-2">
           <Button variant="outline" onClick={handleRunCheck} data-testid="run-check-btn">
             <RefreshCw className="w-4 h-4 mr-2" />Run Escalation Check
           </Button>
-          <Button onClick={() => { handleSaveSettings(); handleSaveMappings(); }} disabled={saving} data-testid="save-ping-settings-btn">
+          <Button onClick={handleSaveAll} disabled={saving} data-testid="save-ping-settings-btn">
             {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save All
           </Button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {checkResult && (
         <Card className="border-blue-500/30">

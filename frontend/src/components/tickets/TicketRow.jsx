@@ -3,14 +3,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Shield, Wrench, Truck, MessageSquare, Paperclip, Lock, AlertTriangle,
-  ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark, Play, UserPlus, CheckCircle2, Monitor,
+  ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark, Play, UserPlus, CheckCircle2, Monitor, Check, Link2,
 } from "lucide-react";
 import { differenceInHours, formatDistanceToNow } from "date-fns";
 import { TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES } from "@/lib/ticketWorkspaceHelpers";
+import { TICKET_QUEUE_STATUSES } from "@/config/ticketConfig";
 
 /* ─────────────────────────────────────────────────────────────────
    Density mode tokens — Linear/Plain.com inspired
@@ -24,15 +25,96 @@ export const DENSITY = {
 /* ─────────────────────────────────────────────────────────────────
    Status pill — Linear-style: tiny uppercase, mono, semantic color
    ───────────────────────────────────────────────────────────────── */
-export function StatusPill({ status, label }) {
+/* When `onSelect` is supplied the pill becomes an inline status control so the
+   queue is a work surface, not a read-only list. Reversible states apply
+   immediately; terminal closure still routes through the governed resolution
+   review because `PUT /tickets/{id}` promotes `resolved` to `closed` and writes
+   the closure audit record. */
+export function StatusPill({
+  status, label, ticketId, disabled = false, statusOptions = [], onSelect, onRequestTerminal, isTerminal = false,
+}) {
   const tone = TICKET_STATUS_STYLES[status] || TICKET_STATUS_STYLES.open;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-[1px] font-mono text-[9px] uppercase tracking-[0.12em] ${tone}`}>
+  const text = label || status;
+  const pill = (
+    <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-[1px] font-mono text-[9px] uppercase tracking-[0.12em] ${tone}`} data-testid={ticketId ? `ticket-status-${ticketId}` : undefined}>
       <span className="w-1 h-1 rounded-full bg-current opacity-70" />
-      {label || status}
+      {text}
     </span>
   );
+  if (!onSelect || disabled) return pill;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          aria-label={`Change status for ${ticketId || "ticket"} — currently ${text}`}
+          data-testid={`ticket-status-trigger-${ticketId}`}
+          className="group/status inline-flex items-center gap-0.5 rounded-md outline-none transition-transform duration-150 hover:scale-[1.04] focus-visible:ring-1 focus-visible:ring-cyan-400/50 active:scale-100"
+        >
+          {pill}
+          <ChevronDown className="h-2.5 w-2.5 text-zinc-600 transition-colors group-hover/status:text-zinc-300" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52 nx-queue-status-menu" onClick={(event) => event.stopPropagation()}>
+        <DropdownMenuLabel className="text-[9px] uppercase tracking-[0.16em] text-zinc-500">Set status</DropdownMenuLabel>
+        {statusOptions.map((option) => {
+          const optionTone = TICKET_STATUS_STYLES[option.key] || TICKET_STATUS_STYLES.open;
+          const isCurrent = option.key === status;
+          return (
+            <DropdownMenuItem
+              key={option.key}
+              disabled={isCurrent}
+              onSelect={() => onSelect?.(option.key)}
+              data-testid={`ticket-status-set-${option.key}-${ticketId}`}
+              className="gap-2"
+            >
+              <span className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full border ${optionTone}`} aria-hidden="true" />
+              <span className="flex-1 text-xs">{option.label}</span>
+              {isCurrent ? (
+                <Check className="h-3 w-3 opacity-70" />
+              ) : option.shortcut ? (
+                <kbd className="rounded border border-white/10 bg-black/30 px-1 font-mono text-[9px] text-zinc-500">{option.shortcut}</kbd>
+              ) : null}
+            </DropdownMenuItem>
+          );
+        })}
+        {onRequestTerminal && (
+          <>
+            <DropdownMenuSeparator />
+            {isTerminal ? (
+              <DropdownMenuItem onSelect={() => onRequestTerminal("reopen")} data-testid={`ticket-status-reopen-${ticketId}`}>
+                <Activity className="h-3 w-3 text-cyan-400" />
+                <span className="flex-1 text-xs">Reopen…</span>
+                <span className="text-[9px] text-zinc-600">audited</span>
+              </DropdownMenuItem>
+            ) : (
+              <>
+                <DropdownMenuItem onSelect={() => onRequestTerminal("resolved")} data-testid={`ticket-status-resolve-${ticketId}`}>
+                  <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                  <span className="flex-1 text-xs">Resolve…</span>
+                  <span className="text-[9px] text-zinc-600">review</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onRequestTerminal("closed")} data-testid={`ticket-status-close-${ticketId}`}>
+                  <Lock className="h-3 w-3 text-zinc-400" />
+                  <span className="flex-1 text-xs">Close…</span>
+                  <span className="text-[9px] text-zinc-600">review</span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
+
+/* Shortcut map for the inline status control: 1–4 move reversible state. */
+const QUEUE_STATUS_SHORTCUTS = TICKET_QUEUE_STATUSES.reduce((acc, key, index) => {
+  acc[key] = String(index + 1);
+  return acc;
+}, {});
 
 /* ─────────────────────────────────────────────────────────────────
    Priority left-border accent (sticky 2px)
@@ -74,6 +156,8 @@ function ActiveViewers({ viewers, density = "comfortable" }) {
 export function TicketRow({
   ticket, density = "comfortable", isSelected, onToggleSelect, onOpen, viewers,
   noteCount, attachmentCount, statusConfig, onQuickAction,
+  onStatusChange, onRequestTerminal, statusPending = false,
+  recentlyChanged = false, index = 0,
 }) {
   const d = DENSITY[density];
   const sc = statusConfig[ticket.status] || { label: ticket.status };
@@ -82,12 +166,24 @@ export function TicketRow({
   const isClosed = ["closed", "resolved"].includes(ticket.status);
   const isBlocked = !!ticket.blocked_by_ticket_number;
   const hasLinkedDevice = Boolean(ticket.device_id || ticket.asset_id || ticket.device_ids?.length);
+  const serviceKit = ticket.service_kit || (ticket.service_kit_id ? { id: ticket.service_kit_id } : null);
+  const serviceKitLabel = serviceKit?.id === "workshop_repair" ? "Workshop kit" : serviceKit?.id === "cabling_field" ? "Field kit" : null;
   const quickActions = [
     !isClosed && !ticket.assigned_to && { id: "claim", label: "Claim", icon: UserPlus, tone: "text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-100" },
     !isClosed && ticket.status !== "in_progress" && { id: "start", label: "Start", icon: Play, tone: "text-amber-300 hover:bg-amber-500/10 hover:text-amber-100" },
     hasLinkedDevice && { id: "remote", label: "Remote", icon: Monitor, tone: "text-violet-300 hover:bg-violet-500/10 hover:text-violet-100" },
     !isClosed && { id: "resolve", label: "Resolve", icon: CheckCircle2, tone: "text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-100" },
+    { id: "copy", label: "Copy link", icon: Link2, tone: "text-zinc-300 hover:bg-white/10 hover:text-zinc-100" },
   ].filter(Boolean);
+
+  // Entrance stagger, capped so a long queue never waits on a 40-step timeline.
+  const entranceDelay = Math.min(Math.max(index, 0), 11) * 28;
+
+  // Reversible queue states only. Terminal closure keeps its governed review
+  // flow, so the pill offers "Resolve…/Close…" instead of a raw status write.
+  const statusOptions = TICKET_QUEUE_STATUSES
+    .filter((key) => statusConfig?.[key])
+    .map((key) => ({ key, label: statusConfig[key].label, shortcut: QUEUE_STATUS_SHORTCUTS[key] }));
 
   // Type icon by category
   const Icon = ticket.category === "workshop" ? Wrench : ticket.category === "field" ? Truck : ticket.category === "change" ? Layers : Shield;
@@ -116,9 +212,22 @@ export function TicketRow({
     <div
       onClick={() => onOpen?.(ticket)}
       onKeyDown={(event) => {
-        if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen?.(ticket);
+          return;
+        }
+        // Linear-style queue keyboard: 1–4 move reversible state, C claims.
+        const statusOption = statusOptions.find((option) => option.shortcut === event.key);
+        if (statusOption && !isClosed && onStatusChange) {
+          event.preventDefault();
+          onStatusChange(ticket, statusOption.key);
+          return;
+        }
+        if ((event.key === "c" || event.key === "C") && quickActions.some((action) => action.id === "claim")) {
+          event.preventDefault();
+          onQuickAction?.(ticket, "claim");
         }
       }}
       tabIndex={0}
@@ -127,7 +236,9 @@ export function TicketRow({
       className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer outline-none transition-colors focus-visible:bg-cyan-500/[0.06] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-400/40 [&>span:has(+.ticket-client-brand)]:md:hidden
         ${TICKET_PRIORITY_STYLES[ticket.priority]?.border || "border-l-zinc-700"}
         ${isSelected ? "bg-violet-500/[0.08]" : isOverdue ? "bg-rose-500/[0.025] hover:bg-rose-500/[0.055]" : ticket.priority === "critical" ? "bg-amber-500/[0.02] hover:bg-amber-500/[0.05]" : "hover:bg-white/[0.025]"}
-        ${isClosed ? "opacity-55" : ""}`}
+        ${isClosed ? "opacity-55" : ""}
+        nx-queue-row`}
+      style={{ animationDelay: `${entranceDelay}ms` }}
       data-testid={`ticket-row-${ticket.id}`}
     >
       {/* Checkbox — fades in on hover or when selected */}
@@ -152,6 +263,11 @@ export function TicketRow({
         {isBlocked && (
           <Badge className="bg-rose-950/60 text-rose-300 border-rose-800/50 px-1 py-0 text-[9px] font-mono uppercase tracking-wider gap-1">
             <Lock className="w-2 h-2" />blocked
+          </Badge>
+        )}
+        {serviceKitLabel && (
+          <Badge className={`${serviceKit?.id === "workshop_repair" ? "border-cyan-400/25 bg-cyan-400/[0.08] text-cyan-200" : "border-violet-400/25 bg-violet-400/[0.08] text-violet-200"} px-1.5 py-0 text-[9px] font-mono uppercase tracking-wider`} title="Specialist delivery workflow linked to this parent ticket">
+            {serviceKitLabel}
           </Badge>
         )}
         {ticket.csat_sent && <Bookmark className="w-3 h-3 text-amber-400/70 shrink-0" title="CSAT sent" />}
@@ -186,8 +302,17 @@ export function TicketRow({
       {/* Active viewers */}
       <ActiveViewers viewers={viewers} density={density} />
 
-      {/* Status pill */}
-      <StatusPill status={ticket.status} label={sc.label} />
+      {/* Status pill — inline status control for the queue */}
+      <StatusPill
+        status={ticket.status}
+        label={sc.label}
+        ticketId={ticket.id}
+        disabled={statusPending}
+        statusOptions={statusOptions}
+        isTerminal={isClosed}
+        onSelect={onStatusChange ? (next) => onStatusChange(ticket, next) : undefined}
+        onRequestTerminal={onRequestTerminal ? (target) => onRequestTerminal(ticket, target) : undefined}
+      />
 
       {/* Technician cockpit actions appear only once a row is targeted. */}
       {quickActions.length > 0 && (
@@ -221,7 +346,7 @@ export function TicketRow({
 
       {/* SLA / age */}
       {slaLabel ? (
-        <span className={`hidden sm:inline-block ${slaTone} font-mono text-[10px] tabular-nums w-[60px] text-right shrink-0`} data-testid={`ticket-sla-${ticket.id}`}>
+        <span className={`hidden sm:inline-block ${slaTone} ${isOverdue ? "nx-sla-overdue" : ""} font-mono text-[10px] tabular-nums w-[60px] text-right shrink-0`} data-testid={`ticket-sla-${ticket.id}`}>
           <Timer className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px" />{slaLabel}
         </span>
       ) : (
@@ -231,6 +356,10 @@ export function TicketRow({
       )}
 
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-700 opacity-0 transition-opacity group-hover/row:opacity-100" />
+
+      {/* One-shot acknowledgement of a recorded queue change. It is an overlay
+          rather than a class on the row so no entrance animation restarts. */}
+      {recentlyChanged && <span className="nx-queue-row-flash" aria-hidden="true" data-testid={`ticket-row-changed-${ticket.id}`} />}
     </div>
   );
 }

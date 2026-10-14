@@ -8,6 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import {
   CreditCard, DollarSign, Users, Send, ExternalLink, Bell,
   CheckCircle, AlertTriangle, Loader2, TrendingUp, RefreshCw
@@ -64,13 +66,9 @@ export default function StripeBillingPortalPage() {
 
   return (
     <div className="space-y-6" data-testid="stripe-billing-portal-page">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><CreditCard className="w-4 h-4 text-violet-300" /></span>
-          <div><div className="flex items-center gap-2"><h1 className="text-2xl font-bold tracking-tight">Customer Billing Portal</h1><Badge variant="outline" className={portalReady ? "border-emerald-500/40 text-emerald-400" : "border-amber-500/40 text-amber-400"}>{portalReady ? "Portal live" : portalConfig?.stripe_configured ? "Portal disabled" : "Stripe setup required"}</Badge></div><p className="text-sm text-muted-foreground">Self-service payments, client reminders, and billing access.</p></div>
-        </div>
-        <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="portal-go-invoices"><DollarSign className="w-4 h-4 mr-1" />Invoices</Button><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button></div>
-      </div>
+      <OperationalPageHeader eyebrow="Revenue operations · client payments" title="Customer Billing Portal" description="Manage self-service payments, client reminders and billing access from one controlled workspace." icon={CreditCard} tone="violet" signal={portalReady ? "connected" : "attention"} meta={[portalReady ? "Portal live" : portalConfig?.stripe_configured ? "Portal disabled" : "Stripe setup required"]} actions={<Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>} />
+
+      <BillingWorkspaceNav />
 
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3">

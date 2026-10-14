@@ -18,13 +18,16 @@ export function WorkspaceLoadingState({ label = "Loading workspace", className =
   );
 }
 
-export function WorkspaceErrorState({ title = "Workspace data is unavailable", description, onRetry, retryLabel = "Retry", className = "" }) {
+export function WorkspaceErrorState({ title = "Workspace data is unavailable", description, onRetry, retryLabel = "Retry", onSecondaryAction, secondaryLabel, className = "" }) {
   return (
     <Card className={`mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045] ${className}`} data-testid="workspace-error-state">
       <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
         <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-500/25 bg-rose-500/[0.1]"><AlertTriangle className="h-6 w-6 text-rose-300" /></span>
         <div><h1 className="text-lg font-semibold">{title}</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{description || "Nexus could not retrieve the information needed for this workspace. No work has been changed."}</p></div>
-        {onRetry && <Button onClick={onRetry} data-testid="workspace-retry"><RefreshCw className="mr-2 h-4 w-4" />{retryLabel}</Button>}
+        {(onRetry || onSecondaryAction) && <div className="flex flex-wrap justify-center gap-2">
+          {onSecondaryAction && <Button variant="outline" onClick={onSecondaryAction} data-testid="workspace-secondary-action">{secondaryLabel || "Go back"}</Button>}
+          {onRetry && <Button onClick={onRetry} data-testid="workspace-retry"><RefreshCw className="mr-2 h-4 w-4" />{retryLabel}</Button>}
+        </div>}
       </CardContent>
     </Card>
   );

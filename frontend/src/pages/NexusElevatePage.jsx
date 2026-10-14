@@ -17,12 +17,14 @@ import {
   Loader2, MonitorCog, RefreshCw, Search, ShieldCheck, ShieldX, TimerReset,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import HeroTile from "@/components/HeroTile";
 import ElevatePolicyWorkspace from "@/components/nexus-elevate/ElevatePolicyWorkspace";
+import NexusAccessPanel from "@/components/roadmap-tools/NexusAccessPanel";
 
 const EMPTY_OVERVIEW = {
-  settings: { native_enabled: true, max_duration_minutes: 15, keeper_bridge_enabled: false },
-  summary: { pending: 0, approved: 0, expiring_soon: 0, failed_or_expired: 0, native_agent_coverage: 0, native_agents_online: 0, companion_agents_ready: 0, companion_agents_online: 0, elevate_active: 0, elevate_deploying: 0, keeper_bridge_requests: 0, active_policies: 0, enforced_policies: 0 },
+  settings: { native_enabled: true, max_duration_minutes: 15, approval_sla_minutes: 15, keeper_bridge_enabled: false },
+  summary: { pending: 0, overdue_reviews: 0, approved: 0, expiring_soon: 0, failed_or_expired: 0, native_agent_coverage: 0, native_agents_online: 0, companion_agents_ready: 0, companion_agents_online: 0, elevate_active: 0, elevate_deploying: 0, keeper_bridge_requests: 0, active_policies: 0, enforced_policies: 0 },
   recent_requests: [],
 };
 
@@ -31,6 +33,8 @@ const STATUS_STYLE = {
   approved: "border-sky-500/30 bg-sky-500/15 text-sky-200",
   executed: "border-emerald-500/30 bg-emerald-500/15 text-emerald-200",
   denied: "border-zinc-500/30 bg-zinc-500/15 text-zinc-300",
+  cancelled: "border-zinc-500/30 bg-zinc-500/15 text-zinc-300",
+  revoked: "border-violet-500/30 bg-violet-500/15 text-violet-200",
   failed: "border-rose-500/30 bg-rose-500/15 text-rose-200",
   expired: "border-rose-500/30 bg-rose-500/15 text-rose-200",
 };
@@ -47,6 +51,7 @@ export default function NexusElevatePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const endpointScope = searchParams.get("device") || "";
+  const ticketScope = searchParams.get("ticket") || "";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [overview, setOverview] = useState(EMPTY_OVERVIEW);
   const [requests, setRequests] = useState([]);
@@ -66,24 +71,41 @@ export default function NexusElevatePage() {
   const [companionLoading, setCompanionLoading] = useState(false);
   const [companionDeploying, setCompanionDeploying] = useState(false);
   const [policyCount, setPolicyCount] = useState(null);
+  const [secureAccessOpen, setSecureAccessOpen] = useState(false);
+  const [secureAccessAgents, setSecureAccessAgents] = useState([]);
+  const [secureAccessRequests, setSecureAccessRequests] = useState([]);
+  const [secureAccessAgentId, setSecureAccessAgentId] = useState("");
+  const [secureAccessProvider, setSecureAccessProvider] = useState("entra_pim");
+  const [secureAccessTicket, setSecureAccessTicket] = useState("");
+  const [secureAccessReason, setSecureAccessReason] = useState("");
+  const [secureAccessLoading, setSecureAccessLoading] = useState(false);
+  const [secureAccessSubmitting, setSecureAccessSubmitting] = useState(false);
+  const [secureAccessReadiness, setSecureAccessReadiness] = useState(null);
+  const [secureAccessReadinessLoading, setSecureAccessReadinessLoading] = useState(false);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
     try {
-      const [overviewResult, requestsResult] = await Promise.all([
+      const [overviewResult, requestsResult, secureAccessResult] = await Promise.all([
         axios.get(`${API}/nexus-elevate/overview`, { headers }),
-        axios.get(`${API}/nexus-elevate/requests`, { headers, params: endpointScope ? { device_id: endpointScope } : undefined }),
+        axios.get(`${API}/nexus-elevate/requests`, { headers, params: { ...(endpointScope ? { device_id: endpointScope } : {}), ...(ticketScope ? { ticket_id: ticketScope } : {}) } }),
+        axios.get(`${API}/nexus-elevate/secure-access/requests`, { headers, params: { ...(endpointScope ? { agent_id: endpointScope } : {}), ...(ticketScope ? { ticket_id: ticketScope } : {}) } }),
       ]);
       setOverview(overviewResult.data || EMPTY_OVERVIEW);
       setRequests(requestsResult.data?.requests || []);
+      setSecureAccessRequests(secureAccessResult.data?.requests || []);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Nexus Elevate could not be loaded");
     } finally {
       setLoading(false);
     }
-  }, [headers, endpointScope]);
+  }, [headers, endpointScope, ticketScope]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (ticketScope) setSecureAccessTicket(ticketScope);
+  }, [ticketScope]);
 
   useEffect(() => {
     const refreshQueue = () => {
@@ -114,7 +136,7 @@ export default function NexusElevatePage() {
 
   useEffect(() => {
     const requestedStatus = searchParams.get("status");
-    if (requestedStatus && ["pending", "approved", "executed", "denied", "failed", "expired"].includes(requestedStatus)) {
+    if (requestedStatus && ["pending", "approved", "executed", "denied", "cancelled", "revoked", "failed", "expired"].includes(requestedStatus)) {
       setStatus(requestedStatus);
     }
     const requestId = searchParams.get("request");
@@ -160,6 +182,60 @@ export default function NexusElevatePage() {
     }
   };
 
+  const openSecureAccess = async () => {
+    setSecureAccessOpen(true);
+    setSecureAccessLoading(true);
+    try {
+      const response = await axios.get(`${API}/nexus-agent/agents`, { headers });
+      const agents = (response.data || []).filter((agent) => agent.client_id);
+      setSecureAccessAgents(agents);
+      const scopedAgent = agents.find((agent) => agent.id === endpointScope);
+      if (!secureAccessAgentId && (scopedAgent || agents[0])?.id) setSecureAccessAgentId((scopedAgent || agents[0]).id);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Managed endpoints could not be loaded");
+    } finally {
+      setSecureAccessLoading(false);
+    }
+  };
+
+  const createSecureAccessRequest = async () => {
+    if (!secureAccessAgentId) return toast.error("Choose a client-assigned Nexus Agent");
+    if (secureAccessReason.trim().length < 8) return toast.error("Record a technician justification of at least 8 characters");
+    setSecureAccessSubmitting(true);
+    try {
+      const response = await axios.post(`${API}/nexus-elevate/secure-access/requests`, {
+        provider: secureAccessProvider,
+        agent_id: secureAccessAgentId,
+        ticket_id: secureAccessTicket,
+        justification: secureAccessReason,
+        requested_duration_minutes: 30,
+      }, { headers });
+      setSecureAccessRequests((current) => [response.data.request, ...current]);
+      setSecureAccessOpen(false);
+      setSecureAccessReason("");
+      setSecureAccessTicket("");
+      toast.success("Secure access hand-off recorded. Complete the Microsoft-controlled step with your own sign-in.");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Secure access request could not be recorded");
+    } finally {
+      setSecureAccessSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!secureAccessOpen || !secureAccessAgentId) {
+      setSecureAccessReadiness(null);
+      return undefined;
+    }
+    let active = true;
+    setSecureAccessReadinessLoading(true);
+    axios.get(`${API}/nexus-elevate/secure-access/readiness`, { headers, params: { agent_id: secureAccessAgentId } })
+      .then((response) => { if (active) setSecureAccessReadiness(response.data || null); })
+      .catch((error) => { if (active) toast.error(error.response?.data?.detail || "Microsoft access readiness could not be checked"); })
+      .finally(() => { if (active) setSecureAccessReadinessLoading(false); });
+    return () => { active = false; };
+  }, [headers, secureAccessAgentId, secureAccessOpen]);
+
   const decide = async () => {
     if (!selected) return;
     if (reason.trim().length < 8) {
@@ -184,39 +260,67 @@ export default function NexusElevatePage() {
     }
   };
 
+  const cancelRequest = async () => {
+    if (!selected) return;
+    if (reason.trim().length < 8) {
+      toast.error("Record a cancellation reason of at least 8 characters");
+      return;
+    }
+    setActing(true);
+    try {
+      const response = await axios.post(`${API}/nexus-elevate/requests/${encodeURIComponent(selected.id)}/cancel`, { reason }, { headers });
+      const updated = response.data?.request;
+      toast.success(response.data?.message || "Elevation request cancelled and audited");
+      setSelected(null);
+      setDetail(null);
+      if (updated) setRequests((current) => current.map((item) => item.id === updated.id ? updated : item));
+      await load({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not cancel the elevation request");
+    } finally {
+      setActing(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return requests
+      .filter((request) => !ticketScope || request.ticket_id === ticketScope)
       .filter((request) => status === "all" || request.status === status)
       .filter((request) => !query || [request.program_name, request.program_path, request.hostname, request.client_name, request.requested_by_name, request.publisher, request.ticket_id].some((value) => String(value || "").toLowerCase().includes(query)));
-  }, [requests, search, status]);
+  }, [requests, search, status, ticketScope]);
 
   const summary = overview.summary || EMPTY_OVERVIEW.summary;
   const settings = overview.settings || EMPTY_OVERVIEW.settings;
   const selectedStatus = selected?.status;
   const canDecide = selectedStatus === "pending";
+  const canCancel = selectedStatus === "pending" || selectedStatus === "approved";
   const jumpToPolicies = () => document.getElementById("nexus-elevate-policies")?.scrollIntoView({ behavior: "smooth", block: "start" });
   const updatePolicyCount = useCallback((policies) => setPolicyCount(policies.filter((policy) => policy.enabled).length), []);
 
   return (
     <div className="space-y-6" data-testid="nexus-elevate-page">
       <OperationalPageHeader
-        eyebrow="Endpoint security - controlled privilege"
+        eyebrow="Endpoint security · controlled privilege"
         title="Nexus Elevate"
         description="A native, hash-pinned service-launch approval workflow for enrolled Windows Nexus Agents. It supports precise unattended executable tasks; it does not grant an endpoint user interactive or permanent administrator access."
         icon={ShieldCheck}
         tone="emerald"
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => navigate("/help/nexus-elevate-setup")}><HelpCircle className="mr-1 h-4 w-4" />Setup guide</Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}><FileKey2 className="mr-1 h-4 w-4" />Settings</Button>
-          <Button variant="outline" size="sm" onClick={jumpToPolicies}><ShieldCheck className="mr-1 h-4 w-4" />Policies</Button>
+          <WorkspaceActionMenu testId="elevate-more-actions">
+            <WorkspaceActionMenuItem icon={HelpCircle} onSelect={() => navigate("/help/nexus-elevate-setup")}>Setup guide</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={FileKey2} onSelect={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}>Settings</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={ShieldCheck} onSelect={jumpToPolicies}>Policies</WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
+          <Button variant="outline" size="sm" onClick={openSecureAccess}><FileKey2 className="mr-1 h-4 w-4" />Secure Microsoft access</Button>
           <Button variant="outline" size="sm" onClick={openCompanionRollout}><MonitorCog className="mr-1 h-4 w-4" />Companion repair</Button>
           <Button size="sm" onClick={() => load()} disabled={loading}><RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh queue</Button>
         </>}
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-8">
         <HeroTile label="Awaiting review" value={summary.pending} icon={CircleAlert} glow={summary.pending ? "amber" : "zinc"} subtitle="Needs an approver" onClick={() => setStatus("pending")} active={status === "pending"} testId="nexus-elevate-pending-tile" />
+        <HeroTile label="Review SLA" value={summary.overdue_reviews || 0} icon={TimerReset} glow={summary.overdue_reviews ? "rose" : "zinc"} subtitle={summary.overdue_reviews ? "On-call escalation sent" : `${settings.approval_sla_minutes || 15} minute target`} onClick={() => setStatus("pending")} active={status === "pending"} testId="nexus-elevate-overdue-tile" />
         <HeroTile label="Approved launch" value={summary.approved} icon={Clock3} glow={summary.approved ? "sky" : "zinc"} subtitle="Queued or time-bound" onClick={() => setStatus("approved")} active={status === "approved"} testId="nexus-elevate-approved-tile" />
         <HeroTile label="Expiring soon" value={summary.expiring_soon} icon={TimerReset} glow={summary.expiring_soon ? "amber" : "zinc"} subtitle="Within ten minutes" onClick={() => setStatus("approved")} testId="nexus-elevate-expiring-tile" />
         <HeroTile label="Execution exceptions" value={summary.failed_or_expired} icon={ShieldX} glow={summary.failed_or_expired ? "rose" : "zinc"} subtitle="Failures and expired requests" onClick={() => setStatus("failed")} active={status === "failed"} testId="nexus-elevate-failed-tile" />
@@ -232,17 +336,27 @@ export default function NexusElevatePage() {
         </CardContent>
       </Card>
 
+      {ticketScope && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-4 py-3 text-sm" data-testid="nexus-elevate-ticket-scope"><div><span className="font-semibold text-cyan-100">Ticket-scoped Elevate view</span><span className="ml-2 text-muted-foreground">Showing governed privilege evidence for ticket {ticketScope}{endpointScope ? " and its linked endpoint" : ""}.</span></div><Button variant="ghost" size="sm" className="text-cyan-100 hover:bg-cyan-400/[0.10]" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(ticketScope)}`)}>Return to ticket</Button></div>}
+
+      <NexusAccessPanel />
+      <Card className="border-sky-500/20 bg-sky-500/[0.025]" data-testid="nexus-secure-access-card">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><p className="font-semibold text-sky-100">Secure Microsoft access hand-offs</p><p className="mt-1 max-w-4xl text-sm text-muted-foreground">Record an Entra PIM activation or Windows LAPS retrieval against the exact endpoint and ticket. Nexus keeps the scope and audit trail; Microsoft remains the authentication and credential authority. No passkey, password, MFA response, token, or LAPS password is collected here.</p></div><div className="flex shrink-0 gap-2"><Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}>Connector setup</Button><Button variant="outline" size="sm" onClick={openSecureAccess}>New hand-off</Button></div></div>
+          {secureAccessRequests.length > 0 && <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">{secureAccessRequests.slice(0, 6).map((request) => <div key={request.id} className="rounded-lg border border-border/70 bg-background/30 px-3 py-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{request.provider === "entra_pim" ? "Entra PIM" : "Windows LAPS"}</span><Badge variant="outline" className="text-[9px] uppercase">{String(request.status || "requested").replace(/_/g, " ")}</Badge></div><p className="mt-1 truncate text-muted-foreground">{request.device_name || request.hostname || "Managed endpoint"}{request.ticket_id ? ` · ${request.ticket_id}` : ""}</p><p className="mt-1 text-[10px] text-muted-foreground">{displayTime(request.requested_at)}</p></div>)}</div>}
+        </CardContent>
+      </Card>
+
       <ElevatePolicyWorkspace api={API} headers={headers} onPolicyCountChange={updatePolicyCount} />
 
       <div className="flex flex-wrap gap-3">
         <div className="relative min-w-[260px] flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search program, asset, client, requester, or ticket..." data-testid="nexus-elevate-search" /></div>
-        <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-[180px]" data-testid="nexus-elevate-status-filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All request states</SelectItem><SelectItem value="pending">Awaiting review</SelectItem><SelectItem value="approved">Approved / queued</SelectItem><SelectItem value="executed">Executed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="expired">Expired</SelectItem></SelectContent></Select>
+        <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-[180px]" data-testid="nexus-elevate-status-filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All request states</SelectItem><SelectItem value="pending">Awaiting review</SelectItem><SelectItem value="approved">Approved / queued</SelectItem><SelectItem value="executed">Executed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="cancelled">Withdrawn</SelectItem><SelectItem value="revoked">Queued launch revoked</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="expired">Expired</SelectItem></SelectContent></Select>
         {endpointScope && <Button variant="outline" size="sm" onClick={() => navigate("/nexus-elevate")}>Endpoint scope <span className="ml-1 text-muted-foreground">×</span></Button>}
         <span className="self-center text-xs text-muted-foreground">{filtered.length} shown</span>
       </div>
 
       <Card><CardContent className="p-0"><div className="max-h-[660px] overflow-auto"><Table><TableHeader><TableRow><TableHead>Request</TableHead><TableHead>Asset / client</TableHead><TableHead>Requester</TableHead><TableHead>Trust evidence</TableHead><TableHead>Requested</TableHead><TableHead>State</TableHead><TableHead className="text-right">Review</TableHead></TableRow></TableHeader><TableBody>
-        {loading ? <TableRow><TableCell colSpan={7} className="py-14 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></TableCell></TableRow> : filtered.length === 0 ? <TableRow><TableCell colSpan={7} className="py-14 text-center text-sm text-muted-foreground">No elevation requests match the current filter.</TableCell></TableRow> : filtered.map((request) => <TableRow key={request.id} data-testid={`nexus-elevate-request-${request.id}`}><TableCell className="max-w-xs"><div className="truncate font-medium" title={request.program_path}>{request.program_name || "Approved executable"}</div><div className="mt-1 truncate font-mono text-[10px] text-muted-foreground" title={request.program_path}>{request.program_path}</div>{request.ticket_id && <div className="mt-1 text-[10px] text-sky-300">Ticket {request.ticket_id}</div>}</TableCell><TableCell><div className="text-sm">{request.asset_name || request.hostname || "Managed endpoint"}</div><div className="mt-1 text-xs text-muted-foreground">{request.client_name || "Unassigned client"}</div></TableCell><TableCell><div className="text-sm">{request.requested_by_name || "Endpoint user"}</div><div className="mt-1 max-w-[180px] truncate text-[10px] text-muted-foreground" title={request.justification}>{request.justification || "No reason supplied"}</div></TableCell><TableCell><div className="max-w-[210px] truncate text-xs" title={request.publisher}>{request.publisher || "Publisher not provided"}</div><div className="mt-1 font-mono text-[10px] text-emerald-300">{request.sha256?.slice(0, 12)}...</div></TableCell><TableCell className="text-xs text-muted-foreground">{displayTime(request.requested_at)}</TableCell><TableCell><Badge variant="outline" className={`text-[10px] uppercase ${STATUS_STYLE[request.status] || STATUS_STYLE.pending}`}>{String(request.status || "pending").replace(/_/g, " ")}</Badge>{request.approved_until && request.status === "approved" && <div className="mt-1 text-[10px] text-muted-foreground">Until {safeDate(request.approved_until)?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>}</TableCell><TableCell className="text-right"><Button variant={request.status === "pending" ? "default" : "ghost"} size="sm" onClick={() => openRequest(request)}>{request.status === "pending" ? "Review" : "Details"}</Button></TableCell></TableRow>)}
+        {loading ? <TableRow><TableCell colSpan={7} className="py-14 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></TableCell></TableRow> : filtered.length === 0 ? <TableRow><TableCell colSpan={7} className="py-14 text-center text-sm text-muted-foreground">No elevation requests match the current filter.</TableCell></TableRow> : filtered.map((request) => <TableRow key={request.id} data-testid={`nexus-elevate-request-${request.id}`}><TableCell className="max-w-xs"><div className="truncate font-medium" title={request.program_path}>{request.program_name || "Approved executable"}</div><div className="mt-1 truncate font-mono text-[10px] text-muted-foreground" title={request.program_path}>{request.program_path}</div>{request.ticket_id && <div className="mt-1 text-[10px] text-sky-300">Ticket {request.ticket_id}</div>}</TableCell><TableCell><div className="text-sm">{request.asset_name || request.hostname || "Managed endpoint"}</div><div className="mt-1 text-xs text-muted-foreground">{request.client_name || "Unassigned client"}</div></TableCell><TableCell><div className="text-sm">{request.requested_by_name || "Endpoint user"}</div><div className="mt-1 max-w-[180px] truncate text-[10px] text-muted-foreground" title={request.justification}>{request.justification || "No reason supplied"}</div></TableCell><TableCell><div className="max-w-[210px] truncate text-xs" title={request.publisher}>{request.publisher || "Publisher not provided"}</div><div className="mt-1 font-mono text-[10px] text-emerald-300">{request.sha256?.slice(0, 12)}...</div></TableCell><TableCell className="text-xs text-muted-foreground">{displayTime(request.requested_at)}</TableCell><TableCell><Badge variant="outline" className={`text-[10px] uppercase ${STATUS_STYLE[request.status] || STATUS_STYLE.pending}`}>{String(request.status || "pending").replace(/_/g, " ")}</Badge>{request.status === "pending" && request.approval_due_at && <div className={`mt-1 text-[10px] ${safeDate(request.approval_due_at)?.getTime() <= Date.now() ? "text-rose-300" : "text-muted-foreground"}`}>{request.approval_escalated_at ? "Escalated to on-call" : `Due ${safeDate(request.approval_due_at)?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}</div>}{request.approved_until && request.status === "approved" && <div className="mt-1 text-[10px] text-muted-foreground">Until {safeDate(request.approved_until)?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>}</TableCell><TableCell className="text-right"><Button variant={request.status === "pending" ? "default" : "ghost"} size="sm" onClick={() => openRequest(request)}>{request.status === "pending" ? "Review" : "Details"}</Button></TableCell></TableRow>)}
       </TableBody></Table></div></CardContent></Card>
 
       <Dialog open={companionOpen} onOpenChange={setCompanionOpen}>
@@ -252,14 +366,18 @@ export default function NexusElevatePage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={secureAccessOpen} onOpenChange={setSecureAccessOpen}>
+        <DialogContent className="max-w-xl" data-testid="nexus-secure-access-dialog"><DialogHeader><DialogTitle className="flex items-center gap-2"><FileKey2 className="h-5 w-5 text-sky-300" />Secure Microsoft access hand-off</DialogTitle></DialogHeader><div className="space-y-4"><p className="text-sm text-muted-foreground">This creates a device- and ticket-bound audit record before you continue in your own Microsoft sign-in session. Nexus will not autofill, store, replay, or view passkeys, passwords, MFA responses, tokens, or LAPS credentials.</p><div className="grid gap-3 sm:grid-cols-2"><div><Label>Microsoft workflow</Label><Select value={secureAccessProvider} onValueChange={setSecureAccessProvider}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="entra_pim">Activate eligible Entra PIM role</SelectItem><SelectItem value="windows_laps">Retrieve Windows LAPS in Microsoft</SelectItem></SelectContent></Select></div><div><Label>Managed endpoint</Label><Select value={secureAccessAgentId} onValueChange={setSecureAccessAgentId} disabled={secureAccessLoading}><SelectTrigger className="mt-1"><SelectValue placeholder={secureAccessLoading ? "Loading endpoints..." : "Choose endpoint"} /></SelectTrigger><SelectContent>{secureAccessAgents.length === 0 ? <SelectItem value="none" disabled>No client-assigned agents available</SelectItem> : secureAccessAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.hostname || agent.id} · {agent.client_name || agent.client_id}</SelectItem>)}</SelectContent></Select></div></div>{secureAccessReadinessLoading ? <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Checking technician identity and tenant mapping…</div> : secureAccessReadiness && <div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.05] p-3 text-xs"><p className="font-semibold text-sky-100">Provider verification preflight</p><p className="mt-1 text-muted-foreground">Microsoft identity: {secureAccessReadiness.technician_identity?.microsoft_identity_bound ? "bound to this technician" : "not yet bound"} · Client Entra tenant: {secureAccessReadiness.client?.provider_tenant_mapped ? "mapped" : "not mapped"}.</p><p className="mt-1 text-amber-200">Delegated secure-access connector: {String(secureAccessReadiness.provider_connection?.delegated_secure_access_connector || "awaiting_registration").replace(/_/g, " ")}. A fresh Microsoft sign-in will still be required.</p></div>}<div><Label htmlFor="secure-access-ticket">Ticket reference (optional)</Label><Input id="secure-access-ticket" className="mt-1" value={secureAccessTicket} onChange={(event) => setSecureAccessTicket(event.target.value)} placeholder="INC-1234" /></div><div><Label htmlFor="secure-access-reason">Technician justification</Label><Textarea id="secure-access-reason" className="mt-1" rows={3} value={secureAccessReason} onChange={(event) => setSecureAccessReason(event.target.value)} placeholder="Why is this time-bound provider access required?" /></div><div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.05] p-3 text-xs text-sky-100">{secureAccessProvider === "entra_pim" ? "Next: activate only your eligible Entra role and complete Microsoft-required MFA/approval." : "Next: retrieve LAPS only in the Microsoft-controlled experience using your authorised account."}</div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setSecureAccessOpen(false)} disabled={secureAccessSubmitting}>Cancel</Button><Button onClick={createSecureAccessRequest} disabled={secureAccessSubmitting || secureAccessLoading || secureAccessReason.trim().length < 8}>{secureAccessSubmitting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Record secure hand-off</Button></div></div></DialogContent>
+      </Dialog>
+
       <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto" data-testid="nexus-elevate-review-dialog">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-300" />Nexus Elevate request review</DialogTitle></DialogHeader>
-          {!selected ? null : <div className="space-y-5">
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="nexus-elevate-review-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-emerald-400/15 via-emerald-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-300" />Nexus Elevate request review</DialogTitle></DialogHeader>
+          {!selected ? null : <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             <div className="grid gap-3 rounded-xl border border-border bg-muted/25 p-4 sm:grid-cols-2"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Approved program</p><p className="mt-1 break-all text-sm font-medium">{selected.program_name}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{selected.program_path}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Endpoint context</p><p className="mt-1 text-sm font-medium">{selected.asset_name || selected.hostname}</p><p className="mt-1 text-xs text-muted-foreground">{selected.client_name || "Unassigned client"} · {selected.requested_by_name || "Endpoint user"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Fingerprint (verified on endpoint)</p><p className="mt-1 break-all font-mono text-[10px] text-emerald-300">{selected.sha256}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Publisher and arguments</p><p className="mt-1 text-xs">{selected.publisher || "Unknown publisher"}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{(selected.arguments || []).join(" ") || "No arguments"}</p></div></div>
             <div className="rounded-lg border border-border bg-background/40 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Requester justification</p><p className="mt-1 whitespace-pre-wrap text-sm">{selected.justification || "No justification supplied"}</p>{selected.parent_process && <p className="mt-2 font-mono text-[10px] text-muted-foreground">Parent process: {selected.parent_process}</p>}</div>
             {detail?.audit?.length > 0 && <div><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Audit timeline</p><div className="space-y-2">{detail.audit.map((event) => <div key={event.id} className="flex gap-3 rounded-lg border border-border/70 px-3 py-2 text-xs"><Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /><div><span className="font-medium capitalize">{String(event.kind || "event").replace(/_/g, " ")}</span><span className="ml-2 text-muted-foreground">{displayTime(event.at)}</span></div></div>)}</div></div>}
-            {canDecide ? <div className="space-y-3 border-t border-border pt-4"><div className="flex gap-2"><Button variant={decision === "approve" ? "default" : "outline"} size="sm" onClick={() => setDecision("approve")}>Approve controlled launch</Button><Button variant={decision === "deny" ? "destructive" : "outline"} size="sm" onClick={() => setDecision("deny")}>Deny request</Button></div>{decision === "approve" && <div className="max-w-xs"><Label htmlFor="elevation-duration">Time bound</Label><Select value={duration} onValueChange={setDuration}><SelectTrigger id="elevation-duration" className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{[5, 10, 15, 30, 45, 60].filter((value) => value <= (settings.max_duration_minutes || 15)).map((value) => <SelectItem key={value} value={String(value)}>{value} minutes</SelectItem>)}</SelectContent></Select></div>}<div><Label htmlFor="elevation-decision-reason">{decision === "approve" ? "Approval rationale" : "Denial rationale"}</Label><Textarea id="elevation-decision-reason" className="mt-1" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={decision === "approve" ? "Why is this precise, time-bound launch appropriate?" : "Explain why the request cannot be approved and what the requester should do next."} /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setSelected(null)} disabled={acting}>Cancel</Button><Button variant={decision === "deny" ? "destructive" : "default"} onClick={decide} disabled={acting || reason.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{decision === "approve" ? "Approve and queue" : "Deny and record"}</Button></div></div> : <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">This request is already <strong className="capitalize text-foreground">{selected.status}</strong>. Its full activity remains above for audit.</div>}
+            {(canDecide || canCancel) ? <div className="space-y-3 border-t border-border pt-4">{canDecide && <div className="flex flex-wrap gap-2"><Button variant={decision === "approve" ? "default" : "outline"} size="sm" onClick={() => setDecision("approve")}>Approve controlled launch</Button><Button variant={decision === "deny" ? "destructive" : "outline"} size="sm" onClick={() => setDecision("deny")}>Deny request</Button></div>}{selectedStatus === "approved" && <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3 text-xs text-amber-100">A queued launch can be revoked only while the endpoint has not received its command. Nexus will refuse to claim a dispatched or running process was stopped.</div>}{canDecide && decision === "approve" && <div className="max-w-xs"><Label htmlFor="elevation-duration">Time bound</Label><Select value={duration} onValueChange={setDuration}><SelectTrigger id="elevation-duration" className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{[5, 10, 15, 30, 45, 60].filter((value) => value <= (settings.max_duration_minutes || 15)).map((value) => <SelectItem key={value} value={String(value)}>{value} minutes</SelectItem>)}</SelectContent></Select></div>}<div><Label htmlFor="elevation-decision-reason">{selectedStatus === "approved" ? "Revocation rationale" : decision === "approve" ? "Approval rationale" : "Denial rationale"}</Label><Textarea id="elevation-decision-reason" className="mt-1" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={selectedStatus === "approved" ? "Why must this queued launch be revoked before dispatch?" : decision === "approve" ? "Why is this precise, time-bound launch appropriate?" : "Explain why the request cannot be approved and what the requester should do next."} /></div><div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => setSelected(null)} disabled={acting}>Close</Button>{canCancel && <Button variant="outline" className="border-rose-500/35 text-rose-200 hover:bg-rose-500/10" onClick={cancelRequest} disabled={acting || reason.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{selectedStatus === "approved" ? "Revoke queued launch" : "Withdraw request"}</Button>}{canDecide && <Button variant={decision === "deny" ? "destructive" : "default"} onClick={decide} disabled={acting || reason.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{decision === "approve" ? "Approve and queue" : "Deny and record"}</Button>}</div></div> : <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">This request is already <strong className="capitalize text-foreground">{selected.status}</strong>. Its full activity remains above for audit.</div>}
           </div>}
         </DialogContent>
       </Dialog>

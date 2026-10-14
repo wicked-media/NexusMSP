@@ -1,6 +1,7 @@
 /* QuickScriptDialog.jsx — bulk script picker w/ fan-out & audit log. */
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
@@ -12,15 +13,27 @@ import { toast } from "sonner";
 
 export default function QuickScriptDialog({ open, onClose, deviceIds }) {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [scripts, setScripts] = useState([]);
+  const [executionState, setExecutionState] = useState("loading");
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [search, setSearch] = useState("");
   const [running, setRunning] = useState(null);
 
   useEffect(() => {
     if (!open) return;
+    setExecutionState("loading");
     axios.get(`${API}/devices/quick-scripts`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => setScripts(r.data?.scripts || []))
-      .catch(() => setScripts([]));
+      .then(r => {
+        setScripts(r.data?.scripts || []);
+        setExecutionState(r.data?.execution_state || "ready");
+        setAvailabilityMessage(r.data?.message || "");
+      })
+      .catch(() => {
+        setScripts([]);
+        setExecutionState("unavailable");
+        setAvailabilityMessage("Nexus could not confirm that quick-script execution is available.");
+      });
   }, [open, token]);
 
   const run = async (s) => {
@@ -46,7 +59,7 @@ export default function QuickScriptDialog({ open, onClose, deviceIds }) {
       <NexusWorkflowDialog
         eyebrow="Device automation"
         title={`Run a quick script on ${deviceIds.length} device${deviceIds.length === 1 ? "" : "s"}`}
-        description="Choose an approved script. Nexus records the queued action against every selected endpoint."
+        description={executionState === "ready" ? "Choose an approved script. Nexus will show the recorded command and verification state for every selected endpoint." : "Nexus will never claim an endpoint action was queued until a governed Agent command exists."}
         icon={Search}
         tone="violet"
         className="max-w-2xl"
@@ -55,6 +68,14 @@ export default function QuickScriptDialog({ open, onClose, deviceIds }) {
         <DialogHeader className="sr-only" aria-hidden="true">
           <DialogTitle>Quick Scripts · fan-out to {deviceIds.length} device{deviceIds.length === 1 ? "" : "s"}</DialogTitle>
         </DialogHeader>
+        {executionState !== "loading" && executionState !== "ready" ? <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
+          <p className="text-sm font-semibold text-zinc-100">Quick scripts are not configured yet</p>
+          <p className="mt-1 text-xs leading-relaxed text-zinc-400">{availabilityMessage || "Use a governed maintenance window or the Nexus Agent command centre instead."}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => { onClose?.(); navigate("/nexus-agent"); }}>Open Nexus Agent</Button>
+            <Button size="sm" variant="outline" onClick={() => { onClose?.(); navigate("/devices?maintenance=1"); }}>Schedule maintenance</Button>
+          </div>
+        </div> : <>
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-zinc-500" />
           <Input className="pl-8 text-xs" placeholder="Search scripts (cleanup, gpupdate, defender…)" value={search} onChange={e => setSearch(e.target.value)} data-testid="quick-script-search" />
@@ -83,7 +104,9 @@ export default function QuickScriptDialog({ open, onClose, deviceIds }) {
               </div>
             </Card>
           ))}
+          {executionState === "ready" && filtered.length === 0 && <div className="col-span-full rounded-lg border border-dashed border-zinc-800 p-6 text-center text-xs text-zinc-500">No approved scripts match this search.</div>}
         </div>
+        </>}
       </NexusWorkflowDialog>
     </Dialog>
   );

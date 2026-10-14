@@ -6,13 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
-  Loader2, Upload, Image, Palette, FileText, Receipt, Shield, Save, Eye
+  Loader2, Upload, Image, Palette, FileText, Receipt, Save
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const LogoUploader = ({ label, logoUrl, logoType, apiBase, headers, onUpload }) => {
   const inputRef = useRef(null);
@@ -90,22 +90,15 @@ export default function WhiteLabelPage() {
 
   return (
     <div className="space-y-6" data-testid="whitelabel-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">White Label & Branding</h1>
-          <p className="text-muted-foreground">Customize your brand across invoices, contracts, and letterheads</p>
-        </div>
-        <Button onClick={handleSave} disabled={saving} data-testid="save-branding-btn">
+      <OperationalPageHeader eyebrow="Brand governance · client-facing identity" title="White Label & Branding" description="Control the identity, organisation evidence and legal copy used across Nexus documents." icon={Palette} tone="violet" actions={<Button onClick={handleSave} disabled={saving} data-testid="save-branding-btn">
           {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save All Settings
-        </Button>
-      </div>
+        </Button>} />
 
       <Tabs defaultValue="general">
-        <TabsList className="grid grid-cols-4 w-full max-w-xl">
+        <TabsList className="grid grid-cols-3 w-full max-w-lg">
           <TabsTrigger value="general"><Palette className="w-3 h-3 mr-1" />General</TabsTrigger>
           <TabsTrigger value="invoices"><Receipt className="w-3 h-3 mr-1" />Invoices</TabsTrigger>
           <TabsTrigger value="contracts"><FileText className="w-3 h-3 mr-1" />Contracts</TabsTrigger>
-          <TabsTrigger value="letterhead"><Shield className="w-3 h-3 mr-1" />Letterhead</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-4">
@@ -176,6 +169,7 @@ export default function WhiteLabelPage() {
               <LogoUploader label="Invoice Logo" logoUrl={branding.invoice_logo_url} logoType="invoice"
                 apiBase={`${API}/settings/branding/upload-logo`} headers={headers}
                 onUpload={url => setBranding({ ...branding, invoice_logo_url: url })} />
+              <p className="-mt-2 text-xs text-muted-foreground">The shared PDF renderer uses this logo first, then falls back to the company logo. Unsupported image formats keep the typographic masthead rather than breaking a document.</p>
               <div className="space-y-2">
                 <Label>Invoice Header Text</Label>
                 <Textarea value={branding.invoice_header_text} onChange={e => setBranding({ ...branding, invoice_header_text: e.target.value })} placeholder="Company address, tax info, etc." rows={2} />
@@ -184,13 +178,7 @@ export default function WhiteLabelPage() {
                 <Label>Invoice Footer Text</Label>
                 <Textarea value={branding.invoice_footer_text} onChange={e => setBranding({ ...branding, invoice_footer_text: e.target.value })} placeholder="Payment terms, bank details, etc." rows={2} />
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">Show Customer Logo on Invoices</p>
-                  <p className="text-xs text-muted-foreground">Display the client's logo alongside yours</p>
-                </div>
-                <Switch checked={branding.show_customer_logo_on_invoices} onCheckedChange={v => setBranding({ ...branding, show_customer_logo_on_invoices: v })} />
-              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">Client identity is shown in the billed-to evidence. Nexus deliberately does not print client logos on invoices, so financial documents remain unambiguous and consistent.</div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -210,13 +198,6 @@ export default function WhiteLabelPage() {
                 <Label>Contract Footer Text</Label>
                 <Textarea value={branding.contract_footer_text} onChange={e => setBranding({ ...branding, contract_footer_text: e.target.value })} placeholder="Terms, signatures section, etc." rows={2} />
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">Show Customer Logo on Contracts</p>
-                  <p className="text-xs text-muted-foreground">Print both company logos on contract documents</p>
-                </div>
-                <Switch checked={branding.show_customer_logo_on_contracts} onCheckedChange={v => setBranding({ ...branding, show_customer_logo_on_contracts: v })} />
-              </div>
               {/* Preview */}
               <Separator />
               <div className="p-6 rounded-lg border bg-white/5">
@@ -228,12 +209,6 @@ export default function WhiteLabelPage() {
                       <p className="text-[10px] text-muted-foreground">{branding.contract_header_text || "Your company details"}</p>
                     </div>
                   </div>
-                  {branding.show_customer_logo_on_contracts && (
-                    <div className="text-right">
-                      <div className="w-10 h-10 rounded bg-muted flex items-center justify-center ml-auto"><Eye className="w-5 h-5 text-muted-foreground" /></div>
-                      <p className="text-[10px] text-muted-foreground mt-1">Client Logo</p>
-                    </div>
-                  )}
                 </div>
                 <div className="border-t pt-3 text-[10px] text-muted-foreground text-center">
                   {branding.contract_footer_text || "Contract footer will appear here"}
@@ -243,28 +218,6 @@ export default function WhiteLabelPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="letterhead" className="space-y-4">
-          <Card>
-            <CardHeader><CardTitle className="text-base">Letterhead Template</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <LogoUploader label="Letterhead Logo" logoUrl={branding.letterhead_logo_url} logoType="letterhead"
-                apiBase={`${API}/settings/branding/upload-logo`} headers={headers}
-                onUpload={url => setBranding({ ...branding, letterhead_logo_url: url })} />
-              <div className="space-y-2">
-                <Label>Header Content</Label>
-                <Textarea value={branding.letterhead_header} onChange={e => setBranding({ ...branding, letterhead_header: e.target.value })} placeholder="Company name, address, phone, website" rows={3} />
-              </div>
-              <div className="space-y-2">
-                <Label>Footer Content</Label>
-                <Textarea value={branding.letterhead_footer} onChange={e => setBranding({ ...branding, letterhead_footer: e.target.value })} placeholder="Registration details, legal notices" rows={2} />
-              </div>
-              <div className="space-y-2">
-                <Label>Email Signature HTML</Label>
-                <Textarea value={branding.email_signature_html} onChange={e => setBranding({ ...branding, email_signature_html: e.target.value })} placeholder="<p>Your Name</p><p>Company</p>" rows={3} className="font-mono text-xs" />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
     </div>
   );

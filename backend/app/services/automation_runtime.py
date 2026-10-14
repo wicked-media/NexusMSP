@@ -64,6 +64,60 @@ def event_context(event: dict | None) -> dict:
     return merged
 
 
+def _event_client_id(event: dict | None) -> str | None:
+    """Return one unambiguous client ID from an automation event.
+
+    Events normally carry the client on their envelope.  Some legacy publishers
+    place it in the payload instead, so accept either representation but never
+    silently choose between conflicting values.
+    """
+    event = event or {}
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    candidates = {
+        str(value).strip()
+        for value in (event.get("client_id"), payload.get("client_id"))
+        if value is not None and str(value).strip()
+    }
+    if len(candidates) > 1:
+        raise ValueError("Automation event has conflicting client scope")
+    return next(iter(candidates), None)
+
+
+def _event_tenant_id(event: dict | None, actor: dict | None = None) -> str | None:
+    event = event or {}
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    value = event.get("tenant_id") or payload.get("tenant_id") or (actor or {}).get("tenant_id")
+    return str(value).strip() if value is not None and str(value).strip() else None
+
+
+def workflow_scope_matches_event(workflow: dict, event: dict | None) -> bool:
+    """Require a client-scoped workflow to match the event's client exactly.
+
+    Workflows created before scope was introduced are treated as legacy global
+    workflows.  They can only be managed by global operators in the router,
+    while their worker actions still require a concrete run client before they
+    may change a client-owned target.
+    """
+    try:
+        event_client_id = _event_client_id(event)
+    except ValueError:
+        return False
+    scope = workflow.get("scope")
+    if scope is None:
+        return True
+    if not isinstance(scope, dict):
+        return False
+    scope_type = str(scope.get("type") or "").strip().lower()
+    if scope_type == "all_clients":
+        return True
+    if scope_type != "client":
+        return False
+    expected_client_id = str(scope.get("client_id") or "").strip()
+    if not expected_client_id:
+        return False
+    return event_client_id == expected_client_id
+
+
 def condition_matches(condition: dict, context: dict) -> bool:
     field = str(condition.get("field") or "").strip()
     if not field:
@@ -92,6 +146,8 @@ def condition_matches(condition: dict, context: dict) -> bool:
 
 
 def workflow_matches_event(workflow: dict, event: dict) -> bool:
+    if not workflow_scope_matches_event(workflow, event):
+        return False
     trigger = workflow.get("trigger") or {}
     subject = str(event.get("subject") or "").lower()
     trigger_type = str(trigger.get("type") or "")
@@ -105,8 +161,132 @@ def workflow_matches_event(workflow: dict, event: dict) -> bool:
     return all(condition_matches(condition, context) for condition in workflow.get("conditions") or [])
 
 
-def make_run_key(workflow_id: str, source_id: str) -> str:
-    return f"{workflow_id}:{source_id}"
+def make_run_key(
+    workflow_id: str,
+    source_id: str,
+    *,
+    client_id: str | None = None,
+    tenant_id: str | None = None,
+) -> str:
+    """Keep event deduplication isolated to its tenant/client context."""
+    scope = [
+        f"tenant={str(tenant_id).strip()}" if tenant_id and str(tenant_id).strip() else None,
+        f"client={str(client_id).strip()}" if client_id and str(client_id).strip() else None,
+    ]
+    return ":".join([str(workflow_id), *(item for item in scope if item), str(source_id)])
+
+
+def _run_target_query(run: dict, target_id: str) -> dict:
+    """Build the canonical ownership filter for a client-owned target."""
+    client_id = str(run.get("client_id") or "").strip()
+    if not client_id:
+        raise RuntimeError("A client-scoped event is required before automation can change a ticket or managed asset")
+    return {"id": str(target_id), "client_id": client_id}
+
+
+async def _target_record(collection: Any, run: dict, target_id: str, projection: dict) -> dict:
+    record = await collection.find_one(_run_target_query(run, target_id), projection)
+    if not record:
+        raise RuntimeError("The target no longer exists within this automation run's client scope")
+    return record
+
+
+def _require_target_write(result: Any) -> None:
+    """Fail rather than report a success when ownership changed after lookup."""
+    if getattr(result, "matched_count", 1) == 0:
+        raise RuntimeError("The target changed ownership or was removed before the automation write completed")
+
+
+def _ticket_note_lock_id(run: dict, step: dict) -> str:
+    """Return the durable lock used while an automation creates a ticket note.
+
+    MongoDB writes are atomic per document, not across the ticket and its
+    ``ticket_notes`` child collection. Holding the lock on the parent ticket
+    gives the note write a linearisation point: Nexus ticket-move routes refuse
+    to change its client while the child record is being created. The lock is
+    deterministic so a recovered run can safely complete or release its own
+    work after a worker interruption.
+    """
+    return f"automation:{run['id']}:{step['id']}"
+
+
+async def _write_ticket_note_in_scope(
+    run: dict,
+    step: dict,
+    ticket_id: str,
+    note_id: str,
+    note: dict,
+) -> None:
+    """Reserve a ticket's client binding while writing its child note.
+
+    A note lives in a separate MongoDB collection, so a simple parent lookup
+    followed by an upsert leaves a client-move race. Rather than relying on
+    optional multi-document transactions in the existing standalone MongoDB
+    deployment, acquire a short-lived parent-document lock. Both supported
+    ticket client-move paths use the matching no-lock predicate. If either
+    side wins the race, the other fails closed and can be retried safely.
+    """
+    client_id = str(run.get("client_id") or "").strip()
+    if not client_id:
+        raise RuntimeError("A client-scoped event is required before automation can add a ticket note")
+
+    lock_id = _ticket_note_lock_id(run, step)
+    acquired = await db.tickets.update_one(
+        {
+            "id": str(ticket_id),
+            "client_id": client_id,
+            "$or": [
+                {"automation_note_lock": {"$exists": False}},
+                {"automation_note_lock": lock_id},
+            ],
+        },
+        {"$set": {
+            "automation_note_lock": lock_id,
+            "automation_note_lock_acquired_at": utc_now(),
+        }},
+    )
+    if getattr(acquired, "matched_count", 0) == 0:
+        raise RuntimeError("The ticket changed client scope or has another protected automation note in progress")
+
+    release_error: RuntimeError | None = None
+    try:
+        await db.ticket_notes.update_one(
+            {"id": note_id},
+            {"$setOnInsert": note},
+            upsert=True,
+        )
+        stored = await db.ticket_notes.find_one(
+            {"id": note_id},
+            {"_id": 0, "ticket_id": 1, "client_id": 1, "automation_run_id": 1, "automation_step_id": 1},
+        )
+        if not stored or any(
+            str(stored.get(field) or "") != str(expected or "")
+            for field, expected in {
+                "ticket_id": ticket_id,
+                "client_id": client_id,
+                "automation_run_id": run["id"],
+                "automation_step_id": step["id"],
+            }.items()
+        ):
+            raise RuntimeError("The automation note ID is already bound to a different ticket or client")
+    finally:
+        released = await db.tickets.update_one(
+            {
+                "id": str(ticket_id),
+                "client_id": client_id,
+                "automation_note_lock": lock_id,
+            },
+            {"$unset": {
+                "automation_note_lock": "",
+                "automation_note_lock_acquired_at": "",
+            }},
+        )
+        if getattr(released, "matched_count", 0) == 0:
+            release_error = RuntimeError(
+                "The ticket changed client scope while its protected automation note was being written; review the run"
+            )
+    if release_error:
+        raise release_error
 
 
 async def ensure_automation_runtime_indexes() -> None:
@@ -142,10 +322,12 @@ async def _emit(subject: str, run: dict, payload: dict | None = None, actor: dic
         source="nexus.automation.runtime",
         payload={"run_id": run["id"], "workflow_id": run["workflow_id"], **(payload or {})},
         actor=actor or {"id": "automation-runtime", "name": "Nexus Automation", "role": "system"},
+        tenant_id=run.get("tenant_id"),
         client_id=run.get("client_id"),
         correlation_id=run.get("correlation_id"),
         causation_id=run.get("trigger_event_id"),
         idempotency_key=f"{subject}:{run['id']}:{payload.get('step_index') if payload else 'run'}",
+        partition_key=run.get("client_id") or run.get("tenant_id") or "nexus-automation",
     )
 
 
@@ -157,9 +339,13 @@ async def queue_workflow_run(
     source_id: str | None = None,
 ) -> dict:
     await ensure_automation_runtime_indexes()
+    if not workflow_scope_matches_event(workflow, event):
+        raise ValueError("Workflow scope does not match the automation event")
     context = event_context(event)
+    client_id = _event_client_id(event)
+    tenant_id = _event_tenant_id(event, actor)
     event_id = str(source_id or event.get("id") or event.get("event_id") or uuid.uuid4())
-    run_key = make_run_key(workflow["id"], event_id)
+    run_key = make_run_key(workflow["id"], event_id, client_id=client_id, tenant_id=tenant_id)
     existing = await db.workflow_runs.find_one({"run_key": run_key}, {"_id": 0})
     if existing:
         return {**existing, "deduplicated": True}
@@ -174,6 +360,7 @@ async def queue_workflow_run(
         "trigger_event_id": event.get("id") or event.get("event_id"),
         "trigger_subject": event.get("subject") or event.get("event_subject") or "manual",
         "trigger": workflow.get("trigger") or {},
+        "workflow_scope": workflow.get("scope") or {"type": "all_clients", "legacy": True},
         "event": {key: value for key, value in event.items() if key != "_id"},
         "context": context,
         "steps": [
@@ -197,7 +384,8 @@ async def queue_workflow_run(
         "wake_at": now,
         "approval_id": None,
         "failure": None,
-        "client_id": context.get("client_id") or event.get("client_id"),
+        "tenant_id": tenant_id,
+        "client_id": client_id,
         "correlation_id": event.get("correlation_id") or str(uuid.uuid4()),
         "queued_by": _actor_name(actor),
         "queued_by_id": (actor or {}).get("id") or "system",
@@ -247,7 +435,7 @@ async def queue_runs_for_legacy_event(trigger_type: str, event: dict) -> list[di
     queued = []
     source_id = str(event.get("id") or event.get("event_id") or uuid.uuid4())
     for workflow in workflows:
-        if all(condition_matches(condition, event) for condition in workflow.get("conditions") or []):
+        if workflow_scope_matches_event(workflow, event) and all(condition_matches(condition, event) for condition in workflow.get("conditions") or []):
             queued.append(await queue_workflow_run(
                 workflow,
                 {**event, "event_subject": trigger_type, "event_id": source_id},
@@ -311,34 +499,31 @@ async def _prepare_checkpoint(run: dict, step: dict, step_index: int) -> dict | 
     if action_type == "change_priority":
         if not ticket_id or not config.get("new_priority"):
             raise RuntimeError("Ticket ID and new priority are required")
-        ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "priority": 1})
-        if not ticket:
-            raise RuntimeError("The target ticket no longer exists")
+        ticket = await _target_record(db.tickets, run, ticket_id, {"_id": 0, "priority": 1})
         checkpoint = {"type": action_type, "entity": "ticket", "entity_id": ticket_id, "field": "priority", "before": ticket.get("priority"), "after": config["new_priority"], "reversible": True}
     elif action_type == "assign_ticket":
         if not ticket_id or not config.get("assign_to"):
             raise RuntimeError("Ticket ID and assignee are required")
-        ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "assigned_to": 1})
-        if not ticket:
-            raise RuntimeError("The target ticket no longer exists")
+        ticket = await _target_record(db.tickets, run, ticket_id, {"_id": 0, "assigned_to": 1})
         checkpoint = {"type": action_type, "entity": "ticket", "entity_id": ticket_id, "field": "assigned_to", "before": ticket.get("assigned_to"), "after": config["assign_to"], "reversible": True}
     elif action_type == "add_note":
         if not ticket_id or not config.get("note_text"):
             raise RuntimeError("Ticket ID and note text are required")
+        await _target_record(db.tickets, run, ticket_id, {"_id": 0, "id": 1})
         note_id = f"automation-{run['id'].lower()}-{step['id']}"[:120]
         checkpoint = {"type": action_type, "entity": "ticket_note", "entity_id": note_id, "before": None, "after": "created", "reversible": False, "reason": "Audit notes are append-only"}
     elif action_type == "tag_device":
         if not device_id or not config.get("tags"):
             raise RuntimeError("Asset ID and at least one tag are required")
-        device = await db.devices.find_one({"id": device_id}, {"_id": 0, "tags": 1})
-        if not device:
-            raise RuntimeError("The target asset no longer exists")
+        device = await _target_record(db.devices, run, device_id, {"_id": 0, "tags": 1})
         before = _tags(device.get("tags"))
         checkpoint = {"type": action_type, "entity": "device", "entity_id": device_id, "field": "tags", "before": before, "after": sorted(set(before + _tags(config["tags"]))), "reversible": True}
     if not checkpoint:
         return None
     checkpoint = {
         **checkpoint,
+        "client_id": run.get("client_id"),
+        "tenant_id": run.get("tenant_id"),
         "step_index": step_index,
         "step_id": step["id"],
         "state": "prepared",
@@ -369,7 +554,8 @@ async def _execute_mutation(run: dict, step: dict, checkpoint: dict | None) -> t
 
     if action_type == "change_priority":
         before, after = checkpoint["before"], checkpoint["after"]
-        await db.tickets.update_one({"id": ticket_id}, {"$set": {"priority": after, "updated_at": now}})
+        result = await db.tickets.update_one(_run_target_query(run, ticket_id), {"$set": {"priority": after, "updated_at": now}})
+        _require_target_write(result)
         return (
             {"status": "completed", "message": f"Ticket priority changed from {before or 'unset'} to {after}."},
             checkpoint,
@@ -377,7 +563,8 @@ async def _execute_mutation(run: dict, step: dict, checkpoint: dict | None) -> t
 
     if action_type == "assign_ticket":
         before, after = checkpoint["before"], checkpoint["after"]
-        await db.tickets.update_one({"id": ticket_id}, {"$set": {"assigned_to": after, "updated_at": now}})
+        result = await db.tickets.update_one(_run_target_query(run, ticket_id), {"$set": {"assigned_to": after, "updated_at": now}})
+        _require_target_write(result)
         return (
             {"status": "completed", "message": "Ticket assignment updated."},
             checkpoint,
@@ -385,11 +572,16 @@ async def _execute_mutation(run: dict, step: dict, checkpoint: dict | None) -> t
 
     if action_type == "add_note":
         note_id = checkpoint["entity_id"]
-        await db.ticket_notes.update_one(
-            {"id": note_id},
-            {"$setOnInsert": {
+        await _write_ticket_note_in_scope(
+            run,
+            step,
+            ticket_id,
+            note_id,
+            {
                 "id": note_id,
                 "ticket_id": ticket_id,
+                "client_id": run.get("client_id"),
+                "tenant_id": run.get("tenant_id"),
                 "body": config["note_text"],
                 "author": "Nexus Automation",
                 "author_type": "system",
@@ -397,8 +589,7 @@ async def _execute_mutation(run: dict, step: dict, checkpoint: dict | None) -> t
                 "automation_run_id": run["id"],
                 "automation_step_id": step["id"],
                 "created_at": now,
-            }},
-            upsert=True,
+            },
         )
         return (
             {"status": "completed", "message": "Auditable internal ticket note added.", "note_id": note_id},
@@ -407,7 +598,8 @@ async def _execute_mutation(run: dict, step: dict, checkpoint: dict | None) -> t
 
     if action_type == "tag_device":
         before, after = checkpoint["before"], checkpoint["after"]
-        await db.devices.update_one({"id": device_id}, {"$set": {"tags": after, "updated_at": now}})
+        result = await db.devices.update_one(_run_target_query(run, device_id), {"$set": {"tags": after, "updated_at": now}})
+        _require_target_write(result)
         return (
             {"status": "completed", "message": f"Asset classification now has {len(after)} tag(s)."},
             checkpoint,
@@ -426,6 +618,9 @@ async def _pause_for_approval(run: dict, step: dict) -> dict:
         "run_id": run["id"],
         "workflow_id": run["workflow_id"],
         "workflow_name": run["workflow_name"],
+        "tenant_id": run.get("tenant_id"),
+        "client_id": run.get("client_id"),
+        "correlation_id": run.get("correlation_id"),
         "step_index": run["current_step"],
         "step_id": step["id"],
         "approval_group": (step.get("config") or {}).get("approval_group") or "Automation Approvers",
@@ -592,6 +787,9 @@ async def execute_claimed_run(run: dict) -> dict:
             "id": f"wflog-{uuid.uuid4().hex[:8]}",
             "workflow_id": run["workflow_id"],
             "run_id": run["id"],
+            "tenant_id": run.get("tenant_id"),
+            "client_id": run.get("client_id"),
+            "correlation_id": run.get("correlation_id"),
             "status": "completed",
             "trigger_data": run.get("context") or {},
             "results": await db.workflow_runs.find_one({"id": run["id"]}, {"_id": 0, "step_results": 1}) or {},
@@ -779,21 +977,34 @@ async def compensate_run(run_id: str, actor: dict, reason: str) -> dict:
             "status": "manual_review",
             "message": checkpoint.get("reason") or "This action is not automatically reversible.",
         }
+        if checkpoint.get("reversible") and not str(run.get("client_id") or "").strip():
+            item["message"] = "The original run has no provable client scope; automatic compensation is withheld for manual review."
+            results.append(item)
+            continue
         if checkpoint.get("reversible") and checkpoint.get("entity") == "ticket":
             result = await db.tickets.update_one(
-                {"id": checkpoint["entity_id"], checkpoint["field"]: checkpoint.get("after")},
+                {
+                    **_run_target_query(run, checkpoint["entity_id"]),
+                    checkpoint["field"]: checkpoint.get("after"),
+                },
                 {"$set": {checkpoint["field"]: checkpoint.get("before"), "updated_at": utc_now()}},
             )
-            item["status"] = "completed" if result.modified_count else "conflict"
-            item["message"] = "Previous ticket value restored." if result.modified_count else "Current value changed after the run; no overwrite was performed."
+            item["status"] = "completed" if getattr(result, "modified_count", 0) else "conflict"
+            item["message"] = "Previous ticket value restored." if item["status"] == "completed" else "Current value changed after the run, moved client scope, or no longer exists; no overwrite was performed."
         elif checkpoint.get("reversible") and checkpoint.get("entity") == "device":
-            device = await db.devices.find_one({"id": checkpoint["entity_id"]}, {"_id": 0, checkpoint["field"]: 1})
+            device = await db.devices.find_one(
+                _run_target_query(run, checkpoint["entity_id"]),
+                {"_id": 0, checkpoint["field"]: 1},
+            )
             if device and _tags(device.get(checkpoint["field"])) == _tags(checkpoint.get("after")):
-                await db.devices.update_one(
-                    {"id": checkpoint["entity_id"]},
+                result = await db.devices.update_one(
+                    _run_target_query(run, checkpoint["entity_id"]),
                     {"$set": {checkpoint["field"]: checkpoint.get("before"), "updated_at": utc_now()}},
                 )
-                item["status"], item["message"] = "completed", "Previous asset classification restored."
+                if getattr(result, "matched_count", 1):
+                    item["status"], item["message"] = "completed", "Previous asset classification restored."
+                else:
+                    item["status"], item["message"] = "conflict", "Asset ownership changed after the run; no overwrite was performed."
             else:
                 item["status"], item["message"] = "conflict", "Asset classification changed after the run; no overwrite was performed."
         results.append(item)
@@ -805,6 +1016,9 @@ async def compensate_run(run_id: str, actor: dict, reason: str) -> dict:
         "reason": rationale,
         "requested_by": _actor_name(actor),
         "requested_by_id": actor.get("id"),
+        "tenant_id": run.get("tenant_id"),
+        "client_id": run.get("client_id"),
+        "correlation_id": run.get("correlation_id"),
         "results": results,
         "status": final_status,
         "completed_at": completed_at,

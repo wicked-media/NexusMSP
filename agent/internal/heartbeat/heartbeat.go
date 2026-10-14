@@ -7,20 +7,37 @@ import (
 	"reflect"
 	"time"
 
+	"nexusagent/internal/appupdate"
 	"nexusagent/internal/config"
 	"nexusagent/internal/enroll"
 	"nexusagent/internal/identity"
+	"nexusagent/internal/nexusbackup"
+	"nexusagent/internal/nexusremote"
+	"nexusagent/internal/selfheal"
 	"nexusagent/internal/telemetry"
 	"nexusagent/internal/transport"
 	"nexusagent/internal/updater"
 )
 
 type Loop struct {
-	tr      *transport.Client
-	cfg     *config.Config
-	version string
-	every   time.Duration
+	tr         *transport.Client
+	cfg        *config.Config
+	version    string
+	every      time.Duration
+	selfHeal   *selfheal.Loop
+	appUpdates func() *appupdate.Evidence
 }
+
+// SetSelfHeal connects the agent's self-awareness loop. Every heartbeat result is
+// fed into its watchdog, and its evidence is reported with the next check-in, so
+// NexusMSP learns an endpoint was offline from the endpoint itself rather than
+// waiting for it to disappear from the fleet view.
+func (l *Loop) SetSelfHeal(selfHeal *selfheal.Loop) { l.selfHeal = selfHeal }
+
+// SetAppUpdates connects the application-update monitor. Its evidence rides the
+// same heartbeat, so an operator sees which applications an endpoint has waiting
+// without a second network path or a poll of every device.
+func (l *Loop) SetAppUpdates(provider func() *appupdate.Evidence) { l.appUpdates = provider }
 
 func NewLoop(tr *transport.Client, cfg *config.Config, version string, fallback time.Duration) *Loop {
 	every := time.Duration(cfg.HeartbeatSecs) * time.Second
@@ -31,14 +48,19 @@ func NewLoop(tr *transport.Client, cfg *config.Config, version string, fallback 
 }
 
 type payload struct {
-	AgentVersion string                 `json:"agent_version"`
-	Snapshot     telemetry.Snapshot     `json:"snapshot"`
-	Capabilities []string               `json:"capabilities,omitempty"`
-	NexusDNS     *config.NexusDNSConfig `json:"nexus_dns,omitempty"`
-	Identity     map[string]any         `json:"identity,omitempty"`
-	Policy       map[string]any         `json:"policy_evidence,omitempty"`
-	SelfRepair   identity.Evidence      `json:"self_repair"`
-	Update       *config.UpdateEvidence `json:"update_evidence,omitempty"`
+	AgentVersion        string                 `json:"agent_version"`
+	Snapshot            telemetry.Snapshot     `json:"snapshot"`
+	Capabilities        []string               `json:"capabilities,omitempty"`
+	RuntimeCapabilities []string               `json:"runtime_capabilities,omitempty"`
+	NexusDNS            *config.NexusDNSConfig `json:"nexus_dns,omitempty"`
+	Identity            map[string]any         `json:"identity,omitempty"`
+	Policy              map[string]any         `json:"policy_evidence,omitempty"`
+	SelfRepair          identity.Evidence      `json:"self_repair"`
+	SelfHeal            *selfheal.Evidence     `json:"self_heal,omitempty"`
+	AppUpdates          *appupdate.Evidence    `json:"app_updates,omitempty"`
+	Update              *config.UpdateEvidence `json:"update_evidence,omitempty"`
+	NativeRemote        map[string]any         `json:"native_remote_evidence,omitempty"`
+	Backup              map[string]any         `json:"backup_evidence,omitempty"`
 }
 
 type heartbeatResponse struct {
@@ -81,19 +103,32 @@ func (l *Loop) sendOnce() {
 		}
 	}
 	request := payload{
-		AgentVersion: l.version,
-		Snapshot:     snapshot,
-		Capabilities: l.cfg.ShieldCapabilities(),
-		NexusDNS:     l.cfg.NexusDNS,
-		Identity:     identity.Report(l.cfg),
-		Policy:       identity.PolicyEvidence(l.cfg),
-		SelfRepair:   repairEvidence,
-		Update:       l.cfg.UpdateEvidence,
+		AgentVersion:        l.version,
+		Snapshot:            snapshot,
+		Capabilities:        l.cfg.ShieldCapabilities(),
+		RuntimeCapabilities: l.cfg.RuntimeCapabilities(),
+		NexusDNS:            l.cfg.NexusDNS,
+		Identity:            identity.Report(l.cfg),
+		Policy:              identity.PolicyEvidence(l.cfg),
+		SelfRepair:          repairEvidence,
+		SelfHeal:            l.selfHealEvidence(),
+		AppUpdates:          l.appUpdatesEvidence(),
+		Update:              l.cfg.UpdateEvidence,
+		NativeRemote:        nexusremote.CompanionHealthEvidence(l.cfg),
+		Backup:              nexusbackup.Evidence(l.cfg),
 	}
 	var response heartbeatResponse
 	if err := l.tr.Do("POST", "/api/nexus-agent/heartbeat", request, &response); err != nil {
 		log.Printf("[heartbeat] error: %v", err)
+		if l.selfHeal != nil {
+			l.selfHeal.ObserveControlPlane(err)
+			status := l.selfHeal.Status()
+			log.Printf("[self-heal] control plane %s (%d consecutive failures)", status.State, status.ConsecutiveFailures)
+		}
 		return
+	}
+	if l.selfHeal != nil {
+		l.selfHeal.ObserveControlPlane(nil)
 	}
 	log.Printf("[heartbeat] sent cpu=%.1f%% mem=%.1f%% disks=%d", snapshot.CPUPercent, snapshot.MemPercent, len(snapshot.Disks))
 
@@ -107,7 +142,7 @@ func (l *Loop) sendOnce() {
 	}
 
 	if response.Policy != nil && !reflect.DeepEqual(l.cfg.PlatformPolicy, response.Policy) {
-		l.cfg.PlatformPolicy = response.Policy
+		l.cfg.ApplyPlatformPolicy(response.Policy)
 		if err := config.Save(l.cfg); err != nil {
 			log.Printf("[policy] persist cache failed: %v", err)
 		} else {
@@ -153,6 +188,24 @@ func (l *Loop) sendOnce() {
 			log.Printf("[updater] apply failed: %v", err)
 		}
 	}
+}
+
+// selfHealEvidence is nil until main connects the loop, which keeps the heartbeat
+// usable in isolation (tests, one-shot tooling) without a self-heal loop running.
+func (l *Loop) selfHealEvidence() *selfheal.Evidence {
+	if l.selfHeal == nil {
+		return nil
+	}
+	return l.selfHeal.Evidence()
+}
+
+// appUpdatesEvidence is nil until main connects the monitor, which keeps the
+// heartbeat usable in isolation without an application scan running behind it.
+func (l *Loop) appUpdatesEvidence() *appupdate.Evidence {
+	if l.appUpdates == nil {
+		return nil
+	}
+	return l.appUpdates()
 }
 
 func policyString(cfg *config.Config, key string) string {

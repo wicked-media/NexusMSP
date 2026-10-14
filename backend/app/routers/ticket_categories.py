@@ -1,10 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 from app.database import db
 from app.auth import get_current_user
-from app.models import *
 
 router = APIRouter()
 

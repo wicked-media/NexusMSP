@@ -2,15 +2,20 @@
 Fire-and-forget — never blocks ticket creation."""
 import asyncio, httpx, logging
 from app.database import db
+from app.services.notification_channels import resolve_notification_webhook_url
 
 logger = logging.getLogger("notify_publish")
 
 
 async def _send(ch: dict, text: str):
     payload = {"slack": {"text": text}, "teams": {"text": text}, "discord": {"content": text}}.get(ch.get("kind"), {"text": text})
+    webhook_url = await resolve_notification_webhook_url(ch)
+    if not webhook_url:
+        logger.warning("Notify channel %s has no usable encrypted webhook destination", ch.get("name") or ch.get("id"))
+        return
     try:
         async with httpx.AsyncClient(timeout=8) as c:
-            await c.post(ch["webhook_url"], json=payload)
+            await c.post(webhook_url, json=payload)
     except Exception as e:
         logger.warning(f"Notify webhook failed for {ch.get('name')}: {e}")
 

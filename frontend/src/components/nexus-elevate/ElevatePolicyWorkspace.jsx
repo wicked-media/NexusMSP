@@ -30,6 +30,30 @@ const EMPTY_FORM = {
   requireJustification: true,
 };
 
+// Templates intentionally omit executable identity. A technician must take
+// the path and SHA-256 from reviewed request evidence before a policy can be
+// saved, so a preset can never become an accidental broad allow-list.
+const POLICY_TEMPLATES = [
+  {
+    id: "review-every-request",
+    name: "Review every elevation request",
+    description: "Default governed rollout: collect evidence and require a technician decision for every matching elevation request.",
+    form: { mode: "monitor", action: "approval", priority: "100", maxDuration: "15", requireTicket: true, requireJustification: true },
+  },
+  {
+    id: "change-window-review",
+    name: "Change-window approval",
+    description: "Use for a reviewed, ticketed maintenance workflow with a slightly longer but still bounded approval window.",
+    form: { mode: "monitor", action: "approval", priority: "90", maxDuration: "30", requireTicket: true, requireJustification: true },
+  },
+  {
+    id: "block-reviewed-identity",
+    name: "Block a reviewed application",
+    description: "Prepare an enforced deny rule for one exact executable identity after confirming its path and SHA-256.",
+    form: { mode: "enforce", action: "deny", priority: "50", maxDuration: "15", requireTicket: true, requireJustification: true },
+  },
+];
+
 const ACTION_META = {
   allow: { label: "Allow automatically", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" },
   approval: { label: "Require approval", className: "border-amber-500/30 bg-amber-500/10 text-amber-200" },
@@ -150,6 +174,11 @@ export default function ElevatePolicyWorkspace({ api, headers, onPolicyCountChan
     setForm(policyToForm(policy));
     setDialogOpen(true);
   };
+  const applyTemplate = (template) => {
+    setEditing(null);
+    setForm({ ...EMPTY_FORM, ...template.form, name: template.name, description: template.description });
+    setDialogOpen(true);
+  };
   const payloadFor = (value) => ({
     name: value.name,
     description: value.description,
@@ -246,7 +275,7 @@ export default function ElevatePolicyWorkspace({ api, headers, onPolicyCountChan
 
     <Dialog open={Boolean(archiveTarget)} onOpenChange={(open) => !open && setArchiveTarget(null)}><NexusWorkflowDialog eyebrow="Privilege control" title="Archive elevation policy" description={`Archive ${archiveTarget?.name || "this policy"}? It will stop matching new elevation requests and remain in the audit history.`} icon={Trash2} tone="amber" data-testid="nexus-elevate-policy-archive" footer={<><Button variant="outline" onClick={() => setArchiveTarget(null)}>Keep policy</Button><Button variant="destructive" onClick={() => archive(archiveTarget)}>Archive policy</Button></>}><div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">The rule can no longer influence elevation requests after archiving. Its decision history stays available for audit and investigation.</div></NexusWorkflowDialog></Dialog>
 
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><NexusWorkflowDialog eyebrow="Privilege control" title={editing ? "Edit Nexus Elevate policy" : "Create Nexus Elevate policy"} description="Define the exact application, scope and approval boundary before Nexus applies the policy to managed endpoints." icon={ShieldCheck} tone="emerald" className="max-w-3xl" data-testid="nexus-elevate-policy-dialog" footer={<><Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{editing ? "Save new version" : "Create policy"}</Button></>}><FieldSet form={form} setForm={setForm} catalog={catalog} /></NexusWorkflowDialog></Dialog>
+    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><NexusWorkflowDialog eyebrow="Privilege control" title={editing ? "Edit Nexus Elevate policy" : "Create Nexus Elevate policy"} description="Define the exact application, scope and approval boundary before Nexus applies the policy to managed endpoints." icon={ShieldCheck} tone="emerald" className="max-w-3xl" data-testid="nexus-elevate-policy-dialog" footer={<><Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{editing ? "Save new version" : "Create policy"}</Button></>}>{!editing && <div className="mb-5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.045] p-3"><div className="flex items-start gap-2"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /><div><p className="text-sm font-medium">Start from a guarded template</p><p className="mt-0.5 text-xs text-muted-foreground">Templates prefill workflow controls only. Add a reviewed executable path and SHA-256 before saving.</p></div></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{POLICY_TEMPLATES.map((template) => <button key={template.id} type="button" onClick={() => applyTemplate(template)} className="rounded-lg border border-border/80 bg-background/60 p-3 text-left transition-colors hover:border-emerald-400/40 hover:bg-emerald-500/[0.06]"><p className="text-xs font-semibold text-foreground">{template.name}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">{template.description}</p></button>)}</div></div>}<FieldSet form={form} setForm={setForm} catalog={catalog} /></NexusWorkflowDialog></Dialog>
 
     <Dialog open={simulateOpen} onOpenChange={setSimulateOpen}><NexusWorkflowDialog eyebrow="Privilege policy safety" title="Simulate elevation policy outcome" description="This does not contact an endpoint, queue a process or change a policy. It records the proposed evaluation for audit." icon={Activity} tone="cyan" className="max-w-3xl" data-testid="nexus-elevate-policy-simulation" footer={<><Button variant="outline" onClick={() => setSimulateOpen(false)} disabled={simulating}>Close</Button><Button onClick={runSimulation} disabled={simulating}>{simulating && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Run simulation</Button></>}><FieldSet form={simulation} setForm={setSimulation} catalog={catalog} prefix="simulation" />{simulationResult && <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.05] p-4"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">Proposed outcome</p><Badge variant="outline" className={ACTION_META[simulationResult.decision]?.className}>{ACTION_META[simulationResult.decision]?.label || simulationResult.decision}</Badge></div>{simulationResult.matched ? <div className="mt-3 text-sm"><p><span className="text-muted-foreground">Matched policy: </span><span className="font-medium">{simulationResult.matched.name}</span></p><p className="mt-1 text-xs text-muted-foreground">Matched by {simulationResult.matched.reasons?.join(", ") || "configured conditions"}{simulationResult.matched.downgraded_reason ? ` — ${simulationResult.matched.downgraded_reason}` : ""}</p></div> : <p className="mt-2 text-sm text-muted-foreground">No enforced policy matches. The request would enter the standard approval queue.</p>}{simulationResult.monitor_matches?.length > 0 && <p className="mt-3 text-xs text-sky-200">Monitor evidence: {simulationResult.monitor_matches.map((item) => item.name).join(", ")}</p>}</div>}</NexusWorkflowDialog></Dialog>
   </section>;

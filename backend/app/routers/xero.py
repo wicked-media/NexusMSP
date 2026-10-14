@@ -1,24 +1,106 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timezone, timedelta
 import uuid
 import random as _random_mod
-import base64
 import logging
+from math import isfinite
 _srand = _random_mod.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    effective_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
+from app.services.activity import log_activity, ticket_audit
+from app.services.integration_security import redact_connection_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _version_filter(document: dict) -> dict:
+    """Match the version saved when a financial document was authorised."""
+    version = document.get("version")
+    return {"version": version} if version is not None else {"version": {"$exists": False}}
+
+
+async def _scoped_xero_invoice(invoice_id: str, current_user: dict, operation: str) -> dict:
+    """Load a Xero mirror invoice and enforce its Nexus client boundary."""
+    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation=operation,
+        mask_not_found=True,
+    )
+    return invoice
+
+
+async def _scoped_xero_client_record(
+    collection,
+    record_id: str,
+    current_user: dict,
+    operation: str,
+    resource_name: str,
+) -> dict:
+    """Resolve an integration mirror record through the stable client boundary."""
+    record = await collection.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail=f"{resource_name} not found")
+    await assert_client_scope(
+        current_user,
+        record.get("client_id"),
+        operation=operation,
+        mask_not_found=True,
+    )
+    return record
+
+
+async def _scoped_client_identity(client_id: object, current_user: dict, operation: str) -> dict:
+    """Validate a client reference and derive the canonical display identity."""
+    normalized = str(client_id or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="client_id is required")
+    await assert_client_scope(current_user, normalized, operation=operation, mask_not_found=True)
+    client = await db.clients.find_one({"id": normalized}, {"_id": 0, "id": 1, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return client
+
+
+def _payment_amount(value: object) -> float:
+    """Normalise a manual Xero payment amount without allowing non-finite values."""
+    if isinstance(value, bool):
+        raise HTTPException(status_code=422, detail="Payment amount must be a positive number")
+    try:
+        amount = round(float(value), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Payment amount must be a positive number") from None
+    if amount <= 0 or not isfinite(amount):
+        raise HTTPException(status_code=422, detail="Payment amount must be a positive finite number")
+    return amount
+
 # ============== XERO SETTINGS ==============
 
 @router.get("/xero/status")
-async def get_xero_status(current_user: dict = Depends(get_current_user)):
-    doc = await db.settings.find_one({"type": "xero"}, {"_id": 0})
-    configured = bool(doc and doc.get("client_id") and doc.get("client_secret"))
-    oauth_ready = bool(configured and doc.get("tenant_id") and (doc.get("access_token") or doc.get("refresh_token")))
+async def get_xero_status(request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("billing.integration.manage"))):
+    await assert_global_scope(current_user, operation="billing.integration.xero.status", request=request)
+    settings_doc = await db.settings.find_one({"type": "xero"}, {"_id": 0})
+    configured = bool(settings_doc and settings_doc.get("client_id") and settings_doc.get("client_secret"))
+    oauth_ready = bool(
+        configured
+        and settings_doc.get("tenant_id")
+        and (settings_doc.get("access_token") or settings_doc.get("refresh_token"))
+    )
+    doc = redact_connection_settings(settings_doc)
     return {
         "connected": oauth_ready,
         "configured": configured,
@@ -26,7 +108,8 @@ async def get_xero_status(current_user: dict = Depends(get_current_user)):
     }
 
 @router.put("/xero/settings")
-async def update_xero_settings(data: dict, current_user: dict = Depends(get_current_user)):
+async def update_xero_settings(data: dict, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("billing.integration.manage"))):
+    await assert_global_scope(current_user, operation="billing.integration.xero.update", request=request)
     await db.settings.update_one({"type": "xero"}, {"$set": {
         "type": "xero",
         "client_id": data.get("client_id", ""),
@@ -36,19 +119,18 @@ async def update_xero_settings(data: dict, current_user: dict = Depends(get_curr
         "redirect_uri": data.get("redirect_uri", ""),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }}, upsert=True)
+    await log_activity(current_user, "xero_settings_updated", "integration", "xero", "Xero accounting connection")
     return {"message": "Xero settings saved"}
 
 # ============== XERO CONTACTS ==============
 
-@router.get("/xero/contacts")
+@router.get("/xero/contacts", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_xero_contacts(current_user: dict = Depends(get_current_user)):
-    contacts = await db.xero_contacts.find({}, {"_id": 0}).to_list(500)
-    if not contacts:
-        contacts = await _seed_xero_demo()
-    return contacts
+    return await db.xero_contacts.find(scoped_query(current_user), {"_id": 0}).to_list(500)
 
-@router.post("/xero/contacts/sync")
+@router.post("/xero/contacts/sync", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def sync_xero_contacts(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="billing.integration.xero.contacts.sync")
     clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(100)
     synced = 0
     for client in clients:
@@ -73,21 +155,25 @@ async def sync_xero_contacts(current_user: dict = Depends(get_current_user)):
 
 # ============== XERO INVOICES ==============
 
-@router.get("/xero/invoices")
+@router.get("/xero/invoices", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_xero_invoices(client_id: str = None, status: str = None, current_user: dict = Depends(get_current_user)):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="billing.xero_invoice.list", mask_not_found=True)
         query["client_id"] = client_id
     if status:
         query["status"] = status
-    invoices = await db.xero_invoices.find(query, {"_id": 0}).sort("date", -1).to_list(500)
-    if not invoices:
-        await _seed_xero_demo()
-        invoices = await db.xero_invoices.find(query, {"_id": 0}).sort("date", -1).to_list(500)
-    return invoices
+    return await db.xero_invoices.find(scoped_query(current_user, query), {"_id": 0}).sort("date", -1).to_list(500)
 
-@router.post("/xero/invoices")
+@router.post("/xero/invoices", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def create_xero_invoice(data: dict, current_user: dict = Depends(get_current_user)):
+    client_id = str(data.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=422, detail="client_id is required")
+    await assert_client_scope(current_user, client_id, operation="billing.xero_invoice.create", mask_not_found=True)
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
     line_items = data.get("line_items", [])
     sub_total = sum(item.get("quantity", 1) * item.get("unit_price", 0) for item in line_items)
     tax = round(sub_total * 0.1, 2)
@@ -96,8 +182,8 @@ async def create_xero_invoice(data: dict, current_user: dict = Depends(get_curre
         "id": str(uuid.uuid4()),
         "xero_invoice_id": f"INV-{uuid.uuid4().hex[:8].upper()}",
         "invoice_number": data.get("invoice_number", f"INV-{str(await db.xero_invoices.count_documents({}) + 1).zfill(4)}"),
-        "client_id": data.get("client_id", ""),
-        "client_name": data.get("client_name", ""),
+        "client_id": client_id,
+        "client_name": client.get("name", ""),
         "contact_id": data.get("contact_id", ""),
         "date": data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
         "due_date": data.get("due_date", (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")),
@@ -111,71 +197,100 @@ async def create_xero_invoice(data: dict, current_user: dict = Depends(get_curre
         "currency": data.get("currency", "AUD"),
         "reference": data.get("reference", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "version": 1,
     }
     await db.xero_invoices.insert_one(invoice)
     invoice.pop("_id", None)
+    await log_activity(current_user, "created", "xero_invoice", invoice["id"], invoice["invoice_number"], "Created Xero mirror invoice")
     return invoice
 
-@router.put("/xero/invoices/{invoice_id}")
+@router.put("/xero/invoices/{invoice_id}", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def update_xero_invoice(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await db.xero_invoices.find_one({"id": invoice_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    existing = await _scoped_xero_invoice(invoice_id, current_user, "billing.xero_invoice.update")
+    requested_client_id = data.get("client_id")
+    if requested_client_id is not None and str(requested_client_id).strip() != str(existing.get("client_id") or ""):
+        raise HTTPException(status_code=409, detail="Move a Xero invoice through the governed invoice ownership workflow")
     updates = {}
-    for field in ["client_name", "client_id", "date", "due_date", "status", "line_items", "sub_total", "tax", "total", "amount_due", "reference", "currency"]:
+    for field in ["date", "due_date", "status", "line_items", "sub_total", "tax", "total", "amount_due", "reference", "currency"]:
         if field in data:
             updates[field] = data[field]
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.xero_invoices.update_one({"id": invoice_id}, {"$set": updates})
+    result = await db.xero_invoices.update_one(
+        {"id": invoice_id, "client_id": existing.get("client_id"), **_version_filter(existing)},
+        {"$set": updates, "$inc": {"version": 1}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Invoice changed while it was being updated; refresh and retry")
+    await log_activity(current_user, "updated", "xero_invoice", invoice_id, existing.get("invoice_number", ""), "Updated Xero mirror invoice")
     return {"message": "Invoice updated"}
 
-@router.put("/xero/invoices/{invoice_id}/pay")
+@router.put("/xero/invoices/{invoice_id}/pay", dependencies=[Depends(require_action("billing.payment.record"))])
 async def pay_xero_invoice(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    amount = data.get("amount", 0)
-    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    new_paid = (invoice.get("amount_paid", 0) or 0) + amount
+    invoice = await _scoped_xero_invoice(invoice_id, current_user, "billing.xero_invoice.payment.record")
+    amount = _payment_amount(data.get("amount"))
+    total = float(invoice.get("total", 0) or 0)
+    paid = float(invoice.get("amount_paid", 0) or 0)
+    outstanding = round(total - paid, 2)
+    if str(invoice.get("status") or "").upper() == "VOIDED" or outstanding <= 0:
+        raise HTTPException(status_code=409, detail="Invoice is not eligible for a payment")
+    if amount > outstanding + 0.01:
+        raise HTTPException(status_code=422, detail="Payment cannot exceed the outstanding balance")
+    new_paid = round(paid + amount, 2)
     new_due = max(0, (invoice.get("total", 0) or 0) - new_paid)
     new_status = "PAID" if new_due <= 0 else "AUTHORISED"
-    await db.xero_invoices.update_one({"id": invoice_id}, {"$set": {
-        "amount_paid": new_paid, "amount_due": new_due, "status": new_status,
-        "paid_at": datetime.now(timezone.utc).isoformat() if new_due <= 0 else None,
-    }})
+    result = await db.xero_invoices.update_one(
+        {"id": invoice_id, "client_id": invoice.get("client_id"), **_version_filter(invoice)},
+        {"$set": {
+            "amount_paid": new_paid, "amount_due": new_due, "status": new_status,
+            "paid_at": datetime.now(timezone.utc).isoformat() if new_due <= 0 else None,
+        }, "$inc": {"version": 1}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Invoice changed while the payment was being recorded; refresh and retry")
     # Log sync event
     await _log_sync_event("payment_recorded", f"Payment ${amount:.2f} on {invoice.get('invoice_number', invoice_id)}")
+    await log_activity(current_user, "payment_recorded", "xero_invoice", invoice_id, invoice.get("invoice_number", ""), f"Recorded Xero mirror payment of ${amount:.2f}")
     return {"message": "Payment recorded", "amount_paid": new_paid, "amount_due": new_due, "status": new_status}
 
-@router.put("/xero/invoices/{invoice_id}/void")
+@router.put("/xero/invoices/{invoice_id}/void", dependencies=[Depends(require_action("billing.invoice.void"))])
 async def void_xero_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
-    invoice = await db.xero_invoices.find_one({"id": invoice_id})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    await db.xero_invoices.update_one({"id": invoice_id}, {"$set": {"status": "VOIDED", "amount_due": 0, "voided_at": datetime.now(timezone.utc).isoformat()}})
+    invoice = await _scoped_xero_invoice(invoice_id, current_user, "billing.xero_invoice.void")
+    if str(invoice.get("status") or "").upper() == "VOIDED" or float(invoice.get("amount_paid", 0) or 0) > 0:
+        raise HTTPException(status_code=409, detail="Paid or already voided invoices cannot be voided")
+    result = await db.xero_invoices.update_one(
+        {"id": invoice_id, "client_id": invoice.get("client_id"), **_version_filter(invoice)},
+        {"$set": {"status": "VOIDED", "amount_due": 0, "voided_at": datetime.now(timezone.utc).isoformat()}, "$inc": {"version": 1}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Invoice changed while it was being voided; refresh and retry")
+    await log_activity(current_user, "voided", "xero_invoice", invoice_id, invoice.get("invoice_number", ""), "Voided Xero mirror invoice")
     return {"message": "Invoice voided"}
 
-@router.post("/xero/invoices/{invoice_id}/send")
+@router.post("/xero/invoices/{invoice_id}/send", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def send_xero_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
-    invoice = await db.xero_invoices.find_one({"id": invoice_id})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice = await _scoped_xero_invoice(invoice_id, current_user, "billing.xero_invoice.send")
+    if str(invoice.get("status") or "").upper() == "VOIDED":
+        raise HTTPException(status_code=409, detail="A voided invoice cannot be sent")
     new_status = "AUTHORISED" if invoice.get("status") == "DRAFT" else invoice.get("status")
-    await db.xero_invoices.update_one({"id": invoice_id}, {"$set": {"status": new_status, "sent_at": datetime.now(timezone.utc).isoformat()}})
+    result = await db.xero_invoices.update_one(
+        {"id": invoice_id, "client_id": invoice.get("client_id"), **_version_filter(invoice)},
+        {"$set": {"status": new_status, "sent_at": datetime.now(timezone.utc).isoformat()}, "$inc": {"version": 1}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Invoice changed while it was being sent; refresh and retry")
     await _log_sync_event("invoice_sent", f"Invoice {invoice.get('invoice_number', invoice_id)} sent to client")
+    await log_activity(current_user, "sent", "xero_invoice", invoice_id, invoice.get("invoice_number", ""), "Sent Xero mirror invoice")
     return {"message": "Invoice sent"}
 
 # ============== XERO ESTIMATES ==============
 
-@router.get("/xero/estimates")
+@router.get("/xero/estimates", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_xero_estimates(current_user: dict = Depends(get_current_user)):
-    estimates = await db.xero_estimates.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    if not estimates:
-        await _seed_xero_estimates()
-        estimates = await db.xero_estimates.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return estimates
+    return await db.xero_estimates.find(scoped_query(current_user), {"_id": 0}).sort("created_at", -1).to_list(500)
 
-@router.post("/xero/estimates")
+@router.post("/xero/estimates", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def create_xero_estimate(data: dict, current_user: dict = Depends(get_current_user)):
+    client = await _scoped_client_identity(data.get("client_id"), current_user, "billing.xero_estimate.create")
     line_items = data.get("line_items", [])
     sub_total = sum(item.get("quantity", 1) * item.get("unit_price", 0) for item in line_items)
     tax = round(sub_total * data.get("tax_rate", 10) / 100, 2)
@@ -184,8 +299,8 @@ async def create_xero_estimate(data: dict, current_user: dict = Depends(get_curr
         "id": str(uuid.uuid4()),
         "estimate_number": f"EST-{str(await db.xero_estimates.count_documents({}) + 1).zfill(4)}",
         "title": data.get("title", ""),
-        "client_id": data.get("client_id", ""),
-        "client_name": data.get("client_name", ""),
+        "client_id": client["id"],
+        "client_name": client.get("name", ""),
         "line_items": line_items,
         "sub_total": sub_total,
         "tax": tax,
@@ -197,22 +312,25 @@ async def create_xero_estimate(data: dict, current_user: dict = Depends(get_curr
     }
     await db.xero_estimates.insert_one(estimate)
     estimate.pop("_id", None)
+    await log_activity(current_user, "created", "xero_estimate", estimate["id"], estimate["estimate_number"], "Created Xero mirror estimate")
     return estimate
 
-@router.put("/xero/estimates/{estimate_id}/status")
+@router.put("/xero/estimates/{estimate_id}/status", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def update_estimate_status(estimate_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     new_status = data.get("status", "DRAFT")
-    result = await db.xero_estimates.find_one({"id": estimate_id})
-    if not result:
-        raise HTTPException(status_code=404, detail="Estimate not found")
-    await db.xero_estimates.update_one({"id": estimate_id}, {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    result = await _scoped_xero_client_record(db.xero_estimates, estimate_id, current_user, "billing.xero_estimate.status", "Estimate")
+    await db.xero_estimates.update_one(
+        {"id": estimate_id, "client_id": result.get("client_id")},
+        {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    await log_activity(current_user, "updated", "xero_estimate", estimate_id, result.get("estimate_number", ""), f"Set Xero mirror estimate status to {new_status}")
     return {"message": f"Estimate status updated to {new_status}"}
 
-@router.post("/xero/estimates/{estimate_id}/convert")
+@router.post("/xero/estimates/{estimate_id}/convert", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def convert_estimate_to_invoice(estimate_id: str, current_user: dict = Depends(get_current_user)):
-    est = await db.xero_estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not est:
-        raise HTTPException(status_code=404, detail="Estimate not found")
+    est = await _scoped_xero_client_record(db.xero_estimates, estimate_id, current_user, "billing.xero_estimate.convert", "Estimate")
+    if str(est.get("status") or "").upper() == "CONVERTED":
+        raise HTTPException(status_code=409, detail="Estimate has already been converted")
     invoice = {
         "id": str(uuid.uuid4()),
         "xero_invoice_id": f"INV-{uuid.uuid4().hex[:8].upper()}",
@@ -231,27 +349,29 @@ async def convert_estimate_to_invoice(estimate_id: str, current_user: dict = Dep
         "currency": "AUD",
         "reference": f"From estimate {est.get('estimate_number', '')}",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "version": 1,
     }
     await db.xero_invoices.insert_one(invoice)
-    await db.xero_estimates.update_one({"id": estimate_id}, {"$set": {"status": "CONVERTED", "converted_invoice_id": invoice["id"]}})
+    await db.xero_estimates.update_one(
+        {"id": estimate_id, "client_id": est.get("client_id"), "status": {"$ne": "CONVERTED"}},
+        {"$set": {"status": "CONVERTED", "converted_invoice_id": invoice["id"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
     invoice.pop("_id", None)
     await _log_sync_event("estimate_converted", f"Estimate {est.get('estimate_number', '')} converted to Invoice {invoice['invoice_number']}")
+    await log_activity(current_user, "converted", "xero_estimate", estimate_id, est.get("estimate_number", ""), f"Converted Xero mirror estimate to invoice {invoice['invoice_number']}")
     return invoice
 
 # ============== XERO RECURRING ==============
 
 FREQ_DAYS = {"weekly": 7, "fortnightly": 14, "monthly": 30, "quarterly": 90, "yearly": 365}
 
-@router.get("/xero/recurring")
+@router.get("/xero/recurring", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_xero_recurring(current_user: dict = Depends(get_current_user)):
-    recurring = await db.xero_recurring.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    if not recurring:
-        await _seed_xero_recurring()
-        recurring = await db.xero_recurring.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return recurring
+    return await db.xero_recurring.find(scoped_query(current_user), {"_id": 0}).sort("created_at", -1).to_list(200)
 
-@router.post("/xero/recurring")
+@router.post("/xero/recurring", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def create_xero_recurring(data: dict, current_user: dict = Depends(get_current_user)):
+    client = await _scoped_client_identity(data.get("client_id"), current_user, "billing.xero_recurring.create")
     line_items = data.get("line_items", [])
     tax_rate = data.get("tax_rate", 10)
     sub_total = sum(item.get("quantity", 1) * item.get("unit_price", 0) for item in line_items)
@@ -260,8 +380,8 @@ async def create_xero_recurring(data: dict, current_user: dict = Depends(get_cur
     freq = data.get("frequency", "monthly")
     rec = {
         "id": str(uuid.uuid4()),
-        "client_id": data.get("client_id", ""),
-        "client_name": data.get("client_name", ""),
+        "client_id": client["id"],
+        "client_name": client.get("name", ""),
         "description": data.get("description", ""),
         "frequency": freq,
         "line_items": line_items,
@@ -288,15 +408,17 @@ async def create_xero_recurring(data: dict, current_user: dict = Depends(get_cur
     await db.xero_recurring.insert_one(rec)
     rec.pop("_id", None)
     await _log_sync_event("recurring_created", f"Recurring template created for {rec['client_name']} - {rec['description']} (${total}/{freq})")
+    await log_activity(current_user, "created", "xero_recurring", rec["id"], rec.get("description", ""), "Created Xero mirror recurring template")
     return rec
 
-@router.put("/xero/recurring/{rec_id}")
+@router.put("/xero/recurring/{rec_id}", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def update_xero_recurring(rec_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    item = await db.xero_recurring.find_one({"id": rec_id})
-    if not item:
-        raise HTTPException(status_code=404, detail="Recurring item not found")
+    item = await _scoped_xero_client_record(db.xero_recurring, rec_id, current_user, "billing.xero_recurring.update", "Recurring invoice")
+    requested_client_id = data.get("client_id")
+    if requested_client_id is not None and str(requested_client_id).strip() != str(item.get("client_id") or ""):
+        raise HTTPException(status_code=409, detail="Move recurring billing through an explicit client reassignment workflow")
     updates = {}
-    for field in ["client_name", "client_id", "description", "frequency", "line_items", "payment_terms",
+    for field in ["description", "frequency", "line_items", "payment_terms",
                    "contract_start", "contract_end", "escalation_percent", "auto_send", "auto_generate",
                    "notes", "email", "next_generation", "tax_rate"]:
         if field in data:
@@ -309,35 +431,37 @@ async def update_xero_recurring(rec_id: str, data: dict, current_user: dict = De
         updates["tax"] = tax
         updates["amount"] = round(sub_total + tax, 2)
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.xero_recurring.update_one({"id": rec_id}, {"$set": updates})
+    await db.xero_recurring.update_one({"id": rec_id, "client_id": item.get("client_id")}, {"$set": updates})
+    await log_activity(current_user, "updated", "xero_recurring", rec_id, item.get("description", ""), "Updated Xero mirror recurring template")
     return {"message": "Recurring template updated"}
 
-@router.delete("/xero/recurring/{rec_id}")
+@router.delete("/xero/recurring/{rec_id}", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def delete_xero_recurring(rec_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.xero_recurring.delete_one({"id": rec_id})
+    item = await _scoped_xero_client_record(db.xero_recurring, rec_id, current_user, "billing.xero_recurring.delete", "Recurring invoice")
+    result = await db.xero_recurring.delete_one({"id": rec_id, "client_id": item.get("client_id")})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Recurring item not found")
+    await log_activity(current_user, "deleted", "xero_recurring", rec_id, item.get("description", ""), "Deleted Xero mirror recurring template")
     return {"message": "Recurring template deleted"}
 
-@router.put("/xero/recurring/{rec_id}/toggle")
+@router.put("/xero/recurring/{rec_id}/toggle", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def toggle_recurring(rec_id: str, current_user: dict = Depends(get_current_user)):
-    item = await db.xero_recurring.find_one({"id": rec_id})
-    if not item:
-        raise HTTPException(status_code=404, detail="Recurring item not found")
+    item = await _scoped_xero_client_record(db.xero_recurring, rec_id, current_user, "billing.xero_recurring.toggle", "Recurring invoice")
     new_status = "paused" if item.get("status") == "active" else "active"
-    await db.xero_recurring.update_one({"id": rec_id}, {"$set": {"status": new_status}})
+    await db.xero_recurring.update_one({"id": rec_id, "client_id": item.get("client_id")}, {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await log_activity(current_user, "toggled", "xero_recurring", rec_id, item.get("description", ""), f"Set Xero mirror recurring template to {new_status}")
     return {"message": f"Recurring invoice {new_status}", "status": new_status}
 
-@router.post("/xero/recurring/{rec_id}/generate")
+@router.post("/xero/recurring/{rec_id}/generate", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def generate_from_recurring(rec_id: str, current_user: dict = Depends(get_current_user)):
-    rec = await db.xero_recurring.find_one({"id": rec_id}, {"_id": 0})
-    if not rec:
-        raise HTTPException(status_code=404, detail="Recurring item not found")
+    rec = await _scoped_xero_client_record(db.xero_recurring, rec_id, current_user, "billing.xero_recurring.generate", "Recurring invoice")
     invoice = await _create_invoice_from_recurring(rec)
+    await log_activity(current_user, "generated", "xero_recurring", rec_id, rec.get("description", ""), f"Generated Xero mirror invoice {invoice.get('invoice_number', '')}")
     return invoice
 
-@router.post("/xero/recurring/batch-generate")
+@router.post("/xero/recurring/batch-generate", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def batch_generate_recurring(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="billing.xero_recurring.batch_generate")
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     due_templates = await db.xero_recurring.find(
         {"status": "active", "next_generation": {"$lte": now_str}}, {"_id": 0}
@@ -348,16 +472,17 @@ async def batch_generate_recurring(current_user: dict = Depends(get_current_user
         generated.append(inv)
     return {"message": f"Generated {len(generated)} invoices", "generated": len(generated), "invoices": generated}
 
-@router.get("/xero/recurring/{rec_id}/history")
+@router.get("/xero/recurring/{rec_id}/history", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_recurring_history(rec_id: str, current_user: dict = Depends(get_current_user)):
+    rec = await _scoped_xero_client_record(db.xero_recurring, rec_id, current_user, "billing.xero_recurring.history", "Recurring invoice")
     invoices = await db.xero_invoices.find(
-        {"recurring_id": rec_id}, {"_id": 0}
+        {"recurring_id": rec_id, "client_id": rec.get("client_id")}, {"_id": 0}
     ).sort("created_at", -1).to_list(100)
     return invoices
 
-@router.get("/xero/recurring/forecast")
+@router.get("/xero/recurring/forecast", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_recurring_forecast(current_user: dict = Depends(get_current_user)):
-    active = await db.xero_recurring.find({"status": "active"}, {"_id": 0}).to_list(200)
+    active = await db.xero_recurring.find(scoped_query(current_user, {"status": "active"}), {"_id": 0}).to_list(200)
     now = datetime.now(timezone.utc)
     forecast = []
     for m in range(12):
@@ -393,12 +518,10 @@ async def get_recurring_forecast(current_user: dict = Depends(get_current_user))
 
 # ============== INVOICE EMAIL ==============
 
-@router.post("/xero/invoices/{invoice_id}/email")
+@router.post("/xero/invoices/{invoice_id}/email", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    to_email = data.get("to_email", "")
+    invoice = await _scoped_xero_invoice(invoice_id, current_user, "billing.xero_invoice.email")
+    to_email = str(data.get("to_email") or "").strip()
     subject = data.get("subject", f"Invoice {invoice.get('invoice_number', '')} from NexusOps")
     message = data.get("message", "")
     if not to_email:
@@ -452,14 +575,15 @@ async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = D
         )
         email_status = result.get("status", "failed")
         email_message = result.get("message", email_message)
-    except Exception as e:
-        logger.error(f"Email send failed: {e}")
+    except Exception:
+        logger.exception("xero_invoice_email_failed invoice_id=%s", invoice_id)
         email_status = "failed"
-        email_message = f"Email failed: {str(e)}"
+        email_message = "Email failed to send"
 
     email_record = {
         "id": str(uuid.uuid4()),
         "invoice_id": invoice_id,
+        "client_id": invoice.get("client_id"),
         "invoice_number": invoice.get("invoice_number", ""),
         "to_email": to_email,
         "subject": subject,
@@ -470,28 +594,34 @@ async def email_xero_invoice(invoice_id: str, data: dict, current_user: dict = D
     }
     await db.xero_invoice_emails.insert_one(email_record)
     if invoice.get("status") == "DRAFT":
-        await db.xero_invoices.update_one({"id": invoice_id}, {"$set": {"status": "AUTHORISED", "sent_at": datetime.now(timezone.utc).isoformat()}})
+        await db.xero_invoices.update_one(
+            {"id": invoice_id, "client_id": invoice.get("client_id"), **_version_filter(invoice)},
+            {"$set": {"status": "AUTHORISED", "sent_at": datetime.now(timezone.utc).isoformat()}, "$inc": {"version": 1}},
+        )
     await _log_sync_event("invoice_emailed", f"Invoice {invoice.get('invoice_number', '')} emailed to {to_email}")
+    await log_activity(current_user, "emailed", "xero_invoice", invoice_id, invoice.get("invoice_number", ""), f"Sent Xero mirror invoice to {to_email}")
     email_record.pop("_id", None)
     return {"message": email_message, "email": email_record}
 
-@router.get("/xero/invoices/{invoice_id}/emails")
+@router.get("/xero/invoices/{invoice_id}/emails", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_invoice_emails(invoice_id: str, current_user: dict = Depends(get_current_user)):
-    emails = await db.xero_invoice_emails.find({"invoice_id": invoice_id}, {"_id": 0}).sort("sent_at", -1).to_list(50)
+    invoice = await _scoped_xero_invoice(invoice_id, current_user, "billing.xero_invoice.email_history")
+    emails = await db.xero_invoice_emails.find(
+        {"invoice_id": invoice_id, "client_id": invoice.get("client_id")}, {"_id": 0}
+    ).sort("sent_at", -1).to_list(50)
     return emails
 
 # ============== XERO SYNC HISTORY ==============
 
-@router.get("/xero/sync-history")
+@router.get("/xero/sync-history", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def get_sync_history(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="billing.integration.xero.sync_history")
     history = await db.xero_sync_history.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
-    if not history:
-        await _seed_sync_history()
-        history = await db.xero_sync_history.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
     return history
 
-@router.post("/xero/sync")
+@router.post("/xero/sync", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def trigger_xero_sync(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="billing.integration.xero.sync")
     await _log_sync_event("full_sync", "Full sync triggered - contacts, invoices, and accounts refreshed")
     contacts_synced = await db.xero_contacts.count_documents({})
     invoices_synced = await db.xero_invoices.count_documents({})
@@ -499,12 +629,9 @@ async def trigger_xero_sync(current_user: dict = Depends(get_current_user)):
 
 # ============== XERO DASHBOARD ==============
 
-@router.get("/xero/dashboard")
+@router.get("/xero/dashboard", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_xero_dashboard(current_user: dict = Depends(get_current_user)):
-    invoices = await db.xero_invoices.find({}, {"_id": 0}).to_list(1000)
-    if not invoices:
-        await _seed_xero_demo()
-        invoices = await db.xero_invoices.find({}, {"_id": 0}).to_list(1000)
+    invoices = await db.xero_invoices.find(scoped_query(current_user), {"_id": 0}).to_list(1000)
 
     total_revenue = sum(i.get("total", 0) for i in invoices)
     total_paid = sum(i.get("amount_paid", 0) for i in invoices)
@@ -547,15 +674,20 @@ async def get_xero_dashboard(current_user: dict = Depends(get_current_user)):
                     aging["90_plus"] += i["amount_due"]
 
     # Contacts count
-    contacts_count = await db.xero_contacts.count_documents({})
-    estimates_count = await db.xero_estimates.count_documents({})
-    recurring_count = await db.xero_recurring.count_documents({})
+    contacts_count = await db.xero_contacts.count_documents(scoped_query(current_user))
+    estimates_count = await db.xero_estimates.count_documents(scoped_query(current_user))
+    recurring_count = await db.xero_recurring.count_documents(scoped_query(current_user))
 
     # Collection rate
     collection_rate = round((total_paid / total_revenue * 100) if total_revenue > 0 else 0, 1)
 
     # Recent sync
-    last_sync = await db.xero_sync_history.find_one({}, {"_id": 0}, sort=[("timestamp", -1)])
+    # Sync events are integration-wide and currently have no client reference.
+    # Do not use them to disclose tenant-wide operational timing to a restricted
+    # technician; client-scoped dashboard data remains available above.
+    last_sync = None
+    if effective_scope(current_user)["mode"] == "all":
+        last_sync = await db.xero_sync_history.find_one({}, {"_id": 0}, sort=[("timestamp", -1)])
 
     return {
         "total_revenue": round(total_revenue, 2),
@@ -576,8 +708,9 @@ async def get_xero_dashboard(current_user: dict = Depends(get_current_user)):
 
 # ============== XERO ACCOUNTS ==============
 
-@router.get("/xero/accounts")
+@router.get("/xero/accounts", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def get_xero_accounts(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="billing.integration.xero.accounts")
     accounts = await db.xero_accounts.find({}, {"_id": 0}).to_list(100)
     if not accounts:
         defaults = [
@@ -599,43 +732,321 @@ async def get_xero_accounts(current_user: dict = Depends(get_current_user)):
 
 # ============== TICKET BULK ACTIONS ==============
 
-@router.post("/tickets/bulk-action")
-async def bulk_ticket_action(data: dict, current_user: dict = Depends(get_current_user)):
-    ticket_ids = data.get("ticket_ids", [])
-    action = data.get("action", "")
-    value = data.get("value", "")
-    if not ticket_ids or not action:
-        raise HTTPException(status_code=400, detail="ticket_ids and action required")
+_BULK_TICKET_ACTIONS = frozenset({"assign", "close", "priority", "status", "tag"})
+_BULK_TICKET_PRIORITIES = frozenset({"low", "medium", "high", "critical"})
+_BULK_TICKET_STATUSES = frozenset({"open", "in_progress", "on_hold", "resolved", "closed"})
+_MAX_BULK_TICKETS = 100
+_MAX_TICKET_TAG_LENGTH = 64
 
+
+def _normalise_bulk_ticket_ids(value: object) -> list[str]:
+    """Reject malformed or ambiguous ticket selections before any record is read."""
+    if not isinstance(value, list) or not value:
+        raise HTTPException(status_code=422, detail="ticket_ids must be a non-empty array")
+    if len(value) > _MAX_BULK_TICKETS:
+        raise HTTPException(status_code=422, detail=f"A bulk action may contain at most {_MAX_BULK_TICKETS} tickets")
+
+    ticket_ids: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise HTTPException(status_code=422, detail="Every ticket_id must be a string")
+        ticket_id = item.strip()
+        if not ticket_id or len(ticket_id) > 128:
+            raise HTTPException(status_code=422, detail="Every ticket_id must be a non-empty value up to 128 characters")
+        if ticket_id in seen:
+            raise HTTPException(status_code=422, detail="ticket_ids must not contain duplicates")
+        seen.add(ticket_id)
+        ticket_ids.append(ticket_id)
+    return ticket_ids
+
+
+def _normalise_bulk_ticket_request(data: object) -> tuple[list[str], str, str | None]:
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Bulk ticket action payload must be an object")
+
+    ticket_ids = _normalise_bulk_ticket_ids(data.get("ticket_ids"))
+    raw_action = data.get("action")
+    if not isinstance(raw_action, str):
+        raise HTTPException(status_code=422, detail="action is required")
+    action = raw_action.strip().lower()
+    if action not in _BULK_TICKET_ACTIONS:
+        raise HTTPException(status_code=422, detail="Unsupported bulk ticket action")
+
+    raw_value = data.get("value")
+    if action == "assign":
+        if not isinstance(raw_value, str) or not raw_value.strip() or len(raw_value.strip()) > 128:
+            raise HTTPException(status_code=422, detail="A valid assignee user ID is required")
+        return ticket_ids, action, raw_value.strip()
+    if action == "priority":
+        if not isinstance(raw_value, str) or raw_value.strip().lower() not in _BULK_TICKET_PRIORITIES:
+            raise HTTPException(status_code=422, detail="Invalid priority value")
+        return ticket_ids, action, raw_value.strip().lower()
+    if action == "status":
+        if not isinstance(raw_value, str) or raw_value.strip().lower() not in _BULK_TICKET_STATUSES:
+            raise HTTPException(status_code=422, detail="Invalid status value")
+        return ticket_ids, action, raw_value.strip().lower()
+    if action == "tag":
+        if not isinstance(raw_value, str):
+            raise HTTPException(status_code=422, detail="A tag is required")
+        tag = raw_value.strip()
+        if not tag or len(tag) > _MAX_TICKET_TAG_LENGTH or any(ord(char) < 32 for char in tag):
+            raise HTTPException(status_code=422, detail="Tag must be printable text up to 64 characters")
+        return ticket_ids, action, tag
+    return ticket_ids, action, None
+
+
+async def _load_scoped_bulk_tickets(
+    ticket_ids: list[str],
+    current_user: dict,
+    *,
+    operation: str,
+    request: Request | None,
+) -> list[dict]:
+    """Resolve the whole selection first so a foreign/missing ticket changes nothing."""
+    records = await db.tickets.find(
+        tenant_scoped_query(current_user, {"id": {"$in": ticket_ids}}),
+        {"_id": 0},
+    ).to_list(len(ticket_ids))
+    tickets_by_id = {str(ticket.get("id")): ticket for ticket in records if ticket.get("id")}
+    missing = [ticket_id for ticket_id in ticket_ids if ticket_id not in tickets_by_id]
+    if missing:
+        raise HTTPException(status_code=404, detail="One or more tickets could not be found")
+
+    tickets = [tickets_by_id[ticket_id] for ticket_id in ticket_ids]
+    scope = effective_scope(current_user)
+    for ticket in tickets:
+        # A site-restricted technician cannot act on an old ticket that lacks a
+        # site reference: Nexus cannot prove it belongs to their permitted
+        # location.  ``assert_client_scope`` intentionally permits a missing
+        # site for ordinary client-scoped workflows, so make this legacy bulk
+        # operation fail closed when a site boundary is explicit.
+        ticket_site_id = ticket.get("site_id")
+        if scope["mode"] != "all" and scope["site_ids"] and not ticket_site_id:
+            await assert_client_scope(
+                current_user,
+                ticket.get("client_id"),
+                site_id="__unassigned_ticket_site__",
+                operation=operation,
+                request=request,
+                mask_not_found=True,
+            )
+        await assert_client_scope(
+            current_user,
+            ticket.get("client_id"),
+            site_id=ticket_site_id,
+            operation=operation,
+            request=request,
+            mask_not_found=True,
+        )
+    return tickets
+
+
+async def _assert_bulk_ticket_can_close(ticket: dict) -> None:
+    """Keep the old bulk route from bypassing project and blueprint closure gates."""
+    if ticket.get("project_ticket_plan_role") == "parent":
+        child_ticket_ids = list(dict.fromkeys(ticket.get("child_ticket_ids") or []))
+        if child_ticket_ids:
+            children = await db.tickets.find(
+                {
+                    "id": {"$in": child_ticket_ids},
+                    "client_id": ticket.get("client_id"),
+                    "$or": [
+                        {"project_ticket_plan_required": {"$ne": False}},
+                        {"project_ticket_plan_required": {"$exists": False}},
+                    ],
+                },
+                {"_id": 0, "id": 1, "ticket_number": 1, "status": 1},
+            ).to_list(len(child_ticket_ids))
+            open_children = [
+                child for child in children
+                if str(child.get("status") or "open").lower() not in {"resolved", "closed", "completed"}
+            ]
+            if open_children:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Project delivery is still in progress; close required child tickets before the parent",
+                )
+
+    if not ticket.get("blueprint_require_completion"):
+        return
+    missing_items = [
+        str(item.get("label") or "checklist item")
+        for item in (ticket.get("blueprint_checklist") or [])
+        if item.get("required") and not item.get("done")
+    ]
+    blueprint = (
+        await db.blueprints.find_one({"id": ticket.get("blueprint_id")}, {"_id": 0, "fields": 1})
+        if ticket.get("blueprint_id")
+        else None
+    )
+    values = ticket.get("blueprint_fields") or {}
+    missing_fields = [
+        str(field.get("label") or field.get("key") or "required field")
+        for field in ((blueprint or {}).get("fields") or [])
+        if field.get("required") and not str(values.get(field.get("key"), "") or "").strip()
+    ]
+    if missing_items or missing_fields:
+        raise HTTPException(
+            status_code=409,
+            detail="Ticket blueprint is incomplete; complete required checklist items and fields before closing",
+        )
+
+
+async def _mark_bulk_project_task_for_review(ticket: dict, current_user: dict, completed_at: str) -> None:
+    """Preserve the parent project review hand-off when child work closes in bulk."""
+    if ticket.get("project_ticket_plan_role") != "child" or not ticket.get("project_id"):
+        return
+    await db.project_tasks.update_one(
+        {
+            "project_id": ticket["project_id"],
+            "ticket_id": ticket.get("id"),
+            "status": {"$nin": ["review", "completed"]},
+        },
+        {
+            "$set": {
+                "status": "review",
+                "completed_at": completed_at,
+                "implemented_by": current_user.get("id") or current_user.get("email"),
+                "implemented_by_name": current_user.get("name") or current_user.get("email"),
+                "implemented_at": completed_at,
+                "reviewed_by": None,
+                "reviewed_by_name": None,
+                "reviewed_at": None,
+                "review_result": None,
+                "review_notes": None,
+            }
+        },
+    )
+
+
+@router.post("/tickets/bulk-action", dependencies=[Depends(require_action("ticket.bulk.modify"))])
+async def bulk_ticket_action(
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Apply one bounded, auditable mutation to a fully validated ticket selection.
+
+    This compatibility route remains registered for the older queue UI, but it
+    deliberately follows the same scope and close-out gates as the primary
+    ticket workflow.  The selection is fully resolved and checked before any
+    ticket is changed, preventing a mixed-client request from partly mutating
+    accessible records.
+    """
+    ticket_ids, action, value = _normalise_bulk_ticket_request(data)
+    resolution_summary = str(data.get("resolution_summary") or "").strip() if isinstance(data, dict) else ""
+    closure_reason = str(data.get("closure_reason") or "").strip() if isinstance(data, dict) else ""
+    if action == "close" and (not resolution_summary or not closure_reason):
+        raise HTTPException(status_code=422, detail="Bulk close requires a resolution summary and closure reason")
+    operation = f"ticket.bulk.{action}"
+    tickets = await _load_scoped_bulk_tickets(
+        ticket_ids,
+        current_user,
+        operation=operation,
+        request=request,
+    )
+
+    assignee = None
+    if action == "assign":
+        assignee = await db.users.find_one(
+            tenant_scoped_query(current_user, {"id": value}),
+            {"_id": 0, "id": 1, "name": 1},
+        )
+        if not assignee:
+            raise HTTPException(status_code=422, detail="Assigned technician was not found")
+
+    closing = action == "close" or (action == "status" and value in {"resolved", "closed"})
+    if closing:
+        for ticket in tickets:
+            if str(ticket.get("status") or "").lower() != "closed":
+                await _assert_bulk_ticket_can_close(ticket)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    operation_id = str(uuid.uuid4())
     updated = 0
-    if action == "close":
-        result = await db.tickets.update_many({"id": {"$in": ticket_ids}}, {"$set": {"status": "closed", "updated_at": datetime.now(timezone.utc).isoformat()}})
-        updated = result.modified_count
-    elif action == "assign":
-        if not value:
-            raise HTTPException(status_code=400, detail="value (user_id) required for assign")
-        result = await db.tickets.update_many({"id": {"$in": ticket_ids}}, {"$set": {"assigned_to": value, "updated_at": datetime.now(timezone.utc).isoformat()}})
-        updated = result.modified_count
-    elif action == "priority":
-        if value not in ["low", "medium", "high", "critical"]:
-            raise HTTPException(status_code=400, detail="Invalid priority value")
-        result = await db.tickets.update_many({"id": {"$in": ticket_ids}}, {"$set": {"priority": value, "updated_at": datetime.now(timezone.utc).isoformat()}})
-        updated = result.modified_count
-    elif action == "tag":
-        if not value:
-            raise HTTPException(status_code=400, detail="value (tag) required")
-        for tid in ticket_ids:
-            await db.tickets.update_one({"id": tid}, {"$addToSet": {"tags": value}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
-            updated += 1
-    elif action == "status":
-        if value not in ["open", "in_progress", "on_hold", "resolved", "closed"]:
-            raise HTTPException(status_code=400, detail="Invalid status value")
-        result = await db.tickets.update_many({"id": {"$in": ticket_ids}}, {"$set": {"status": value, "updated_at": datetime.now(timezone.utc).isoformat()}})
-        updated = result.modified_count
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+    for ticket in tickets:
+        updates = {"updated_at": now_iso}
+        changes: dict[str, dict[str, object]] = {}
+        if action == "assign":
+            updates.update({
+                "assigned_to": assignee["id"],
+                "assigned_name": assignee.get("name"),
+                "assigned_at": now_iso,
+            })
+            changes["assigned_to"] = {"old": ticket.get("assigned_to"), "new": assignee["id"]}
+        elif action == "priority":
+            updates["priority"] = value
+            changes["priority"] = {"old": ticket.get("priority"), "new": value}
+        elif action == "tag":
+            updates["tags"] = list(dict.fromkeys([*(ticket.get("tags") or []), value]))
+            changes["tag"] = {"old": ticket.get("tags") or [], "new": updates["tags"]}
+        else:
+            requested_status = "closed" if action == "close" else value
+            updates["status"] = requested_status
+            changes["status"] = {"old": ticket.get("status"), "new": requested_status}
+            if requested_status in {"resolved", "closed"} and str(ticket.get("status") or "").lower() not in {"resolved", "closed"}:
+                updates.update({
+                    "resolved_at": ticket.get("resolved_at") or now_iso,
+                    "resolved_by": ticket.get("resolved_by") or current_user.get("id") or current_user.get("email"),
+                    "resolved_by_name": ticket.get("resolved_by_name") or current_user.get("name") or current_user.get("email"),
+                    "resolution_status": "resolved" if requested_status == "resolved" else "closed",
+                })
+            if requested_status == "closed" and str(ticket.get("status") or "").lower() != "closed":
+                updates.update({
+                    "closed_at": now_iso,
+                    "closed_by": current_user.get("id") or current_user.get("email"),
+                    "closed_by_name": current_user.get("name") or current_user.get("email"),
+                    "resolution_status": "resolved_and_closed" if str(ticket.get("status") or "").lower() == "resolved" else "closed",
+                    "resolution_summary": resolution_summary,
+                    "closure_reason": closure_reason,
+                    "resolution_recorded_at": now_iso,
+                    "resolution_recorded_by": current_user.get("id") or current_user.get("email"),
+                })
 
-    return {"message": f"Bulk {action} applied to {updated} tickets", "updated": updated}
+        result = await db.tickets.update_one(
+            tenant_scoped_query(
+                current_user,
+                {
+                    "id": ticket["id"],
+                    "client_id": ticket.get("client_id"),
+                    "site_id": ticket.get("site_id"),
+                },
+            ),
+            {"$set": updates},
+        )
+        if not result.matched_count:
+            raise HTTPException(status_code=409, detail="Ticket changed while the bulk action was being applied; refresh and retry")
+        updated += 1
+        if updates.get("status") == "closed" and str(ticket.get("status") or "").lower() != "closed":
+            await _mark_bulk_project_task_for_review(ticket, current_user, now_iso)
+
+        audit_details = f"Bulk {action} operation {operation_id} applied"
+        await ticket_audit(ticket["id"], current_user, "bulk_updated", audit_details)
+        await log_activity(
+            current_user,
+            "bulk_updated",
+            "ticket",
+            ticket["id"],
+            ticket.get("title", ""),
+            audit_details,
+            changes=changes,
+            metadata={
+                "operation_id": operation_id,
+                "bulk_action": action,
+                "selection_size": len(tickets),
+                "client_id": ticket.get("client_id"),
+                "site_id": ticket.get("site_id"),
+                "tenant_id": platform_tenant_id(current_user),
+            },
+        )
+
+    return {
+        "message": f"Bulk {action} applied to {updated} tickets",
+        "updated": updated,
+        "action": action,
+        "operation_id": operation_id,
+    }
 
 # ============== SEED HELPERS ==============
 
@@ -687,6 +1098,7 @@ async def _log_sync_event(event_type: str, message: str):
         "status": "success",
     }
     await db.xero_sync_history.insert_one(event)
+    event.pop("_id", None)
     return event
 
 async def _seed_sync_history():
@@ -867,4 +1279,4 @@ async def _seed_xero_demo():
                 "synced_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.xero_contacts.insert_one(contact)
-    return invoices
+    return [{k: v for k, v in inv.items() if k != "_id"} for inv in invoices]

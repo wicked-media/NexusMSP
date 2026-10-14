@@ -3,14 +3,32 @@ Client War Room â€” live operational dashboard for a single client.
 Aggregates real-time device telemetry, open tickets, on-call techs, and
 generates an AI commentary feed for outage moments / client calls.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 import os
 import logging
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope
 
-router = APIRouter()
+
+async def _enforce_war_room_scope(request: Request, current_user: dict = Depends(get_current_user)):
+    """Keep operational client snapshots inside the technician's client boundary."""
+    client_id = request.path_params.get("client_id")
+    if client_id:
+        await assert_record_scope(
+            current_user,
+            db.clients,
+            client_id,
+            request=request,
+            operation=f"client_war_room:{request.method.lower()}",
+            resource_name="Client",
+            client_field="id",
+            site_field="site_id",
+        )
+
+
+router = APIRouter(dependencies=[Depends(_enforce_war_room_scope)])
 logger = logging.getLogger("client_war_room")
 
 

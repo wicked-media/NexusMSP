@@ -1,26 +1,49 @@
 import { useEffect, useRef, useState, useCallback, useId } from "react";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 import "@/styles/hero-tile.css";
 
-/** Animated counter — eases up to numeric target. Also accepts string-with-prefix like "$1,234". */
+/**
+ * Animated counter — eases up to numeric target. Also accepts string-with-prefix like "$1,234".
+ *
+ * The easing runs in JavaScript, and a `prefers-reduced-motion` media query never reaches
+ * `requestAnimationFrame`: the stylesheet could stop every CSS animation on the page and
+ * this counter still counted up. `MetricTile` — the design system's KPI tile — delegates
+ * here, so an operator who chose "minimal" or "none" still watched every figure on a
+ * dashboard tick from zero. It now renders the real value immediately, and follows the
+ * setting live rather than only at mount.
+ */
 export function AnimatedCounter({ value, suffix = "", duration = 900 }) {
-  const [display, setDisplay] = useState(0);
+  const reducedMotion = useReducedMotion();
+  const target = Number(value) || 0;
+  const [display, setDisplay] = useState(() => (reducedMotion ? target : 0));
   const startRef = useRef(null);
+  const fromRef = useRef(0);
+
   useEffect(() => {
+    if (reducedMotion) {
+      setDisplay(target);
+      fromRef.current = target;
+      return undefined;
+    }
     startRef.current = null;
-    const start = display;
-    const target = Number(value) || 0;
+    let frame = 0;
+    const start = fromRef.current;
     const raf = (ts) => {
-      if (!startRef.current) startRef.current = ts;
+      if (startRef.current === null) startRef.current = ts;
       const elapsed = ts - startRef.current;
       const progress = Math.min(1, elapsed / duration);
       // easeOutExpo for a punchy land
       const eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
-      setDisplay(Math.round(start + (target - start) * eased));
-      if (progress < 1) requestAnimationFrame(raf);
+      const next = Math.round(start + (target - start) * eased);
+      fromRef.current = next;
+      setDisplay(next);
+      if (progress < 1) frame = requestAnimationFrame(raf);
     };
-    requestAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+    frame = requestAnimationFrame(raf);
+    // Cancelling matters: a tile that unmounts mid-count used to keep scheduling frames.
+    return () => cancelAnimationFrame(frame);
+  }, [target, duration, reducedMotion]);
+
   return <>{display}{suffix}</>;
 }
 
@@ -118,12 +141,19 @@ export default function HeroTile({
     }).join(" ");
   })();
 
-  // Stagger entrance — index inferred by querySelectorAll order at runtime
-  const [entered, setEntered] = useState(false);
+  // Stagger entrance — index inferred by querySelectorAll order at runtime.
+  // The stagger is motion in its own right, so it is skipped rather than merely
+  // shortened when the operator asked for less of it: the tile is simply already there.
+  const reducedMotion = useReducedMotion();
+  const [entered, setEntered] = useState(() => reducedMotion);
   useEffect(() => {
+    if (reducedMotion) {
+      setEntered(true);
+      return undefined;
+    }
     const t = setTimeout(() => setEntered(true), 30 + Math.random() * 120);
     return () => clearTimeout(t);
-  }, []);
+  }, [reducedMotion]);
 
   return (
     <Tag

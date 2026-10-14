@@ -16,8 +16,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCallback, useRef, useState, useEffect } from 'react';
+import { parsePlainTextClipboardList } from '@/lib/richTextClipboard';
 
-export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true, compactToolbar = false, showHtmlToggle = true }) {
+export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true, compactToolbar = false, showHtmlToggle = true, allowImages = true }) {
   const fileInputRef = useRef(null);
   const [htmlMode, setHtmlMode] = useState(false);
   const [htmlDraft, setHtmlDraft] = useState(content || '');
@@ -33,7 +34,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
       Underline,
       Link.configure({ openOnClick: false }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
-      Image.configure({ inline: true, allowBase64: true }),
+      ...(allowImages ? [Image.configure({ inline: true, allowBase64: true })] : []),
       Table.configure({ resizable: true, HTMLAttributes: { class: 'rte-table' } }),
       TableRow,
       TableHeader,
@@ -55,6 +56,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
           for (const item of items) {
             if (item.type.startsWith('image/')) {
               event.preventDefault();
+              if (!allowImages) return true;
               const file = item.getAsFile();
               if (file) {
                 const reader = new FileReader();
@@ -69,9 +71,36 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
             }
           }
         }
-        // For HTML paste, let tiptap handle it — table/image extensions will
-        // preserve structure now. Outlook-style inline CID images won't work,
-        // but base64 data URIs and http(s) images will.
+        // Prefer the browser's native HTML path whenever it is available. It
+        // retains lists, tables and links from Outlook, Word and web apps.
+        const html = event.clipboardData?.getData('text/html');
+        if (html) return false;
+
+        // Some desktop tools expose only text/plain on paste. Preserve a
+        // complete, unambiguous list as real list nodes instead of silently
+        // flattening it into paragraphs. Mixed text stays native by design.
+        const parsedList = parsePlainTextClipboardList(event.clipboardData?.getData('text/plain'));
+        if (parsedList) {
+          const { schema } = view.state;
+          const listType = parsedList.type === 'ordered'
+            ? schema.nodes.orderedList
+            : schema.nodes.bulletList;
+          const listItem = schema.nodes.listItem;
+          const paragraph = schema.nodes.paragraph;
+          if (listType && listItem && paragraph) {
+            event.preventDefault();
+            const list = listType.create(
+              null,
+              parsedList.items.map((item) => listItem.create(null, paragraph.create(null, schema.text(item))))
+            );
+            view.dispatch(view.state.tr.replaceSelectionWith(list).scrollIntoView());
+            return true;
+          }
+        }
+
+        // For remaining plain text, let Tiptap preserve its normal behaviour.
+        // Outlook-style inline CID images won't work, but base64 data URIs and
+        // http(s) images are handled by the image extension above.
         return false;
       },
       handleDrop(view, event) {
@@ -80,6 +109,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
         for (const file of files) {
           if (file.type.startsWith('image/')) {
             event.preventDefault();
+            if (!allowImages) return true;
             const reader = new FileReader();
             reader.onload = (e) => {
               const pos = view.posAtCoords({ left: event.clientX, top: event.clientY });
@@ -156,7 +186,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
   if (!editor) return null;
 
   const ToolBtn = ({ onClick, active, children, title, disabled }) => (
-    <Button type="button" variant="ghost" size="sm" disabled={disabled} className={`h-7 w-7 p-0 ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`} onClick={onClick} title={title}>
+    <Button type="button" variant="ghost" size="sm" disabled={disabled} className={`h-7 w-7 p-0 ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`} onClick={onClick} title={title} aria-label={title}>
       {children}
     </Button>
   );
@@ -181,7 +211,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
           <ToolBtn onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })} title="Center" disabled={htmlMode}><AlignCenter className="w-3.5 h-3.5" /></ToolBtn>
           <ToolBtn onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })} title="Right" disabled={htmlMode}><AlignRight className="w-3.5 h-3.5" /></ToolBtn>
           <ToolBtn onClick={openLinkComposer} active={editor.isActive('link') || linkComposerOpen} title={editor.isActive('link') ? "Remove link" : "Add link"} disabled={htmlMode}><LinkIcon className="w-3.5 h-3.5" /></ToolBtn>
-          <ToolBtn onClick={handleImageUpload} title="Insert Image" disabled={htmlMode}><ImageIcon className="w-3.5 h-3.5" /></ToolBtn>
+          {allowImages && <ToolBtn onClick={handleImageUpload} title="Insert Image" disabled={htmlMode}><ImageIcon className="w-3.5 h-3.5" /></ToolBtn>}
         </>}
         <div className="w-px h-4 bg-border mx-0.5" />
         <ToolBtn onClick={() => editor.chain().focus().undo().run()} title="Undo" disabled={htmlMode}><Undo className="w-3.5 h-3.5" /></ToolBtn>
@@ -224,7 +254,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
           <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => { setLinkComposerOpen(false); setLinkUrl(''); }}>Cancel</Button>
         </div>
       )}
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+      {allowImages && <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />}
       {htmlMode ? (
         <textarea
           value={htmlDraft}
@@ -242,7 +272,8 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
         <span className="text-[10px] text-muted-foreground/60">
           {showHtmlToggle && htmlMode
             ? "Raw HTML — click Visual to render. Inline images must be data URIs or https URLs (not Outlook cid:)."
-            : showHtmlToggle ? "Paste images directly · drag & drop · toggle HTML to paste full signature source" : "Paste images directly · drag & drop"}
+            : allowImages && showHtmlToggle ? "Paste images directly · drag & drop · toggle HTML to paste full signature source"
+              : allowImages ? "Paste images directly · drag & drop" : "Use the ticket attachments area for screenshots and files."}
         </span>
         <span className="text-[10px] text-muted-foreground/40">Resize ↕</span>
       </div>

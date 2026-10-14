@@ -1,6 +1,7 @@
 import {
-  collectionFromResponse, matchTicketByReference, TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES,
-  ticketModuleForPath, ticketToolAvailability, ticketWorkspaceToolForPath,
+  buildTicketQueueSignals, collectionFromResponse, formatDuration, matchTicketByReference, resolutionMinutes,
+  TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES, ticketHasStaleActivity,
+  ticketModuleForPath, ticketToolAvailability, ticketWorkspaceToolForPath, uniqueByIdentity,
 } from "./ticketWorkspaceHelpers";
 
 describe("ticket workspace helpers", () => {
@@ -11,7 +12,10 @@ describe("ticket workspace helpers", () => {
     expect(ticketModuleForPath("/sla-timer")).toBe("sla");
     expect(ticketModuleForPath("/sla-report-gen")).toBe("sla");
     expect(ticketModuleForPath("/dispatch-board")).toBe("dispatch");
-    expect(ticketWorkspaceToolForPath("/workshop-bench")?.id).toBe("workshop");
+    expect(ticketWorkspaceToolForPath("/workshop-bench")).toMatchObject({
+      id: "workshop",
+      label: "Historical workshop records",
+    });
     expect(ticketWorkspaceToolForPath("/blueprints")?.id).toBe("blueprints");
   });
 
@@ -41,5 +45,51 @@ describe("ticket workspace helpers", () => {
     expect(collectionFromResponse({ tickets }, ["tickets"])).toBe(tickets);
     expect(collectionFromResponse({ items: tickets })).toBe(tickets);
     expect(collectionFromResponse("<!doctype html>")).toEqual([]);
+  });
+
+  test("builds queue recovery from documented SLA, ownership and activity fields", () => {
+    const now = new Date("2026-09-08T12:00:00.000Z");
+    const tickets = [
+      { id: "breached", status: "open", priority: "high", sla_due: "2026-09-08T10:00:00.000Z", updated_at: "2026-09-08T11:30:00.000Z", assigned_to: "tech-1" },
+      { id: "unassigned", status: "open", priority: "medium", created_at: "2026-09-08T08:00:00.000Z", updated_at: "2026-09-08T11:30:00.000Z" },
+      { id: "stale", status: "in_progress", priority: "low", created_at: "2026-09-08T03:00:00.000Z", updated_at: "2026-09-08T06:00:00.000Z", assigned_to: "tech-2" },
+      { id: "closed", status: "closed", priority: "critical", sla_due: "2026-09-08T10:00:00.000Z", updated_at: "2026-09-08T06:00:00.000Z" },
+    ];
+
+    const signals = buildTicketQueueSignals(tickets, now);
+    expect(signals.find(signal => signal.attention === "sla_breach").count).toBe(1);
+    expect(signals.find(signal => signal.attention === "critical_high").count).toBe(1);
+    expect(signals.find(signal => signal.attention === "unassigned").count).toBe(1);
+    expect(signals.find(signal => signal.attention === "no_response").tickets.map(ticket => ticket.id)).toEqual(["stale"]);
+    expect(ticketHasStaleActivity({ status: "open", created_at: "2026-09-08T03:00:00.000Z", updated_at: "2026-09-08T11:00:00.000Z" }, now)).toBe(false);
+  });
+});
+
+describe("ticket presentation helpers", () => {
+  test("uniqueByIdentity keeps the first row per id, email or name identity", () => {
+    expect(uniqueByIdentity([
+      { id: "a", name: "First" },
+      { id: "a", name: "Duplicate id" },
+      { email: "Tech@Example.test" },
+      { email: "tech@example.test" },
+      { name: "Ana" },
+      { name: "ana" },
+    ]).map(row => row.id || row.email || row.name)).toEqual(["a", "Tech@Example.test", "Ana"]);
+    expect(uniqueByIdentity()).toEqual([]);
+  });
+
+  test("resolutionMinutes prefers the explicit metric and falls back to timestamps", () => {
+    expect(resolutionMinutes({ resolution_time_minutes: 45, created_at: "2026-09-08T03:00:00.000Z", closed_at: "2026-09-08T09:00:00.000Z" })).toBe(45);
+    expect(resolutionMinutes({ created_at: "2026-09-08T03:00:00.000Z", closed_at: "2026-09-08T04:30:00.000Z" })).toBe(90);
+    expect(resolutionMinutes({ created_at: "2026-09-08T03:00:00.000Z" })).toBeNull();
+    expect(resolutionMinutes({ resolution_time_minutes: -5 })).toBeNull();
+  });
+
+  test("formatDuration renders minutes, hours and days", () => {
+    expect(formatDuration(null)).toBe("—");
+    expect(formatDuration(45)).toBe("45m");
+    expect(formatDuration(150)).toBe("3h");
+    expect(formatDuration(2880)).toBe("2.0d");
+    expect(formatDuration(14400)).toBe("10d");
   });
 });

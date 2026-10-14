@@ -18,6 +18,48 @@ from app.database import db
 VALID_SCOPE_MODES = frozenset({"all", "restricted"})
 
 
+def platform_tenant_id(user: dict[str, Any]) -> str:
+    """Return the stable Nexus platform tenant for an authenticated actor.
+
+    The existing local installation predates explicit tenant markers on many
+    MongoDB documents.  Those records belong only to the documented
+    ``nexus-local`` partition until a reviewed migration is approved.  An
+    explicitly tenant-bound actor must never fall back to those legacy rows.
+    """
+    return str(user.get("tenant_id") or "nexus-local").strip() or "nexus-local"
+
+
+def tenant_scoped_query(
+    user: dict[str, Any],
+    query: dict[str, Any] | None = None,
+    *,
+    tenant_field: str = "tenant_id",
+) -> dict[str, Any]:
+    """Combine a query with the caller's Nexus tenant partition.
+
+    Only the historic local partition may read documents without an explicit
+    tenant marker.  Every explicitly tenant-bound actor is constrained to an
+    exact tenant value, including administrators with all-client scope.
+    """
+    operational = dict(query or {})
+    tenant_id = platform_tenant_id(user)
+    if tenant_id == "nexus-local":
+        partition = {
+            "$or": [
+                {tenant_field: "nexus-local"},
+                {tenant_field: {"$exists": False}},
+                {tenant_field: None},
+                {tenant_field: ""},
+            ]
+        }
+    else:
+        partition = {tenant_field: tenant_id}
+
+    if not operational:
+        return partition
+    return {"$and": [operational, partition]}
+
+
 def normalise_scope_ids(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple, set, frozenset)):
         return []
@@ -95,7 +137,11 @@ async def assert_client_scope(
         return scope
 
     client_allowed = bool(client_id and str(client_id) in scope["client_ids"])
-    site_allowed = not site_id or not scope["site_ids"] or str(site_id) in scope["site_ids"]
+    # An explicit site allowlist is a fail-closed boundary. A record without a
+    # Nexus site binding cannot be proven to belong to any allowed site, so it
+    # must not become reachable through a direct-ID route while remaining
+    # hidden from the corresponding scoped list view.
+    site_allowed = not scope["site_ids"] or bool(site_id and str(site_id) in scope["site_ids"])
     if client_allowed and site_allowed:
         return scope
 
@@ -154,12 +200,49 @@ async def assert_record_scope(
 ) -> dict[str, Any]:
     """Load an owned record and enforce its client/site boundary.
 
-    Foreign records deliberately produce the same 404 response as missing
-    records so URL tampering cannot be used to enumerate another client.
+    Missing and foreign records deliberately produce the same generic 404
+    response so URL tampering cannot be used to enumerate another client.
+    ``resource_name`` remains part of the call contract for compatibility, but
+    must not affect that externally visible response.
     """
     record = await collection.find_one({id_field: str(record_id)}, {"_id": 0})
     if not record:
-        raise HTTPException(status_code=404, detail=f"{resource_name} not found")
+        raise HTTPException(status_code=404, detail="Resource not found")
+    await assert_client_scope(
+        user,
+        record.get(client_field),
+        site_id=record.get(site_field),
+        operation=operation,
+        request=request,
+        mask_not_found=True,
+    )
+    return record
+
+
+async def assert_tenant_record_scope(
+    user: dict[str, Any],
+    collection: Any,
+    record_id: str,
+    *,
+    id_field: str = "id",
+    client_field: str = "client_id",
+    site_field: str = "site_id",
+    operation: str | None = None,
+    request: Request | None = None,
+    resource_name: str = "Resource",
+) -> dict:
+    """Load a record inside both the tenant and client/site boundaries.
+
+    This is intentionally separate from :func:`assert_record_scope` so legacy
+    callers keep their established behaviour while new tenant-aware domains
+    cannot forget the platform partition on direct-ID operations.
+    """
+    record = await collection.find_one(
+        tenant_scoped_query(user, {id_field: str(record_id)}),
+        {"_id": 0},
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Resource not found")
     await assert_client_scope(
         user,
         record.get(client_field),

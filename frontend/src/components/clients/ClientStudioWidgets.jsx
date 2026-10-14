@@ -1,13 +1,16 @@
 /* AccountBriefingDialog.jsx + ExpansionEngineTile + RenewalForecastTile + ChurnRadar + Lifecycle + ActivityHeatmap + HoursBurndown + Achievements + ContractWatch + ScorecardCard + ComplianceCard + AccountPlanCanvas + StakeholderMap + RenewalWatchTable + MyAccountsTable
    One file for fast wiring. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sparkles, TrendingUp, RefreshCw, Trophy, Flag, AlertTriangle, Crown, FileDown, Shield, Wand2, ChevronRight, Calendar, Activity as ActivityIcon, Save, Plus, Trash2, Award, Gem } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { Loader2, Sparkles, TrendingUp, RefreshCw, Trophy, Flag, AlertTriangle, Crown, FileDown, Shield, Wand2, ChevronRight, Calendar, Activity as ActivityIcon, Save, Plus, Trash2, Award, Gem, Pencil, Mail, Phone, CircleAlert } from "lucide-react";
 import { healthColor, moneyShort, tierMeta } from "./clientStudioHelpers";
 import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 import { toast } from "sonner";
@@ -372,78 +375,163 @@ export function AccountPlanCanvas({ clientId }) {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [loadedClientId, setLoadedClientId] = useState(null);
+  const operation = useRef(false);
+  const currentClient = useRef(clientId);
+  currentClient.current = clientId;
   useEffect(() => {
     if (!clientId) return;
+    const controller = new AbortController();
     setLoading(true);
-    axios.get(`${API}/client-studio/${clientId}/account-plan`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => setPlan({ goals: [], risks: [], opportunities: [], people: [], next_actions: [], ...(r.data || {}) }))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [clientId, token]);
+    setLoadError(false);
+    setLoadedClientId(null);
+    setPlan({ goals: [], risks: [], opportunities: [], people: [], next_actions: [] });
+    axios.get(`${API}/client-studio/${clientId}/account-plan`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, timeout: 15000 })
+      .then(r => {
+        if (controller.signal.aborted) return;
+        setPlan({ goals: [], risks: [], opportunities: [], people: [], next_actions: [], ...(r.data || {}) });
+        setLoadedClientId(clientId);
+      })
+      .catch(() => { if (!controller.signal.aborted) setLoadError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [clientId, token, reload]);
 
   const save = async () => {
+    if (operation.current || loadedClientId !== clientId || loadError) return;
+    operation.current = true;
     setSaving(true);
     try {
       await axios.post(`${API}/client-studio/${clientId}/account-plan`, plan, { headers: { Authorization: `Bearer ${token}` } });
       toast.success("Account plan saved");
     } catch { toast.error("Failed to save"); }
-    finally { setSaving(false); }
+    finally { operation.current = false; setSaving(false); }
   };
   const generate = async () => {
+    if (operation.current || loadedClientId !== clientId || loadError) return;
+    operation.current = true;
     setGenerating(true);
     try {
       const r = await axios.post(`${API}/client-studio/${clientId}/account-plan/generate`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      if (currentClient.current !== clientId) return;
       setPlan({ goals: [], risks: [], opportunities: [], people: [], next_actions: [], ...(r.data || {}) });
-      toast.success("AI-drafted 90-day plan");
+      toast.success("Evidence-based starter plan saved");
     } catch { toast.error("Failed to generate"); }
-    finally { setGenerating(false); }
+    finally { operation.current = false; setGenerating(false); }
   };
   const updateList = (key, idx, value) => setPlan(p => ({ ...p, [key]: p[key].map((it, i) => i === idx ? value : it) }));
   const addItem = (key) => setPlan(p => ({ ...p, [key]: [...(p[key] || []), key === "opportunities" ? { title: "", value: 0 } : ""] }));
   const removeItem = (key, idx) => setPlan(p => ({ ...p, [key]: p[key].filter((_, i) => i !== idx) }));
 
-  if (loading) return <Card className="p-4 flex items-center gap-2 text-xs"><Loader2 className="w-3 h-3 animate-spin" />Loading plan…</Card>;
+  if (loadError) return <Card className="p-4 space-y-3" role="alert"><p>Account plan could not be loaded. Editing is disabled to protect the existing plan.</p><Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry loading plan</Button></Card>;
+  if (loading || loadedClientId !== clientId) return <Card className="p-4 flex items-center gap-2 text-xs"><Loader2 className="w-3 h-3 animate-spin" />Loading plan…</Card>;
   const sections = [
-    { key: "goals", label: "🎯 Goals", placeholder: "e.g. Grow ARR to $X by Q4" },
-    { key: "risks", label: "⚠️ Risks", placeholder: "e.g. Renewal at risk due to ticket volume" },
-    { key: "opportunities", label: "💡 Opportunities", placeholder: "{title, value}", isObj: true },
-    { key: "people", label: "👥 People", placeholder: "e.g. Sarah Chen — CFO, champion" },
-    { key: "next_actions", label: "🚀 Next Actions", placeholder: "e.g. Schedule QBR within 14 days" },
+    {
+      key: "goals",
+      label: "Business outcomes",
+      description: "What the client is trying to achieve with their technology.",
+      placeholder: "e.g. Enable a secure second site before Q4",
+      addLabel: "Add outcome",
+      accent: "text-cyan-200 border-cyan-400/20 bg-cyan-400/[0.04]",
+    },
+    {
+      key: "risks",
+      label: "Account risks",
+      description: "A recorded concern that needs ownership or review.",
+      placeholder: "e.g. Renewal discussion has not been scheduled",
+      addLabel: "Add risk",
+      accent: "text-amber-200 border-amber-400/20 bg-amber-400/[0.04]",
+    },
+    {
+      key: "opportunities",
+      label: "Commercial opportunities",
+      description: "Potential work that still needs validation, pricing or approval.",
+      placeholder: "Opportunity title",
+      addLabel: "Add opportunity",
+      isObj: true,
+      accent: "text-violet-200 border-violet-400/20 bg-violet-400/[0.04]",
+    },
+    {
+      key: "people",
+      label: "Relationship cues",
+      description: "Useful context for the account team; map people in Stakeholder Map.",
+      placeholder: "e.g. Finance lead prefers a concise monthly review",
+      addLabel: "Add cue",
+      accent: "text-emerald-200 border-emerald-400/20 bg-emerald-400/[0.04]",
+    },
+    {
+      key: "next_actions",
+      label: "Next commitments",
+      description: "A clear promise or follow-through item. Assign it in Follow-ups.",
+      placeholder: "e.g. Confirm the QBR attendee list by Friday",
+      addLabel: "Add commitment",
+      accent: "text-sky-200 border-sky-400/20 bg-sky-400/[0.04]",
+    },
   ];
+  const populatedSections = sections.filter((section) => (plan[section.key] || []).length > 0).length;
+  const hasPlanContent = populatedSections > 0;
+  const updatedAt = plan.updated_at && !Number.isNaN(new Date(plan.updated_at).getTime())
+    ? new Date(plan.updated_at).toLocaleString()
+    : null;
   return (
-    <Card className="p-4 bg-zinc-900/40 border-zinc-800/60" data-testid="account-plan-canvas">
-      <div className="flex items-center gap-2 mb-3">
-        <Flag className="w-3.5 h-3.5 text-violet-300" />
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Strategic Account Plan</p>
-        <Button size="sm" variant="outline" className="ml-auto h-7 text-[11px]" onClick={generate} disabled={generating} data-testid="account-plan-ai-generate">
-          {generating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1" />}AI-generate
-        </Button>
-        <Button size="sm" className="h-7 text-[11px] bg-violet-600 hover:bg-violet-500" onClick={save} disabled={saving} data-testid="account-plan-save">
-          {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}Save
-        </Button>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {sections.map(s => (
-          <div key={s.key} className="bg-zinc-950/40 rounded p-2.5" data-testid={`plan-section-${s.key}`}>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-400 mb-1.5">{s.label}</p>
-            <div className="space-y-1.5">
-              {(plan[s.key] || []).map((it, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  {s.isObj ? (
-                    <>
-                      <Input value={it?.title || ""} onChange={e => updateList(s.key, i, { ...it, title: e.target.value })} placeholder="Opportunity title" className="text-xs h-7" />
-                      <Input type="number" value={it?.value ?? ""} onChange={e => updateList(s.key, i, { ...it, value: e.target.value === "" ? null : Number(e.target.value) })} className="text-xs h-7 w-24" placeholder="Rate card" />
-                    </>
-                  ) : (
-                    <Input value={it || ""} onChange={e => updateList(s.key, i, e.target.value)} placeholder={s.placeholder} className="text-xs h-7" />
-                  )}
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-red-300" onClick={() => removeItem(s.key, i)}><Trash2 className="w-3 h-3" /></Button>
-                </div>
-              ))}
-              <Button variant="ghost" size="sm" className="h-6 text-[10px] text-violet-300" onClick={() => addItem(s.key)}><Plus className="w-3 h-3 mr-1" />Add</Button>
+    <Card className="overflow-hidden border-violet-400/20 bg-[linear-gradient(145deg,rgba(39,24,62,0.34),rgba(9,12,20,0.66)_55%,rgba(8,20,29,0.48))] shadow-[0_14px_42px_rgba(0,0,0,0.18)]" data-testid="account-plan-canvas">
+      <div className="border-b border-white/[0.07] px-4 py-4 sm:px-5">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-400/10 text-violet-200"><Flag className="h-4 w-4" /></span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-violet-200">Client success workspace</p>
+              <h3 className="mt-1 text-sm font-semibold text-zinc-100">Strategic account plan</h3>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-400">Keep account context deliberate: outcomes, risks, commercial work, relationship cues and the next commitments.</p>
             </div>
           </div>
-        ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" className="h-8 border-violet-400/20 bg-violet-400/[0.04] text-[11px] text-violet-100 hover:bg-violet-400/[0.1]" onClick={generate} disabled={generating || saving || hasPlanContent} data-testid="account-plan-ai-generate" title="Starter plans are available only for an empty plan, so recorded work is never overwritten.">
+              {generating ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wand2 className="mr-1.5 h-3.5 w-3.5" />}Use evidence starter
+            </Button>
+            <Button size="sm" className="h-8 bg-violet-600 text-[11px] hover:bg-violet-500" onClick={save} disabled={saving || generating} data-testid="account-plan-save">
+              {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}Save changes
+            </Button>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-black/15 px-3 py-2.5">
+          <div className="min-w-[116px]">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-zinc-500">Plan coverage</p>
+            <p className="mt-0.5 text-xs font-medium text-zinc-200">{populatedSections} of {sections.length} areas recorded</p>
+          </div>
+          <div className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-zinc-800/90"><div className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-300 transition-all duration-500" style={{ width: `${(populatedSections / sections.length) * 100}%` }} /></div>
+          <p className="text-[10px] text-zinc-500">{updatedAt ? `Last saved ${updatedAt}` : "No plan has been saved yet"}</p>
+        </div>
+      </div>
+      <div className="p-4 sm:p-5">
+        {!hasPlanContent && <div className="mb-4 rounded-xl border border-dashed border-violet-400/25 bg-violet-400/[0.04] p-3.5" data-testid="account-plan-empty-state"><div className="flex gap-3"><Wand2 className="mt-0.5 h-4 w-4 shrink-0 text-violet-200" /><div><p className="text-xs font-semibold text-zinc-100">Start from evidence or build deliberately</p><p className="mt-1 text-[11px] leading-5 text-zinc-400">The starter uses recorded service evidence only. You can instead add exactly the context your account team needs—nothing is inferred or sent to the client.</p></div></div></div>}
+        <fieldset disabled={saving || generating} className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {sections.map((section) => (
+            <section key={section.key} className="rounded-xl border border-white/[0.07] bg-black/15 p-3.5 transition-colors hover:border-white/[0.12]" data-testid={`plan-section-${section.key}`}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className={`inline-flex rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.13em] ${section.accent}`}>{section.label}</div>
+                  <p className="mt-2 text-[11px] leading-4 text-zinc-500">{section.description}</p>
+                </div>
+                <span className="shrink-0 rounded-full border border-white/[0.08] bg-black/10 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500">{(plan[section.key] || []).length}</span>
+              </div>
+              <div className="space-y-2">
+                {(plan[section.key] || []).map((item, index) => (
+                  <div key={index} className={section.isObj ? "grid grid-cols-[minmax(0,1fr)_112px_auto] items-center gap-2" : "flex items-center gap-2"}>
+                    {section.isObj ? <>
+                      <Input aria-label={`Opportunity ${index + 1} title`} value={item?.title || ""} onChange={(event) => updateList(section.key, index, { ...item, title: event.target.value })} placeholder={section.placeholder} className="h-8 text-xs" />
+                      <Input aria-label={`Opportunity ${index + 1} estimated value`} type="number" min="0" value={item?.value ?? ""} onChange={(event) => updateList(section.key, index, { ...item, value: event.target.value === "" ? null : Number(event.target.value) })} className="h-8 text-xs" placeholder="Est. value" />
+                    </> : <Input aria-label={`${section.label} item ${index + 1}`} value={item || ""} onChange={(event) => updateList(section.key, index, event.target.value)} placeholder={section.placeholder} className="h-8 text-xs" />}
+                    <Button variant="ghost" size="icon" aria-label={`Remove ${section.label.toLowerCase()} item ${index + 1}`} className="h-8 w-8 shrink-0 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-200" onClick={() => removeItem(section.key, index)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                  </div>
+                ))}
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-violet-200 hover:bg-violet-400/[0.08] hover:text-violet-100" onClick={() => addItem(section.key)}><Plus className="mr-1 h-3 w-3" />{section.addLabel}</Button>
+              </div>
+            </section>
+          ))}
+        </fieldset>
       </div>
     </Card>
   );
@@ -452,24 +540,83 @@ export function AccountPlanCanvas({ clientId }) {
 export function StakeholderMapCard({ clientId }) {
   const { token } = useAuth();
   const [list, setList] = useState([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: null });
-  const reload = useCallback(() => axios.get(`${API}/client-studio/${clientId}/stakeholders`, { headers: { Authorization: `Bearer ${token}` } })
-    .then(r => setList(r.data || [])).catch(() => setList([])), [clientId, token]);
-  useEffect(() => { if (clientId) reload(); }, [clientId, reload]);
-  const add = async () => {
-    if (!form.name.trim()) return;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [editor, setEditor] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: "", title: "", email: "", phone: "", role: "influencer", relationship_strength: 50, sentiment: "", notes: "" });
+  const loadRequest = useRef(0);
+  const reload = useCallback(async () => {
+    if (!clientId) return;
+    const request = ++loadRequest.current;
+    setLoading(true);
+    setLoadError(false);
     try {
-      await axios.post(`${API}/client-studio/${clientId}/stakeholders`, form, { headers: { Authorization: `Bearer ${token}` } });
-      setForm({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: null });
-      setShowAdd(false);
-      reload();
-      toast.success("Stakeholder added");
-    } catch { toast.error("Failed"); }
+      const response = await axios.get(`${API}/client-studio/${clientId}/stakeholders`, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+      if (request !== loadRequest.current) return;
+      setList(Array.isArray(response.data) ? response.data : []);
+    } catch {
+      if (request === loadRequest.current) setLoadError(true);
+    } finally {
+      if (request === loadRequest.current) setLoading(false);
+    }
+  }, [clientId, token]);
+  useEffect(() => { reload(); }, [reload]);
+  const resetForm = () => setForm({ name: "", title: "", email: "", phone: "", role: "influencer", relationship_strength: 50, sentiment: "", notes: "" });
+  const openCreate = () => { resetForm(); setEditor({ mode: "create" }); };
+  const openEdit = (stakeholder) => {
+    setForm({
+      name: stakeholder.name || "",
+      title: stakeholder.title || "",
+      email: stakeholder.email || "",
+      phone: stakeholder.phone || "",
+      role: stakeholder.role || "influencer",
+      relationship_strength: Number.isFinite(Number(stakeholder.relationship_strength)) ? Number(stakeholder.relationship_strength) : 50,
+      sentiment: stakeholder.sentiment == null ? "" : String(stakeholder.sentiment),
+      notes: stakeholder.notes || "",
+    });
+    setEditor(stakeholder);
   };
-  const remove = async (id) => {
-    await axios.delete(`${API}/client-studio/stakeholders/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-    reload();
+  const save = async () => {
+    if (saving) return;
+    if (!form.name.trim()) return toast.error("Stakeholder name is required");
+    const payload = {
+      name: form.name.trim(),
+      title: form.title.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim(),
+      role: form.role,
+      relationship_strength: Math.max(0, Math.min(100, Number(form.relationship_strength) || 0)),
+      sentiment: form.sentiment === "" ? null : Number(form.sentiment),
+      notes: form.notes.trim(),
+    };
+    setSaving(true);
+    try {
+      if (editor?.id) await axios.put(`${API}/client-studio/stakeholders/${editor.id}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      else await axios.post(`${API}/client-studio/${clientId}/stakeholders`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      setEditor(null);
+      await reload();
+      toast.success(editor?.id ? "Stakeholder updated" : "Stakeholder added");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not save stakeholder");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async () => {
+    if (!deleting?.id || saving) return;
+    setSaving(true);
+    try {
+      await axios.delete(`${API}/client-studio/stakeholders/${deleting.id}`, { headers: { Authorization: `Bearer ${token}` } });
+      setDeleting(null);
+      await reload();
+      toast.success("Stakeholder removed");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not remove stakeholder");
+    } finally {
+      setSaving(false);
+    }
   };
   const ROLE_COLOR = {
     decision_maker: "bg-violet-500/20 text-violet-200 border-violet-500/40",
@@ -478,57 +625,64 @@ export function StakeholderMapCard({ clientId }) {
     blocker: "bg-red-500/20 text-red-200 border-red-500/40",
     gatekeeper: "bg-amber-500/20 text-amber-200 border-amber-500/40",
   };
+  const relationship = (value) => Math.max(0, Math.min(100, Number.isFinite(Number(value)) ? Number(value) : 50));
+  const outlook = (value) => {
+    if (!Number.isFinite(Number(value))) return { label: "Outlook not recorded", className: "border-zinc-700 bg-zinc-800/50 text-zinc-400" };
+    if (Number(value) >= 67) return { label: "Positive outlook", className: "border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-200" };
+    if (Number(value) >= 34) return { label: "Neutral outlook", className: "border-sky-400/25 bg-sky-400/[0.08] text-sky-200" };
+    return { label: "At-risk outlook", className: "border-amber-400/25 bg-amber-400/[0.08] text-amber-200" };
+  };
+  const roleLabel = (role) => String(role || "influencer").replaceAll("_", " ");
+  const isEditing = Boolean(editor?.id);
   return (
-    <Card className="p-3 bg-zinc-900/40 border-zinc-800/60" data-testid="stakeholder-map-card">
-      <div className="flex items-center gap-2 mb-2">
-        <Crown className="w-3.5 h-3.5 text-amber-300" />
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Stakeholder Map</p>
-        <Button size="sm" variant="ghost" className="ml-auto h-6 text-[10px] text-violet-300" onClick={() => setShowAdd(true)} data-testid="stakeholder-add-btn"><Plus className="w-3 h-3 mr-0.5" />Add</Button>
+    <Card className="overflow-hidden border-amber-400/20 bg-[linear-gradient(145deg,rgba(47,34,20,0.32),rgba(9,12,20,0.66)_55%,rgba(10,24,27,0.42))] shadow-[0_14px_42px_rgba(0,0,0,0.16)]" data-testid="stakeholder-map-card">
+      <div className="flex flex-wrap items-start gap-3 border-b border-white/[0.07] px-4 py-4">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/[0.09] text-amber-200"><Crown className="h-4 w-4" /></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-amber-200">Relationship intelligence</p><span className="rounded-full border border-white/[0.08] bg-black/10 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">{list.length}</span></div>
+          <h3 className="mt-1 text-sm font-semibold text-zinc-100">Stakeholder map</h3>
+          <p className="mt-1 text-[11px] leading-5 text-zinc-400">Map the people who shape a renewal, escalation, business outcome or buying decision.</p>
+        </div>
+        <Button size="sm" className="h-8 bg-amber-500/90 text-[11px] text-zinc-950 hover:bg-amber-400" onClick={openCreate} data-testid="stakeholder-add-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />Add stakeholder</Button>
       </div>
-      <div className="space-y-2">
-        {list.length === 0 && <p className="text-[11px] text-zinc-500">No stakeholders mapped yet.</p>}
-        {list.map(s => (
-          <div key={s.id} className="bg-zinc-950/40 rounded p-2 flex items-center gap-2" data-testid={`stakeholder-${s.id}`}>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-semibold text-zinc-100 truncate">{s.name}</p>
-                <span className={`text-[9px] px-1 py-0.5 rounded border ${ROLE_COLOR[s.role] || ROLE_COLOR.influencer}`}>{(s.role || "").replace('_', ' ')}</span>
+      <div className="p-4">
+        {loading ? <div className="flex items-center gap-2 py-7 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading relationship context</div> : null}
+        {loadError ? <div className="rounded-xl border border-rose-400/20 bg-rose-400/[0.05] p-3" role="alert"><div className="flex items-start gap-2"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-200" /><div className="min-w-0"><p className="text-xs font-semibold text-rose-100">Stakeholder map could not be loaded</p><p className="mt-1 text-[11px] leading-4 text-zinc-400">Nothing has been changed. Retry before editing relationship information.</p><Button variant="outline" size="sm" className="mt-3 h-7 text-[10px]" onClick={reload}>Retry</Button></div></div></div> : null}
+        {!loading && !loadError && list.length === 0 ? <div className="rounded-xl border border-dashed border-amber-400/25 bg-amber-400/[0.035] p-4 text-center"><Crown className="mx-auto h-5 w-5 text-amber-200" /><p className="mt-2 text-xs font-semibold text-zinc-100">No stakeholder context recorded</p><p className="mx-auto mt-1 max-w-sm text-[11px] leading-5 text-zinc-400">Keep the operational contact directory in People. Use this map for the relationship context that helps a technician or account manager make the right next move.</p><Button variant="outline" size="sm" className="mt-3 h-8 border-amber-400/20 text-[11px] text-amber-100 hover:bg-amber-400/[0.08]" onClick={openCreate}><Plus className="mr-1.5 h-3.5 w-3.5" />Map first stakeholder</Button></div> : null}
+        {!loading && !loadError && list.length > 0 ? <div className="space-y-2.5">{list.map((stakeholder) => {
+          const strength = relationship(stakeholder.relationship_strength);
+          const sentiment = outlook(stakeholder.sentiment);
+          return <article key={stakeholder.id} className="group rounded-xl border border-white/[0.07] bg-black/15 p-3 transition hover:border-amber-400/25 hover:bg-amber-400/[0.035]" data-testid={`stakeholder-${stakeholder.id}`}>
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amber-400/20 bg-amber-400/[0.08] text-sm font-semibold text-amber-100">{String(stakeholder.name || "?").slice(0, 1).toUpperCase()}</div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5"><p className="min-w-0 truncate text-xs font-semibold text-zinc-100">{stakeholder.name}</p><span className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] ${ROLE_COLOR[stakeholder.role] || ROLE_COLOR.influencer}`}>{roleLabel(stakeholder.role)}</span><span className={`rounded border px-1.5 py-0.5 text-[9px] ${sentiment.className}`}>{sentiment.label}</span></div>
+                {(stakeholder.title || stakeholder.email || stakeholder.phone) ? <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] text-zinc-500"><span>{stakeholder.title || "Title not recorded"}</span>{stakeholder.email ? <span className="truncate" data-sensitive="email">{stakeholder.email}</span> : null}{stakeholder.phone ? <span data-sensitive="phone">{stakeholder.phone}</span> : null}</div> : <p className="mt-1 text-[10px] text-zinc-500">Contact channel not recorded</p>}
+                <div className="mt-3 flex items-center gap-2"><span className="w-20 shrink-0 text-[9px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Relationship</span><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800"><div className="h-full rounded-full bg-gradient-to-r from-amber-400 via-emerald-400 to-cyan-300 transition-all duration-500" style={{ width: `${strength}%` }} /></div><span className="w-7 text-right font-mono text-[10px] text-zinc-400">{strength}</span></div>
+                {stakeholder.notes ? <p className="mt-3 border-l border-amber-400/25 pl-2.5 text-[11px] leading-4 text-zinc-400">{stakeholder.notes}</p> : null}
               </div>
-              <p className="text-[10px] text-zinc-500 truncate">{s.title || ""}{s.email ? ` · ${s.email}` : ""}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-[9px] text-zinc-500 w-12">Strength</span>
-                <div className="h-1 flex-1 rounded bg-zinc-800 overflow-hidden">
-                  <div className="h-full bg-emerald-500" style={{ width: `${s.relationship_strength || 50}%` }} />
-                </div>
-                <span className="text-[9px] font-mono text-zinc-400 w-6 text-right">{s.relationship_strength || 50}</span>
-              </div>
+              <div className="flex shrink-0 items-center gap-0.5"><Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:bg-amber-400/[0.08] hover:text-amber-100" onClick={() => openEdit(stakeholder)} aria-label={`Edit ${stakeholder.name}`}><Pencil className="h-3.5 w-3.5" /></Button>{stakeholder.email ? <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:bg-cyan-400/[0.08] hover:text-cyan-100" title={`Email ${stakeholder.name}`}><a href={`mailto:${stakeholder.email}`} aria-label={`Email ${stakeholder.name}`}><Mail className="h-3.5 w-3.5" /></a></Button> : null}{stakeholder.phone ? <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:bg-cyan-400/[0.08] hover:text-cyan-100" title={`Call ${stakeholder.name}`}><a href={`tel:${stakeholder.phone}`} aria-label={`Call ${stakeholder.name}`}><Phone className="h-3.5 w-3.5" /></a></Button> : null}<Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-500 opacity-100 hover:bg-rose-400/[0.08] hover:text-rose-200 sm:opacity-0 sm:group-hover:opacity-100" onClick={() => setDeleting(stakeholder)} aria-label={`Remove ${stakeholder.name}`}><Trash2 className="h-3.5 w-3.5" /></Button></div>
             </div>
-            <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-500 hover:text-red-300" onClick={() => remove(s.id)}><Trash2 className="w-3 h-3" /></Button>
-          </div>
-        ))}
+          </article>;
+        })}</div> : null}
       </div>
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Stakeholder</DialogTitle></DialogHeader>
-          <div className="space-y-2">
-            <Input placeholder="Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} data-testid="stakeholder-name-input" />
-            <Input placeholder="Title" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-            <Input placeholder="Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-            <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))} className="w-full p-2 rounded bg-zinc-900 border border-zinc-800 text-xs">
-              <option value="decision_maker">Decision Maker</option>
-              <option value="champion">Champion</option>
-              <option value="influencer">Influencer</option>
-              <option value="blocker">Blocker</option>
-              <option value="gatekeeper">Gatekeeper</option>
-            </select>
-            <div className="text-[10px] text-zinc-400">Relationship strength: {form.relationship_strength}</div>
-            <input type="range" min="0" max="100" value={form.relationship_strength} onChange={e => setForm(f => ({ ...f, relationship_strength: Number(e.target.value) }))} className="w-full" />
+      <Dialog open={Boolean(editor)} onOpenChange={(open) => !open && !saving && setEditor(null)}>
+        <NexusWorkflowDialog eyebrow="Client success · relationship context" title={isEditing ? "Edit stakeholder" : "Map a stakeholder"} description="Capture the people who influence outcomes without duplicating the operational contact directory. These notes stay internal to your Nexus team." icon={Crown} tone="amber" className="max-w-2xl" contentClassName="space-y-5" data-testid="stakeholder-editor" footer={<><Button variant="outline" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Crown className="mr-1.5 h-4 w-4" />}{isEditing ? "Save stakeholder" : "Add stakeholder"}</Button></>}>
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-3 py-2.5 text-[11px] leading-5 text-zinc-400">Use <span className="font-medium text-zinc-200">People</span> for day-to-day contacts. Map only the relationship context that helps account work: decision makers, champions, influencers, blockers and gatekeepers.</div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2 sm:col-span-2"><Label htmlFor="stakeholder-name">Name</Label><Input id="stakeholder-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Taylor Morgan" autoFocus data-testid="stakeholder-name-input" /></div>
+            <div className="grid gap-2"><Label htmlFor="stakeholder-title">Title</Label><Input id="stakeholder-title" value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder="e.g. Chief Financial Officer" /></div>
+            <div className="grid gap-2"><Label htmlFor="stakeholder-role">Relationship role</Label><select id="stakeholder-role" value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none transition focus-visible:ring-1 focus-visible:ring-ring"><option value="decision_maker">Decision maker</option><option value="champion">Champion</option><option value="influencer">Influencer</option><option value="blocker">Blocker</option><option value="gatekeeper">Gatekeeper</option></select></div>
+            <div className="grid gap-2"><Label htmlFor="stakeholder-email">Email</Label><Input id="stakeholder-email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="name@client.example" /></div>
+            <div className="grid gap-2"><Label htmlFor="stakeholder-phone">Direct number</Label><Input id="stakeholder-phone" type="tel" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+61 …" /></div>
+            <div className="grid gap-2 sm:col-span-2"><div className="flex items-center justify-between gap-3"><Label htmlFor="stakeholder-strength">Manual relationship strength</Label><span className="font-mono text-xs text-amber-200">{form.relationship_strength}/100</span></div><input id="stakeholder-strength" type="range" min="0" max="100" value={form.relationship_strength} onChange={(event) => setForm((current) => ({ ...current, relationship_strength: Number(event.target.value) }))} className="accent-amber-400" /><p className="text-[11px] leading-4 text-muted-foreground">This is a deliberate internal assessment—not a client score or an inferred sentiment.</p></div>
+            <div className="grid gap-2 sm:col-span-2"><Label htmlFor="stakeholder-outlook">Manual relationship outlook</Label><select id="stakeholder-outlook" value={form.sentiment} onChange={(event) => setForm((current) => ({ ...current, sentiment: event.target.value }))} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm outline-none transition focus-visible:ring-1 focus-visible:ring-ring"><option value="">Not recorded</option><option value="75">Positive</option><option value="50">Neutral</option><option value="25">At risk</option></select></div>
+            <div className="grid gap-2 sm:col-span-2"><Label htmlFor="stakeholder-notes">Internal relationship context</Label><Textarea id="stakeholder-notes" rows={4} value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="What should the next technician or account manager know before they engage this person?" /></div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button onClick={add} className="bg-violet-600 hover:bg-violet-500" data-testid="stakeholder-add-confirm">Add</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
+      </Dialog>
+      <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && !saving && setDeleting(null)}>
+        <NexusWorkflowDialog eyebrow="Client success · deliberate removal" title={`Remove ${deleting?.name || "stakeholder"}?`} description="This removes the relationship record from Nexus. It does not delete a separate People directory contact or historical audit entry." icon={Trash2} tone="rose" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setDeleting(null)} disabled={saving}>Keep stakeholder</Button><Button variant="destructive" onClick={remove} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}Remove stakeholder</Button></>}><p className="text-sm text-muted-foreground">Only remove a record when the relationship context is no longer useful or was recorded in error.</p></NexusWorkflowDialog>
       </Dialog>
     </Card>
   );

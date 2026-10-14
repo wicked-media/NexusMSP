@@ -22,4 +22,4 @@ async def get_client_timeline(client_id: str, current_user: dict = Depends(get_c
         operation="client.timeline.read",
         resource_name="Client",
     )
-    return await build_client_timeline(client_id, limit=300)
+    return await build_client_timeline(client_id, actor=current_user, limit=300)

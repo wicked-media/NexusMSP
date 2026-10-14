@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone
-import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query
 
 router = APIRouter()
 
@@ -15,15 +14,44 @@ def _is_response(survey: dict) -> bool:
 
 @router.get("/csat/surveys")
 async def get_surveys(current_user: dict = Depends(get_current_user)):
-    """Get all CSAT survey responses."""
-    surveys = await db.csat_surveys.find({}, {"_id": 0}).sort("responded_at", -1).to_list(500)
-    return [{**survey, "submitted_at": survey.get("responded_at") or survey.get("submitted_at")} for survey in surveys if _is_response(survey)][:200]
+    """Get real CSAT responses inside the technician's permitted client scope."""
+    surveys = await db.csat_surveys.find(
+        scoped_query(current_user),
+        {
+            "_id": 0,
+            "id": 1,
+            "ticket_id": 1,
+            "ticket_number": 1,
+            "client_id": 1,
+            "client_name": 1,
+            "tech_id": 1,
+            "tech_name": 1,
+            "score": 1,
+            "status": 1,
+            "comment": 1,
+            "feedback": 1,
+            "responded_at": 1,
+            "submitted_at": 1,
+        },
+    ).sort("responded_at", -1).to_list(500)
+    return [
+        {
+            **survey,
+            "submitted_at": survey.get("responded_at") or survey.get("submitted_at"),
+            # Older seeded records used ``comment``; the ticket-linked public
+            # response flow records the equivalent field as ``feedback``.
+            # Normalize only at the API boundary so both remain auditable.
+            "comment": survey.get("comment") or survey.get("feedback") or "",
+        }
+        for survey in surveys
+        if _is_response(survey)
+    ][:200]
 
 
 @router.get("/csat/dashboard")
 async def csat_dashboard(current_user: dict = Depends(get_current_user)):
     """CSAT dashboard with trends."""
-    surveys = await db.csat_surveys.find({}, {"_id": 0}).to_list(1000)
+    surveys = await db.csat_surveys.find(scoped_query(current_user), {"_id": 0}).to_list(1000)
     surveys = [survey for survey in surveys if _is_response(survey)]
     if not surveys:
         return {"avg_score": 0, "total_responses": 0, "by_tech": [], "by_client": [], "trend": [], "distribution": {}}

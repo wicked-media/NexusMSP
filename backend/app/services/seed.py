@@ -1,8 +1,17 @@
+import base64
+import logging
 from datetime import datetime, timezone, timedelta
+from io import BytesIO
+
+import barcode
+from barcode.writer import SVGWriter
+
 from app.database import db
 from app.auth import hash_password
 from app.models import *
 import random; random = random.SystemRandom()
+
+logger = logging.getLogger(__name__)
 
 PERMISSION_PRESETS = {
     "L1 Technician": {
@@ -101,6 +110,20 @@ PERMISSION_PRESETS = {
         "agent_commands": {"view": False, "execute": False},
     },
 }
+
+
+def generate_barcode_svg_data(code: str, barcode_type: str = "code128") -> str:
+    """Generate a barcode image for seeded catalogue records without route coupling."""
+    try:
+        barcode_class = barcode.get_barcode_class(barcode_type.lower())
+        barcode_value = barcode_class(code, writer=SVGWriter())
+        output = BytesIO()
+        barcode_value.write(output)
+        encoded = base64.b64encode(output.getvalue()).decode()
+        return f"data:image/svg+xml;base64,{encoded}"
+    except Exception:
+        logger.exception("Unable to generate barcode for seeded product")
+        return ""
 
 
 async def seed_data():
@@ -237,11 +260,11 @@ async def _seed_core_data():
         severity = "info" if evt_type in ["agent_check_in", "login", "logout", "backup_completed"] else random.choice(["info", "warning", "error"])
         messages = {
             "agent_check_in": "Agent checked in successfully",
-            "login": f"User logged in via RDP",
+            "login": "User logged in via RDP",
             "logout": "User session ended",
-            "software_installed": f"Software package installed",
-            "patch_applied": f"Windows Update applied successfully",
-            "alert_triggered": f"High resource usage detected",
+            "software_installed": "Software package installed",
+            "patch_applied": "Windows Update applied successfully",
+            "alert_triggered": "High resource usage detected",
             "reboot": "System rebooted",
             "service_restart": "Service 'Spooler' restarted",
             "backup_completed": "Backup completed successfully (12.4 GB)",

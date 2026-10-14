@@ -22,7 +22,7 @@
     "backend": "100% (33/33 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Mock data auto-seeded on first request: 7 tenants, 56 users, 7 GDAP relationships, 15 standards, 8 CA templates, 5 scripted alerts. All tagged with source='m365cc' to avoid collision with legacy CIPP integration.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
@@ -39,7 +39,7 @@
       "standards_update": "PUT /api/m365/standards/{id} toggles enabled and updates actions",
       "standards_run": "POST /api/m365/standards/{id}/run returns {run:{summary:{compliant,drifted,remediated}, results:[per-tenant]}}",
       "standards_history": "GET /api/m365/standards/{id}/runs returns history",
-      "bpa_report": "GET /api/m365/bpa-report returns matrix of standards × tenants",
+      "bpa_report": "GET /api/m365/bpa-report returns matrix of standards Ã— tenants",
       "gdap": "GET /api/m365/gdap returns 7 relationships with expires_in_days",
       "gdap_extend": "POST /api/m365/gdap/{id}/extend bumps expires_at",
       "role_templates": "GET /api/m365/gdap/role-templates returns 4 templates (Tier 1/2/3 + Billing)",

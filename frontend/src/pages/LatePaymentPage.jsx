@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { DollarSign, AlertTriangle, Clock, Send, Loader2, Mail, History, TrendingDown } from "lucide-react";
+import { buildLatePaymentReminderPayload } from "@/lib/latePaymentPayloads";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 export default function LatePaymentPage() {
   const { token } = useAuth();
@@ -21,7 +22,6 @@ export default function LatePaymentPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sendDialog, setSendDialog] = useState(null);
-  const [sendEmail, setSendEmail] = useState("");
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -38,20 +38,20 @@ export default function LatePaymentPage() {
   }, [token]);
 
   const sendReminder = async () => {
-    if (!sendDialog || !sendEmail) return;
+    if (!sendDialog) return;
+    const inv = sendDialog.invoices?.[0] || {};
+    if (!inv.id) {
+      toast.error("This invoice needs to be refreshed before Nexus can send a reminder.");
+      return;
+    }
     setSending(true);
     try {
-      const inv = sendDialog.invoices?.[0] || {};
-      await axios.post(`${API}/late-payment/send-reminder`, {
-        client_name: sendDialog.client_name,
-        invoice_number: inv.number || "",
-        amount: sendDialog.outstanding_amount,
-        due_date: inv.due_date || "",
-        days_late: sendDialog.max_days_overdue || inv.days_overdue || 0,
-        to_email: sendEmail,
-        portal_url: `${window.location.origin}/portal-login`,
-      }, { headers });
-      toast.success(`Reminder sent to ${sendEmail}`);
+      const response = await axios.post(
+        `${API}/late-payment/send-reminder`,
+        buildLatePaymentReminderPayload(inv.id),
+        { headers },
+      );
+      toast.success(response.data?.message || "Payment reminder processed using the verified billing contact.");
       setSendDialog(null);
       // Refresh history
       const hRes = await axios.get(`${API}/late-payment/reminder-history`, { headers }).catch(() => ({ data: [] }));
@@ -67,13 +67,12 @@ export default function LatePaymentPage() {
 
   return (
     <div className="space-y-5" data-testid="late-payment-page">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Late Payment Manager</h1>
-        <p className="text-sm text-muted-foreground">Track overdue invoices, predict late payers, and send automated reminders</p>
-      </div>
+      <OperationalPageHeader eyebrow="Revenue operations · payment follow-up" title="Late Payment Manager" description="Prioritise overdue invoices, explain late-payment risk and send auditable reminders." icon={Clock} tone="amber" signal={(ps.high_risk || os.count) > 0 ? "attention" : "ready"} />
+
+      <BillingWorkspaceNav />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Card className="border-red-500/20"><CardContent className="pt-4 pb-3"><AlertTriangle className="w-5 h-5 text-red-400 mb-1" /><p className="text-2xl font-bold text-red-400">{ps.high_risk || 0}</p><p className="text-[11px] text-muted-foreground">High Risk Clients</p></CardContent></Card>
         <Card className="border-orange-500/20"><CardContent className="pt-4 pb-3"><Clock className="w-5 h-5 text-orange-400 mb-1" /><p className="text-2xl font-bold text-orange-400">{ps.medium_risk || 0}</p><p className="text-[11px] text-muted-foreground">Medium Risk</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><DollarSign className="w-5 h-5 text-amber-400 mb-1" /><p className="text-2xl font-bold">${(ps.total_at_risk || 0).toLocaleString()}</p><p className="text-[11px] text-muted-foreground">At Risk Amount</p></CardContent></Card>
@@ -110,7 +109,7 @@ export default function LatePaymentPage() {
                     <p className="text-xs text-muted-foreground mt-0.5">{p.recommended_action}</p>
                   </div>
                   {p.risk !== "none" && (
-                    <Button size="sm" variant={p.risk === "high" ? "default" : "outline"} onClick={() => { setSendDialog(p); setSendEmail(""); }} data-testid={`send-reminder-${p.id}`}>
+                    <Button size="sm" variant={p.risk === "high" ? "default" : "outline"} onClick={() => setSendDialog(p)} data-testid={`send-reminder-${p.id}`}>
                       <Send className="w-3 h-3 mr-1" />Send Reminder
                     </Button>
                   )}
@@ -134,7 +133,7 @@ export default function LatePaymentPage() {
                   <TableCell className="text-sm">{inv.due_date}</TableCell>
                   <TableCell className="text-right font-mono text-amber-400">${inv.balance_due?.toLocaleString()}</TableCell>
                   <TableCell className="text-right"><Badge variant="destructive" className="text-[10px]">{inv.days_overdue}d</Badge></TableCell>
-                  <TableCell><Button size="sm" variant="ghost" onClick={() => { setSendDialog({ client_name: inv.client_name, outstanding_amount: inv.balance_due, max_days_overdue: inv.days_overdue, invoices: [{ number: inv.invoice_number, due_date: inv.due_date, days_overdue: inv.days_overdue }] }); setSendEmail(""); }}><Send className="w-3 h-3" /></Button></TableCell>
+                  <TableCell><Button size="sm" variant="ghost" onClick={() => setSendDialog({ client_name: inv.client_name, outstanding_amount: inv.balance_due, max_days_overdue: inv.days_overdue, invoices: [{ id: inv.id, number: inv.invoice_number, due_date: inv.due_date, days_overdue: inv.days_overdue }] })}><Send className="w-3 h-3" /></Button></TableCell>
                 </TableRow>
               ))}
               {(!overdue?.overdue?.length) && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No overdue invoices!</TableCell></TableRow>}
@@ -167,24 +166,23 @@ export default function LatePaymentPage() {
 
       {/* Send Reminder Dialog */}
       <Dialog open={!!sendDialog} onOpenChange={v => !v && setSendDialog(null)}>
-        <DialogContent aria-describedby="send-reminder-desc">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(620px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="send-reminder-desc" data-testid="late-payment-reminder-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5" />Send Payment Reminder</DialogTitle>
-            <DialogDescription id="send-reminder-desc">Send a branded email reminder to {sendDialog?.client_name}</DialogDescription>
+            <DialogDescription id="send-reminder-desc">Nexus verifies the invoice and uses the customer&apos;s approved billing contact before delivery.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <div className="p-3 rounded-lg bg-muted/30 border">
               <p className="font-medium">{sendDialog?.client_name}</p>
               <p className="text-sm text-muted-foreground">Outstanding: ${sendDialog?.outstanding_amount?.toLocaleString()} &middot; {sendDialog?.max_days_overdue || 0} days overdue</p>
             </div>
-            <div>
-              <Label className="text-xs">Recipient Email</Label>
-              <Input type="email" value={sendEmail} onChange={e => setSendEmail(e.target.value)} placeholder="accounts@client.com" data-testid="reminder-email-input" />
+            <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-3 text-sm text-muted-foreground" data-testid="canonical-recipient-notice">
+              The recipient, amount due and payment link are verified from Nexus billing records when you send this reminder.
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button variant="ghost" onClick={() => setSendDialog(null)}>Cancel</Button>
-            <Button onClick={sendReminder} disabled={sending || !sendEmail.trim()} data-testid="confirm-send-reminder">
+            <Button onClick={sendReminder} disabled={sending} data-testid="confirm-send-reminder">
               {sending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}Send Reminder
             </Button>
           </DialogFooter>

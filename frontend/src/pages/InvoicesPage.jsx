@@ -18,15 +18,21 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import InvoiceDetailTabs from "@/components/invoices/InvoiceDetailTabs";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
   Plus, Search, FileText, Loader2, Send, Check, ArrowLeft,
   AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
-  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Timer, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown
+  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown, ChevronRight, CreditCard
 } from "lucide-react";
 import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
@@ -34,6 +40,10 @@ import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
 import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
 import { InvoiceAIBundle } from "@/components/ai/InvoiceAIBundle";
 import { InvoiceDetailSmartActions } from "@/components/invoices/InvoicesSmartBar";
+import SavedCardChargeDialog from "@/components/billing/SavedCardChargeDialog";
+import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { isInvoiceChargeable, savedCardSummary } from "@/lib/savedCardPayment";
 
 const PAYMENT_STATUS = {
   unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
@@ -60,6 +70,20 @@ const RECURRING_INTERVAL_OPTIONS = [
   { value: "annually", label: "Annually", detail: "Once each year" },
 ];
 
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "eftpos", label: "EFTPOS terminal", hint: "Card / payWave", icon: CreditCard, activeClass: "border-emerald-400/45 bg-emerald-500/[0.14] shadow-[0_12px_32px_-18px_rgba(16,185,129,0.9)]", iconWrapClass: "bg-emerald-500/15 text-emerald-300", textClass: "text-emerald-200" },
+  { value: "cash", label: "Cash", hint: "Till / cash-up", icon: Wallet, activeClass: "border-amber-400/45 bg-amber-500/[0.14] shadow-[0_12px_32px_-18px_rgba(245,158,11,0.9)]", iconWrapClass: "bg-amber-500/15 text-amber-300", textClass: "text-amber-200" },
+  { value: "bank_transfer", label: "Bank transfer", hint: "EFT / remittance", icon: ArrowRightLeft, activeClass: "border-cyan-400/45 bg-cyan-500/[0.14] shadow-[0_12px_32px_-18px_rgba(34,211,238,0.9)]", iconWrapClass: "bg-cyan-500/15 text-cyan-300", textClass: "text-cyan-100" },
+  { value: "xero_reconciled", label: "Xero reconciled", hint: "Already matched", icon: CheckCircle, activeClass: "border-sky-400/45 bg-sky-500/[0.14] shadow-[0_12px_32px_-18px_rgba(56,189,248,0.9)]", iconWrapClass: "bg-sky-500/15 text-sky-300", textClass: "text-sky-100" },
+  { value: "cheque", label: "Cheque", hint: "Posted cheque", icon: Receipt, activeClass: "border-violet-400/45 bg-violet-500/[0.14] shadow-[0_12px_32px_-18px_rgba(139,92,246,0.9)]", iconWrapClass: "bg-violet-500/15 text-violet-300", textClass: "text-violet-100" },
+  { value: "other", label: "Other", hint: "Manual reference", icon: FileText, activeClass: "border-white/25 bg-white/[0.08]", iconWrapClass: "bg-white/[0.08] text-zinc-200", textClass: "text-zinc-100" },
+];
+
+const SETTLEMENT_METHOD_OPTIONS = [
+  { value: "eftpos", label: "EFTPOS terminal", hint: "Card batch settlement", icon: CreditCard, activeClass: "border-emerald-400/45 bg-emerald-500/[0.14] shadow-[0_12px_32px_-18px_rgba(16,185,129,0.9)]", iconWrapClass: "bg-emerald-500/15 text-emerald-300", textClass: "text-emerald-200" },
+  { value: "cash", label: "Cash", hint: "Daily cash-up deposit", icon: Wallet, activeClass: "border-amber-400/45 bg-amber-500/[0.14] shadow-[0_12px_32px_-18px_rgba(245,158,11,0.9)]", iconWrapClass: "bg-amber-500/15 text-amber-300", textClass: "text-amber-200" },
+];
+
 const normaliseInvoice = (invoice) => ({
   ...invoice,
   line_items: (invoice?.line_items || []).map((line) => {
@@ -75,6 +99,23 @@ const normaliseInvoice = (invoice) => ({
     };
   }),
 });
+
+function PaymentMethodTile({ option, active, onSelect, testId }) {
+  const Icon = option.icon;
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onSelect}
+      data-testid={testId}
+      className={`flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all duration-150 ${active ? option.activeClass : "border-white/[0.08] bg-black/[0.16] hover:-translate-y-px hover:border-white/[0.18] hover:bg-white/[0.05]"}`}
+    >
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${active ? option.iconWrapClass : "bg-white/[0.05] text-zinc-400"}`}><Icon className="h-4 w-4" /></span>
+      <span className="min-w-0"><span className={`block truncate text-xs font-semibold ${active ? option.textClass : "text-zinc-200"}`}>{option.label}</span><span className="block truncate text-[10px] text-muted-foreground">{option.hint}</span></span>
+    </button>
+  );
+}
 
 function ClientAutocomplete({
   clients,
@@ -243,9 +284,12 @@ export default function InvoicesPage() {
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [documentTemplates, setDocumentTemplates] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [allowedActions, setAllowedActions] = useState(new Set());
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterPayment, setFilterPayment] = useState("all");
@@ -275,11 +319,18 @@ export default function InvoicesPage() {
   const [voidReason, setVoidReason] = useState("");
   const [voidingInvoice, setVoidingInvoice] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // Saved cards, surfaced here as well as on the client Billing tab so a
+  // technician collecting money never has to leave the invoice they are on.
+  const [chargeCardInvoice, setChargeCardInvoice] = useState(null);
+  const [cardOnFile, setCardOnFile] = useState({ clientId: null, loading: false, methods: [], error: null });
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [pdfPreviewInvoice, setPdfPreviewInvoice] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   // Enhanced state
   const [detailTab, setDetailTab] = useState("items");
+  // Which invoice detail view this technician (and the team) actually opens, so
+  // the tab bar can order itself. Deliberate tab clicks are the evidence.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.INVOICES);
   const [emailHistory, setEmailHistory] = useState([]);
   const [emailDialog, setEmailDialog] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
@@ -300,6 +351,7 @@ export default function InvoicesPage() {
   const [bulkConfirmAction, setBulkConfirmAction] = useState(null);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
+    document_label: "", document_terms: "", document_template_id: "",
     line_items: [], tax_rate: "0", discount_pct: "0", discount_amount: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
@@ -307,12 +359,27 @@ export default function InvoicesPage() {
   const processedStripeSession = useRef(null);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const canCreateInvoice = allowedActions.has("billing.invoice.create");
+  const canModifyInvoice = allowedActions.has("billing.invoice.modify");
+  const canRecordPayment = allowedActions.has("billing.payment.record");
+  const canVoidInvoice = allowedActions.has("billing.invoice.void");
+  const canChargeSavedCard = allowedActions.has("billing.payment_method.charge");
+  const canViewSavedCards = allowedActions.has("billing.payment_method.view");
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
+  const fetchAll = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     setLoadError(null);
     try {
-      const [invResult, clientResult, productResult, ticketResult, statsResult, xeroResult, reconciliationResult] = await Promise.allSettled([
+      const permissionResponse = await axios.get(`${API}/permissions/me`, { headers });
+      const nextAllowedActions = new Set(permissionResponse.data?.allowed || []);
+      setAllowedActions(nextAllowedActions);
+      if (!nextAllowedActions.has("billing.portal.view")) {
+        const permissionError = new Error("Invoice access required");
+        permissionError.permissionDenied = true;
+        throw permissionError;
+      }
+      const [invResult, clientResult, productResult, ticketResult, statsResult, xeroResult, reconciliationResult, templateResult] = await Promise.allSettled([
         axios.get(`${API}/invoices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/products`, { headers }),
@@ -320,6 +387,7 @@ export default function InvoicesPage() {
         axios.get(`${API}/invoices/stats/summary`, { headers }),
         axios.get(`${API}/xero/status`, { headers }),
         axios.get(`${API}/billing/reconciliation/summary`, { headers }),
+        axios.get(`${API}/invoice-templates?include_presets=true`, { headers }),
       ]);
       if (invResult.status !== "fulfilled") throw invResult.reason;
       setInvoices((invResult.value.data || []).map(normaliseInvoice));
@@ -329,20 +397,35 @@ export default function InvoicesPage() {
       setStats(statsResult.status === "fulfilled" ? statsResult.value.data : {});
       setXeroStatus(xeroResult.status === "fulfilled" ? xeroResult.value.data : { connected: false, configured: false, org_name: null });
       setReconciliation(reconciliationResult.status === "fulfilled" ? reconciliationResult.value.data : { pending_count: 0, pending_total: 0, by_method: [] });
+      setDocumentTemplates(templateResult.status === "fulfilled" ? templateResult.value.data : []);
       if ([clientResult, productResult, ticketResult].some(result => result.status === "rejected")) {
         toast.warning("Invoices loaded, but one optional client, product, or ticket lookup is temporarily unavailable");
       }
-    } catch {
-      setLoadError("NexusMSP could not load invoices and the required billing records. No invoice changes have been made.");
-      toast.error("Failed to load invoices");
+    } catch (error) {
+      const permissionDenied = Boolean(error?.permissionDenied || error?.response?.status === 403);
+      if (quiet) toast.error("Invoices could not refresh. The current billing view has been kept.");
+      else {
+        setLoadError(permissionDenied ? {
+          permissionDenied: true,
+          message: "This account does not have billing.portal.view. Ask a Nexus administrator to grant invoice access from Team Hub permissions.",
+        } : {
+          permissionDenied: false,
+          message: "NexusMSP could not load invoices and the required billing records. No invoice changes have been made.",
+        });
+        if (!permissionDenied) toast.error("Failed to load invoices");
+      }
     }
-    finally { setLoading(false); }
+    finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const resetForm = () => setForm({
     client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
+    document_label: "", document_terms: "", document_template_id: "",
     line_items: [], tax_rate: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
@@ -364,6 +447,50 @@ export default function InvoicesPage() {
       setEmailHistory(emailRes.data);
     } catch { setInvoiceActivity([]); setEmailHistory([]); setInvoiceActivityError("Invoice history could not be loaded."); }
   }, [headers]);
+
+  /**
+   * The card this invoice's customer has on file.
+   *
+   * A technician opening an invoice should be able to see that money can be
+   * collected on the stored card without first navigating to the client's
+   * Billing tab, so the reference is loaded with the invoice they are reading.
+   * A role without the payment-method permission is an expected answer, not a
+   * failure: it simply leaves the invoice workspace as it was before.
+   */
+  useEffect(() => {
+    const clientId = viewInvoice?.client_id || payingInvoice?.client_id || "";
+    if (!clientId || !canViewSavedCards) {
+      setCardOnFile({ clientId: null, loading: false, methods: [], error: null });
+      return;
+    }
+    let active = true;
+    setCardOnFile({ clientId, loading: true, methods: [], error: null });
+    axios.get(`${API}/clients/${encodeURIComponent(clientId)}/payment-methods`, { headers })
+      .then(response => {
+        if (active) setCardOnFile({ clientId, loading: false, methods: response.data?.methods || [], error: null });
+      })
+      .catch(error => {
+        if (!active) return;
+        const permissionDenied = error?.response?.status === 403;
+        setCardOnFile({
+          clientId,
+          loading: false,
+          methods: [],
+          error: permissionDenied ? null : apiErrorMessage(error, "Saved cards could not be loaded."),
+        });
+      });
+    return () => { active = false; };
+  }, [viewInvoice?.client_id, payingInvoice?.client_id, canViewSavedCards, headers]);
+
+  // The lookup answers for one customer at a time, so a chip is only rendered
+  // when the client it describes is the one on screen — never for a client whose
+  // request is still in flight or has already been replaced by another.
+  const savedCardFor = (clientId) => (clientId && cardOnFile.clientId === clientId ? savedCardSummary(cardOnFile.methods) : null);
+  // Before the answer for this customer has arrived the workspace must say it is
+  // still checking, never "no card on file" — an empty answer that has not been
+  // read yet is not the same fact as this customer having saved no card.
+  const cardLookupPendingFor = (clientId) => Boolean(canViewSavedCards && clientId && (cardOnFile.loading || cardOnFile.clientId !== clientId));
+  const cardLookupErrorFor = (clientId) => (clientId && cardOnFile.clientId === clientId ? cardOnFile.error : null);
 
   const openCreate = () => {
     setEditing(null);
@@ -393,7 +520,7 @@ export default function InvoicesPage() {
     axios.get(`${API}/invoices/${inv.id}/payment-status?session_id=${sessionId}`, { headers })
       .then(() => {
         toast.success("Payment processed successfully!");
-        return fetchAll();
+        return fetchAll({ quiet: true });
       })
       .catch(error => {
         processedStripeSession.current = null;
@@ -404,7 +531,7 @@ export default function InvoicesPage() {
     setEditing(inv);
     setForm({
       client_id: inv.client_id, contract_id: inv.contract_id || "", ticket_id: inv.ticket_id || "", ticket_number: inv.ticket_number || "", ticket_title: inv.ticket_title || "", due_date: inv.due_date,
-      invoice_name: inv.invoice_name || "", notes: inv.notes || "", line_items: normaliseInvoice(inv).line_items, tax_rate: String(inv.tax_rate || 0),
+      invoice_name: inv.invoice_name || "", document_label: inv.document_label || "", document_terms: inv.document_terms || "", document_template_id: inv.document_template_id || "", notes: inv.notes || "", line_items: normaliseInvoice(inv).line_items, tax_rate: String(inv.tax_rate || 0),
       is_recurring: inv.is_recurring || false, recurring_interval: inv.recurring_interval || "monthly",
       recurring_start_date: inv.recurring_start_date || "", recurring_end_date: inv.recurring_end_date || ""
     });
@@ -440,7 +567,7 @@ export default function InvoicesPage() {
       toast.success(`${action.replace("_", " ")} → ${n} invoice(s)`);
       setSelectedIds(new Set());
       setBulkConfirmAction(null);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
     finally { setBulkBusy(false); }
   };
@@ -493,12 +620,12 @@ export default function InvoicesPage() {
         await axios.post(`${API}/invoices`, payload, { headers });
         toast.success("Invoice created");
       }
-      setIsFormOpen(false); fetchAll();
+      setIsFormOpen(false); fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
   };
 
   const handleDelete = async (id) => {
-    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); setDeleteTarget(null); fetchAll(); if (viewInvoice?.id === id) setViewInvoice(null); }
+    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); setDeleteTarget(null); fetchAll({ quiet: true }); if (viewInvoice?.id === id) setViewInvoice(null); }
     catch { toast.error("Failed"); }
   };
 
@@ -506,7 +633,7 @@ export default function InvoicesPage() {
     try {
       await axios.put(`${API}/invoices/${inv.id}`, { status }, { headers });
       toast.success(status === "sent" ? "Invoice marked as sent" : `Status: ${status}`);
-      fetchAll();
+      fetchAll({ quiet: true });
       if (viewInvoice?.id === inv.id) setViewInvoice({ ...viewInvoice, status, ...(status === "sent" ? { sent_at: new Date().toISOString() } : {}) });
     } catch (e) { toast.error(e.response?.data?.detail || "Unable to update invoice status"); }
   };
@@ -539,7 +666,7 @@ export default function InvoicesPage() {
       await axios.put(`${API}/clients/${billingProfileClient}/billing-profile`, billingProfile, { headers });
       toast.success("Client billing profile saved");
       setBillingProfileOpen(false);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (error) { toast.error(error.response?.data?.detail || "Could not save billing profile"); }
   };
 
@@ -547,12 +674,13 @@ export default function InvoicesPage() {
     try {
       const response = await axios.post(`${API}/billing/reconciliation/settlements`, settlementForm, { headers });
       toast.success(`Settlement ${response.data.id} created — ready for Xero reconciliation`);
-      setSettlementOpen(false); setSettlementForm(f => ({ ...f, reference: "" })); fetchAll();
+      setSettlementOpen(false); setSettlementForm(f => ({ ...f, reference: "" })); fetchAll({ quiet: true });
     } catch (error) { toast.error(error.response?.data?.detail || "Could not close settlement"); }
   };
 
   const handleManualPayment = async () => {
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) { toast.error("Enter valid amount"); return; }
+    if (["eftpos", "xero_reconciled"].includes(paymentForm.method) && !paymentForm.reference.trim()) { toast.error(paymentForm.method === "eftpos" ? "Enter the EFTPOS terminal receipt or settlement ID" : "Enter the Xero payment or bank-feed reference"); return; }
     const remaining = (payingInvoice?.total || 0) - (payingInvoice?.amount_paid || 0);
     if (parseFloat(paymentForm.amount) > remaining + 0.001) { toast.error(`Payment cannot exceed the remaining balance of $${remaining.toFixed(2)}`); return; }
     try {
@@ -563,7 +691,7 @@ export default function InvoicesPage() {
       );
       toast.success("Payment recorded");
       setIsPaymentOpen(false);
-      fetchAll();
+      fetchAll({ quiet: true });
       if (viewInvoice?.id === payingInvoice.id) {
         const updated = await axios.get(`${API}/invoices/${payingInvoice.id}`, { headers });
         setViewInvoice(updated.data);
@@ -615,7 +743,7 @@ export default function InvoicesPage() {
       setSplitAllocations([]);
       setViewInvoice(response.data.parent);
       setDetailTab("split");
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (error) {
       toast.error(error.response?.data?.detail || "Could not create split-billing invoices");
     } finally {
@@ -643,7 +771,7 @@ export default function InvoicesPage() {
     if (!moveTarget) { toast.error("Select a target client"); return; }
     try {
       const res = await axios.post(`${API}/invoices/${movingInvoice.id}/move-client`, { client_id: moveTarget }, { headers });
-      toast.success(res.data.message); setMoveDialog(false); fetchAll();
+      toast.success(res.data.message); setMoveDialog(false); fetchAll({ quiet: true });
       if (viewInvoice?.id === movingInvoice.id) { const updated = await axios.get(`${API}/invoices/${movingInvoice.id}`, { headers }); setViewInvoice(updated.data); }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to move invoice"); }
   };
@@ -651,7 +779,7 @@ export default function InvoicesPage() {
   const handleVoidInvoice = async () => {
     try {
       await axios.post(`${API}/invoices/${voidingInvoice.id}/void`, { reason: voidReason }, { headers });
-      toast.success("Invoice voided"); setVoidDialog(false); fetchAll();
+      toast.success("Invoice voided"); setVoidDialog(false); fetchAll({ quiet: true });
       if (viewInvoice?.id === voidingInvoice.id) { const updated = await axios.get(`${API}/invoices/${voidingInvoice.id}`, { headers }); setViewInvoice(updated.data); }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to void invoice"); }
   };
@@ -715,7 +843,7 @@ export default function InvoicesPage() {
       // Refresh invoice to show last_sms_reminder_at
       const updated = await axios.get(`${API}/invoices/${viewInvoice.id}`, { headers });
       setViewInvoice(updated.data);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to send SMS");
     } finally {
@@ -728,7 +856,7 @@ export default function InvoicesPage() {
     try {
       const res = await axios.post(`${API}/invoices/${inv.id}/clone`, {}, { headers });
       toast.success(`Cloned as ${res.data.invoice_number}`);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to clone"); }
   };
 
@@ -748,32 +876,50 @@ export default function InvoicesPage() {
   };
 
   // --- PDF ---
+  const resolveInvoicePdfUrl = (inv, download = false) => resolveDocumentPdfUrl({
+    api: API,
+    headers,
+    documentType: "invoice",
+    documentId: inv.id,
+    token,
+    download,
+  });
+
   const handlePdfPreview = async (inv) => {
     setPdfLoading(true); setPdfPreviewInvoice(inv);
     try {
-      const urlWithToken = `${API}/invoices/${inv.id}/pdf?token=${encodeURIComponent(token)}`;
-      const res = await axios.get(urlWithToken, { headers, responseType: "blob" });
+      const pdfUrl = await resolveInvoicePdfUrl(inv);
+      const res = await axios.get(pdfUrl, { responseType: "blob" });
       if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       setPdfPreviewUrl(url);
-    } catch { toast.error("Failed to generate invoice PDF"); }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || error.message || "Failed to generate invoice PDF");
+      setPdfPreviewInvoice(null);
+    }
     finally { setPdfLoading(false); }
   };
 
   const handlePdfDownload = async (inv) => {
     try {
-      const urlWithToken = `${API}/invoices/${inv.id}/pdf/download?token=${encodeURIComponent(token)}`;
-      const res = await axios.get(urlWithToken, { headers, responseType: "blob" });
+      const pdfUrl = await resolveInvoicePdfUrl(inv, true);
+      const res = await axios.get(pdfUrl, { responseType: "blob" });
       if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       const a = document.createElement("a"); a.href = url; a.download = `${inv.invoice_number || "invoice"}.pdf`; a.click();
       window.URL.revokeObjectURL(url); toast.success("PDF downloaded");
-    } catch { toast.error("Failed to download invoice PDF"); }
+    } catch (error) { toast.error(error.response?.data?.detail || error.message || "Failed to download invoice PDF"); }
   };
 
   const closePdfPreview = () => {
     if (pdfPreviewUrl) window.URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null); setPdfPreviewInvoice(null);
+  };
+
+  const continueFromPdfPreview = (action) => {
+    const invoice = pdfPreviewInvoice;
+    closePdfPreview();
+    if (invoice) action(invoice);
   };
 
   // --- Revenue Analytics ---
@@ -796,25 +942,54 @@ export default function InvoicesPage() {
     return inv.status;
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading invoices" />;
 
   if (loadError) {
     return (
       <PageShell data-testid="invoices-load-error">
-        <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]">
-          <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-            <AlertTriangle className="h-10 w-10 text-rose-300" />
-            <div><h1 className="text-lg font-semibold">Invoice workspace is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError}</p></div>
-            <Button onClick={fetchAll} data-testid="retry-invoices-load"><RefreshCw className="mr-2 h-4 w-4" />Retry invoices</Button>
-          </CardContent>
-        </Card>
+        <WorkspaceErrorState
+          title={loadError.permissionDenied ? "Invoice access required" : "Invoice workspace is unavailable"}
+          description={loadError.message}
+          onRetry={loadError.permissionDenied ? undefined : fetchAll}
+          retryLabel="Retry invoices"
+          onSecondaryAction={loadError.permissionDenied ? () => navigate("/team-hub?view=matrix") : undefined}
+          secondaryLabel="Open Team Hub permissions"
+        />
       </PageShell>
     );
   }
 
+  const chargeCardClientId = chargeCardInvoice?.client_id || "";
+  // The client's cards are reused when they were already read for the customer
+  // on screen; otherwise the dialog reads them itself and shows its own state.
+  const chargeDialogMethods = chargeCardClientId && cardOnFile.clientId === chargeCardClientId && !cardOnFile.loading
+    ? cardOnFile.methods
+    : null;
+  const openSavedCardCapture = () => {
+    if (!chargeCardClientId) return;
+    setChargeCardInvoice(null);
+    // Card capture is a provider-hosted session that returns to the client's
+    // Billing tab, so finish it in the one place that handles that return.
+    navigate(`/clients?client=${encodeURIComponent(chargeCardClientId)}&view=billing`);
+  };
+
   // ========== SHARED DIALOGS ==========
   const dialogs = (
     <>
+      {/* SAVED CARD CHARGE — reachable from the invoice workspace as well as the
+          client Billing tab, so money can be collected where the invoice is. */}
+      <SavedCardChargeDialog
+        open={Boolean(chargeCardInvoice)}
+        onOpenChange={next => { if (!next) setChargeCardInvoice(null); }}
+        base={`${API}/clients/${encodeURIComponent(chargeCardClientId)}/payment-methods`}
+        headers={headers}
+        clientName={chargeCardInvoice?.client_name || ""}
+        invoice={chargeCardInvoice}
+        methods={chargeDialogMethods}
+        onAddCard={openSavedCardCapture}
+        onCharged={() => fetchAll({ quiet: true })}
+      />
+
       {/* CREATE/EDIT */}
       <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
         <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col overflow-hidden border-cyan-400/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
@@ -827,6 +1002,10 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4"><div className="min-w-0 flex-1"><Label>Invoice name <span className="font-normal text-muted-foreground">(internal)</span></Label><Input value={form.invoice_name} onChange={e => setForm({ ...form, invoice_name: e.target.value })} maxLength={160} placeholder="e.g. July 2026 managed services" data-testid="invoice-name" /><p className="mt-1 text-[10px] leading-relaxed text-cyan-200/75">A searchable workspace label for technicians. It does not replace the formal invoice number or client-facing notes.</p></div><Badge variant="outline" className="shrink-0 border-cyan-400/20 bg-cyan-400/[0.05] text-[10px] text-cyan-100">Optional</Badge></div>
+              </div>
+              <div className="col-span-4 rounded-xl border border-violet-400/20 bg-violet-400/[0.035] p-4" data-testid="invoice-document-controls">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><Label className="text-sm font-semibold text-violet-100">Client-facing document</Label><p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Set a draft-only title and terms for this invoice. The formal invoice number, totals, tax, payment history, and audit record remain system-controlled.</p></div><Link to="/invoice-templates" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Manage document designs</Link></div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3"><div><Label className="text-xs">Document title <span className="font-normal text-muted-foreground">(optional)</span></Label><Input value={form.document_label} onChange={e => setForm({ ...form, document_label: e.target.value })} maxLength={120} placeholder="Defaults to Tax Invoice" data-testid="invoice-document-label" /><p className="mt-1 text-[10px] text-muted-foreground">Shown on the client PDF; it never replaces the invoice number.</p></div><div><Label className="text-xs">Document design</Label><Select value={form.document_template_id || "__default"} onValueChange={value => setForm({ ...form, document_template_id: value === "__default" ? "" : value })}><SelectTrigger data-testid="invoice-document-template"><SelectValue placeholder="Organisation default" /></SelectTrigger><SelectContent><SelectItem value="__default">Organisation default</SelectItem>{documentTemplates.filter(template => template.doc_type === "invoice").map(template => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">Choose a saved design for this draft only.</p></div><div><Label className="text-xs">Document terms <span className="font-normal text-muted-foreground">(optional)</span></Label><Textarea value={form.document_terms} onChange={e => setForm({ ...form, document_terms: e.target.value })} maxLength={5000} rows={3} placeholder="Delivery, payment, or service terms for this invoice" data-testid="invoice-document-terms" /></div></div>
               </div>
               <div className="col-span-2">
                 <div className="flex items-center justify-between"><Label>Client *</Label>{form.client_id && <button type="button" className="text-[11px] font-medium text-emerald-300 hover:text-emerald-200" onClick={() => openBillingProfile(form.client_id)}>Billing profile</button>}</div>
@@ -992,34 +1171,52 @@ export default function InvoicesPage() {
 
       {/* MANUAL PAYMENT */}
       <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
-        <DialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-3xl overflow-hidden p-0">
-          <DialogHeader className="border-b border-border/80 px-6 py-5">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-emerald-400/15 via-emerald-400/[0.04] to-transparent px-6 py-5">
             <div className="flex items-start gap-3 pr-6">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10"><Banknote className="h-5 w-5 text-emerald-300" /></span>
               <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Billing workflow</p><DialogTitle className="mt-1">Record customer payment</DialogTitle><DialogDescription className="mt-1">Create the auditable payment record here, then reconcile it with Xero once the bank feed or terminal settlement is available.</DialogDescription></div>
             </div>
           </DialogHeader>
-          <div className="space-y-5 px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {payingInvoice && <div className="grid gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 sm:grid-cols-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">Invoice</p><p className="mt-1 font-mono text-sm font-semibold">{payingInvoice.invoice_number}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Client</p><p className="mt-1 truncate text-sm font-medium">{payingInvoice.client_name || "Unassigned client"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Remaining balance</p><p className="mt-1 text-sm font-semibold text-emerald-300">${Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)).toFixed(2)}</p></div></div>}
-            <div className="grid gap-4 sm:grid-cols-2"><div><Label>Payment amount ($)</Label><Input className="mt-1" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div><div><Label>Payment date</Label><Input className="mt-1" type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div></div>
-            <div><Label>Payment method</Label>
-              <Select value={paymentForm.method} onValueChange={v => setPaymentForm({ ...paymentForm, method: v })}>
-                <SelectTrigger className="mt-1" data-testid="payment-method"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="eftpos">EFTPOS terminal</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="bank_transfer">Bank transfer / EFT</SelectItem>
-                  <SelectItem value="xero_reconciled">Already reconciled in Xero</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
+            {/* Recording a manual payment is the longer route when the customer
+                already has a card on file, so say so here rather than leaving the
+                technician to remember the client's Billing tab. */}
+            {payingInvoice && canChargeSavedCard && savedCardFor(payingInvoice.client_id) && isInvoiceChargeable(payingInvoice) && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-xs leading-5 text-violet-50" data-testid="manual-payment-saved-card-hint">
+                <CreditCard className="h-3.5 w-3.5 shrink-0 text-violet-200" />
+                <span><span className="font-medium">{savedCardFor(payingInvoice.client_id).label}</span> is saved for this customer — collect with the card instead of recording the payment by hand.</span>
+                <Button type="button" size="sm" variant="outline" className="ml-auto h-7 rounded-lg border-violet-400/35 bg-violet-500/[0.10] text-violet-100 hover:bg-violet-500/[0.16]" onClick={() => { setIsPaymentOpen(false); setChargeCardInvoice(payingInvoice); }} data-testid="manual-payment-charge-card-btn">Charge saved card</Button>
+              </div>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="flex items-center justify-between gap-2"><Label>Payment amount ($)</Label>
+                  {payingInvoice && (() => { const remaining = Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)); return (
+                    <div className="flex gap-1.5">
+                      <Button type="button" variant="outline" size="sm" className="h-6 rounded-full border-emerald-400/25 px-2.5 text-[10px] text-emerald-200 hover:bg-emerald-500/10" onClick={() => setPaymentForm({ ...paymentForm, amount: remaining.toFixed(2) })} data-testid="payment-amount-full">Full balance</Button>
+                      <Button type="button" variant="outline" size="sm" className="h-6 rounded-full border-white/[0.12] px-2.5 text-[10px] text-zinc-300 hover:bg-white/[0.06]" onClick={() => setPaymentForm({ ...paymentForm, amount: (remaining / 2).toFixed(2) })} data-testid="payment-amount-half">Half</Button>
+                    </div>
+                  ); })()}
+                </div>
+                <Input className="mt-1 h-11 font-mono text-lg" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" />
+              </div>
+              <div><Label>Payment date</Label><Input className="mt-1 h-11" type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div>
+            </div>
+            <div>
+              <Label>Payment method</Label>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Payment method" data-testid="payment-method">
+                {PAYMENT_METHOD_OPTIONS.map(option => (
+                  <PaymentMethodTile key={option.value} option={option} active={paymentForm.method === option.value} onSelect={() => setPaymentForm({ ...paymentForm, method: option.value })} testId={`payment-method-${option.value}`} />
+                ))}
+              </div>
             </div>
             <p className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">{paymentForm.method === "eftpos" ? "Record the EFTPOS terminal receipt or settlement reference so the payment can be matched in Xero." : paymentForm.method === "cash" ? "Record the receipt number or till reference. Cash payments should be reconciled with the daily cash-up." : paymentForm.method === "xero_reconciled" ? "Use this only after the payment is matched in Xero; include the Xero payment or bank-feed reference." : "Include the banking or remittance reference so finance can reconcile the payment in Xero."}</p>
-            <div><Label>Reference</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
+            <div><Label>Reference{["eftpos", "xero_reconciled"].includes(paymentForm.method) ? " *" : ""}</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
             <div><Label>Internal notes</Label><Textarea className="mt-1" value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional reconciliation, remittance, or customer notes" rows={3} /></div>
           </div>
-          <DialogFooter className="border-t border-border/80 px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button variant="success" onClick={handleManualPayment} disabled={["eftpos", "xero_reconciled"].includes(paymentForm.method) && !paymentForm.reference.trim()} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />{paymentForm.method === "eftpos" ? "Record EFTPOS payment" : paymentForm.method === "cash" ? "Record cash payment" : paymentForm.method === "bank_transfer" ? "Record bank transfer" : paymentForm.method === "cheque" ? "Record cheque payment" : "Record audited payment"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1079,8 +1276,14 @@ export default function InvoicesPage() {
       </Dialog>
 
       <Dialog open={settlementOpen} onOpenChange={setSettlementOpen}>
-        <NexusWorkflowDialog eyebrow="Reconciliation workflow" title="Close payment settlement" description="Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero." icon={Check} tone="emerald" className="max-w-md" footer={<><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button onClick={closeSettlement}><Check className="mr-1 h-4 w-4" />Close settlement</Button></>}>
-          <div className="space-y-3"><div><Label>Method</Label><Select value={settlementForm.method} onValueChange={v => setSettlementForm({ ...settlementForm, method: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="eftpos">EFTPOS terminal</SelectItem><SelectItem value="cash">Cash</SelectItem></SelectContent></Select></div><div><Label>Settlement date</Label><Input type="date" value={settlementForm.date} onChange={e => setSettlementForm({ ...settlementForm, date: e.target.value })} /></div><div><Label>Settlement / deposit reference</Label><Input value={settlementForm.reference} onChange={e => setSettlementForm({ ...settlementForm, reference: e.target.value })} placeholder="Terminal batch or bank deposit ID" /></div></div>
+        <NexusWorkflowDialog eyebrow="Reconciliation workflow" title="Close payment settlement" description="Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero." icon={Check} tone="emerald" className="max-w-md" footer={<><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button variant="success" onClick={closeSettlement} disabled={!settlementForm.reference.trim()}><Check className="mr-1 h-4 w-4" />Close settlement</Button></>}>
+          <div className="space-y-3"><div><Label>Method</Label>
+            <div className="mt-2 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Settlement method" data-testid="settlement-method">
+              {SETTLEMENT_METHOD_OPTIONS.map(option => (
+                <PaymentMethodTile key={option.value} option={option} active={settlementForm.method === option.value} onSelect={() => setSettlementForm({ ...settlementForm, method: option.value })} testId={`settlement-method-${option.value}`} />
+              ))}
+            </div>
+          </div><div><Label>Settlement date</Label><Input type="date" value={settlementForm.date} onChange={e => setSettlementForm({ ...settlementForm, date: e.target.value })} /></div><div><Label>Settlement / deposit reference</Label><Input value={settlementForm.reference} onChange={e => setSettlementForm({ ...settlementForm, reference: e.target.value })} placeholder="Terminal batch or bank deposit ID" data-testid="settlement-reference" /></div></div>
         </NexusWorkflowDialog>
       </Dialog>
 
@@ -1119,19 +1322,30 @@ export default function InvoicesPage() {
 
       {/* PDF PREVIEW */}
       <Dialog open={!!pdfPreviewUrl} onOpenChange={v => { if (!v) closePdfPreview(); }}>
-        <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
+        <DialogContent className="flex h-[88vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
           <DialogHeader>
-            <div className="flex items-center justify-between">
+            <div className="border-b border-white/[0.08] px-6 py-4 pr-12">
               <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />Preview: {pdfPreviewInvoice?.invoice_number}</DialogTitle>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => { if (pdfPreviewUrl) { const w = window.open(pdfPreviewUrl, "_blank"); if (w) w.addEventListener("load", () => w.print()); } }} data-testid="print-pdf-btn"><Printer className="w-4 h-4 mr-1" />Print</Button>
-                <Button size="sm" variant="outline" onClick={() => pdfPreviewInvoice && handlePdfDownload(pdfPreviewInvoice)} data-testid="download-invoice-pdf-btn"><Download className="w-4 h-4 mr-1" />Download</Button>
-              </div>
+              <DialogDescription className="mt-1">Review the client copy, then complete the next billing action without leaving the invoice.</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="flex-1 min-h-0">
-            {pdfLoading ? <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin" /></div> : <iframe src={pdfPreviewUrl} className="w-full h-full rounded-lg border" title="Invoice PDF" />}
+          <div className="min-h-0 flex-1 bg-zinc-950/60 p-3">
+            {pdfLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div> : <iframe src={pdfPreviewUrl} className="h-full w-full rounded-lg border border-white/[0.08] bg-white" title="Invoice PDF" />}
           </div>
+          <DialogFooter className="shrink-0 items-center gap-2 border-t border-white/[0.08] bg-black/30 px-5 py-4 sm:justify-between sm:space-x-0" data-testid="invoice-preview-actions">
+            <div className="mr-auto text-left text-xs text-muted-foreground">
+              <p className="font-medium text-zinc-200">{pdfPreviewInvoice?.client_name || "Customer invoice"}</p>
+              <p>Balance ${Math.max(0, Number(pdfPreviewInvoice?.total || 0) - Number(pdfPreviewInvoice?.amount_paid || 0)).toFixed(2)}</p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={closePdfPreview}>Close</Button>
+              {canModifyInvoice && !pdfPreviewInvoice?.is_split_parent && <Button size="sm" variant="outline" onClick={() => continueFromPdfPreview(openInvoiceEmail)} data-testid="preview-email-invoice-btn"><Mail className="mr-1.5 h-4 w-4" />Email</Button>}
+              {canModifyInvoice && !pdfPreviewInvoice?.is_split_parent && !pdfPreviewInvoice?.is_split_child && (pdfPreviewInvoice?.payment_status || "unpaid") === "unpaid" && ["draft", "pending_approval"].includes(pdfPreviewInvoice?.status) && <Button size="sm" variant="outline" className="border-violet-400/30 text-violet-100" onClick={() => continueFromPdfPreview(openSplitBilling)} data-testid="preview-split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing</Button>}
+              {canRecordPayment && !pdfPreviewInvoice?.is_split_parent && Math.max(0, Number(pdfPreviewInvoice?.total || 0) - Number(pdfPreviewInvoice?.amount_paid || 0)) > 0 && <Button size="sm" variant="success" onClick={() => continueFromPdfPreview(invoice => openPaymentDialog(invoice, "eftpos"))} data-testid="preview-record-eftpos-btn"><Banknote className="mr-1.5 h-4 w-4" />Record EFTPOS</Button>}
+              <Button size="sm" variant="outline" onClick={() => { if (pdfPreviewUrl) { const w = window.open(pdfPreviewUrl, "_blank"); if (w) w.addEventListener("load", () => w.print()); } }} data-testid="print-pdf-btn"><Printer className="mr-1.5 h-4 w-4" />Print</Button>
+              <Button size="sm" variant="outline" onClick={() => pdfPreviewInvoice && handlePdfDownload(pdfPreviewInvoice)} data-testid="download-invoice-pdf-btn"><Download className="mr-1.5 h-4 w-4" />Download</Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1287,12 +1501,19 @@ export default function InvoicesPage() {
     const inv = viewInvoice;
     const isSplitParent = Boolean(inv.is_split_parent);
     const pStatus = isSplitParent ? "split" : (inv.payment_status || "unpaid");
-    const canDelete = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
-    const canEditFinancialRecord = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && !isSplitParent;
-    const canVoid = pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
+    const canDelete = canVoidInvoice && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
+    const canEditFinancialRecord = canModifyInvoice && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && !isSplitParent;
+    const canVoid = canVoidInvoice && pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
     const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
     const balance = isSplitParent ? 0 : (inv.total || 0) - (inv.amount_paid || 0);
     const isOverdue = !isSplitParent && inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
+    // The same eligibility rule the charge endpoint enforces decides whether the
+    // action is offered here, so the workspace cannot invite a charge the API
+    // would refuse.
+    const cardSummary = savedCardFor(inv.client_id);
+    const cardLookupPending = cardLookupPendingFor(inv.client_id);
+    const cardLookupError = cardLookupErrorFor(inv.client_id);
+    const canChargeCardForInvoice = canChargeSavedCard && Boolean(inv.client_id) && !isSplitParent && isInvoiceChargeable(inv);
 
     return (
       <div className="space-y-4" data-testid="invoice-detail">
@@ -1310,12 +1531,22 @@ export default function InvoicesPage() {
                 <p className="truncate text-xl font-semibold tracking-tight text-white">{inv.invoice_name || inv.client_name || "Client invoice"}</p>
                 <p className="mt-1 text-xs text-zinc-400">{isSplitParent ? <><span>Source record retained for audit</span><span className="px-1.5 text-zinc-600">/</span><span className="text-violet-200">{(inv.split_billing?.allocations || []).length} payer invoice{(inv.split_billing?.allocations || []).length === 1 ? "" : "s"} issued</span></> : <>{inv.invoice_name && <><span>{inv.client_name || "Client invoice"}</span><span className="px-1.5 text-zinc-600">/</span></>}Due {inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "date not set"} <span className="px-1.5 text-zinc-600">/</span> Balance <span className={balance > 0 ? "font-mono text-amber-200" : "font-mono text-emerald-200"}>${Math.max(0, balance).toFixed(2)}</span></>}</p>
               </div>
-              {balance > 0 && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
-              {!isSplitParent && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
+              {canRecordPayment && balance > 0 && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
+              {canChargeCardForInvoice && <Button variant="outline" className="h-9 rounded-lg border-violet-400/35 bg-violet-500/[0.12] px-3 text-violet-100 hover:border-violet-300/50 hover:bg-violet-500/[0.18]" onClick={() => setChargeCardInvoice(inv)} title={cardSummary ? `Charge ${cardSummary.label}` : "Charge this customer's saved card"} data-testid="header-charge-saved-card-btn"><CreditCard className="mr-1.5 h-3.5 w-3.5" />Charge saved card</Button>}
+              {canModifyInvoice && !isSplitParent && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
               <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="header-preview-invoice-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3">
               <span className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] px-2.5 py-1 text-xs font-medium text-emerald-100">{inv.client_name || "No customer"}</span>
+              {canViewSavedCards && inv.client_id && !isSplitParent && (cardLookupPending ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/[0.2] px-2.5 py-1 text-xs text-zinc-400" data-testid="invoice-card-on-file-loading"><Loader2 className="h-3 w-3 animate-spin" />Checking saved cards…</span>
+              ) : cardSummary ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.10] px-2.5 py-1 text-xs font-medium text-violet-100" data-testid="invoice-card-on-file" title={cardSummary.expiry}><CreditCard className="h-3 w-3" />Card on file {cardSummary.label}{cardSummary.isDefault ? " · default" : ""}</span>
+              ) : cardLookupError ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-rose-400/25 bg-rose-500/[0.08] px-2.5 py-1 text-xs text-rose-100" data-testid="invoice-card-on-file-error" title={cardLookupError || "Nexus could not confirm the saved cards for this customer."}><AlertTriangle className="h-3 w-3" />Saved cards unavailable</span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/[0.2] px-2.5 py-1 text-xs text-zinc-400" data-testid="invoice-card-on-file-none" title="This customer has no card saved for Nexus to charge."><CreditCard className="h-3 w-3" />No card on file</span>
+              ))}
               {inv.ticket_id && <Link to={`/tickets?ticket=${encodeURIComponent(inv.ticket_id)}`} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/[0.08] px-2.5 py-1 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.14]" data-testid="invoice-linked-ticket"><Ticket className="h-3 w-3" />{inv.ticket_number || "Linked ticket"}</Link>}
               {isSplitParent && <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.08] px-2.5 py-1 text-xs font-medium text-violet-100"><Users className="h-3 w-3" />Split-billing ledger</span>}
               {inv.is_split_child && <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.08] px-2.5 py-1 text-xs font-medium text-violet-100"><Users className="h-3 w-3" />Split payer invoice</span>}
@@ -1345,7 +1576,7 @@ export default function InvoicesPage() {
             <InvoiceDetailSmartActions invoice={inv} onReload={async () => {
               const updated = await axios.get(`${API}/invoices/${inv.id}`, { headers });
               setViewInvoice(updated.data);
-              fetchAll();
+              fetchAll({ quiet: true });
             }} />
           </CardContent>
         </Card>
@@ -1353,13 +1584,19 @@ export default function InvoicesPage() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           <div className="space-y-4 xl:col-span-8">
             <Tabs value={detailTab} onValueChange={setDetailTab}>
-              <TabsList className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/[0.14] p-1">
-                <TabsTrigger value="items" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-items">Line Items</TabsTrigger>
-                <TabsTrigger value="payments" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-payments">Payments ({(inv.payments || []).length})</TabsTrigger>
-                {isSplitParent && <TabsTrigger value="split" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-violet-500/[0.14] data-[state=active]:text-violet-100" data-testid="tab-inv-split-billing">Payer invoices ({(inv.split_billing?.allocations || []).length})</TabsTrigger>}
-                <TabsTrigger value="emails" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-emails">Emails ({emailHistory.length})</TabsTrigger>
-                <TabsTrigger value="audit" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-audit">Audit ({invoiceActivity.length})</TabsTrigger>
-              </TabsList>
+              <InvoiceDetailTabs
+                isSplitParent={isSplitParent}
+                counts={{
+                  payments: (inv.payments || []).length,
+                  split: (inv.split_billing?.allocations || []).length,
+                  emails: emailHistory.length,
+                  audit: invoiceActivity.length,
+                }}
+                personal={learning.personal}
+                team={learning.team}
+                onRecordAction={learning.record}
+                onForgetLearning={learning.forget}
+              />
 
               <TabsContent value="items">
                 <Card className="mt-2">
@@ -1554,8 +1791,9 @@ export default function InvoicesPage() {
             <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
               <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Invoice controls</CardTitle></CardHeader>
               <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
-                {!isSplitParent && pStatus !== "paid" && <Button variant="success" className="w-full" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
-                {!isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
+                {canRecordPayment && !isSplitParent && pStatus !== "paid" && <Button variant="success" className="w-full" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
+                {canChargeCardForInvoice && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => setChargeCardInvoice(inv)} data-testid="charge-saved-card-btn"><CreditCard className="mr-1.5 h-4 w-4" />Charge saved card</Button>}
+                {canModifyInvoice && !isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
                 {isSplitParent && <div className="rounded-lg border border-violet-400/25 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-100"><span className="font-medium">Payer invoices issued.</span> Open the Payer invoices tab to email each customer or record their payment.</div>}
                 <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground"><span className="font-medium text-sky-300">Xero</span> {xeroStatus.connected ? `Connected to ${xeroStatus.org_name || "your organisation"}. Reconcile payments after they are recorded.` : xeroStatus.configured ? "Setup is incomplete. Finish Xero OAuth before relying on sync or reconciliation." : "Not connected. Configure Xero before relying on sync or reconciliation."}</div>
                 <Button variant="info" className="w-full" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="open-xero-btn"><Building2 className="mr-1.5 h-4 w-4" />{xeroStatus.connected ? "Open Xero hub" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
@@ -1596,7 +1834,7 @@ export default function InvoicesPage() {
                 >
                   <Zap className="w-4 h-4 mr-1" />Pre-scan Risks (AI)
                 </Button>
-                {!isSplitParent && <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => openInvoiceEmail(inv)} data-testid="email-invoice-btn">
+                {canModifyInvoice && !isSplitParent && <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => openInvoiceEmail(inv)} data-testid="email-invoice-btn">
                   <Mail className="w-4 h-4 mr-1" />Email Invoice
                 </Button>}
                 {pStatus !== "paid" && (
@@ -1606,16 +1844,16 @@ export default function InvoicesPage() {
                   </Button>
                 )}
                 <Separator />
-                <Button variant="outline" className="w-full" onClick={() => handleCloneInvoice(inv)} data-testid="clone-invoice-btn">
+                {canCreateInvoice && <Button variant="outline" className="w-full" onClick={() => handleCloneInvoice(inv)} data-testid="clone-invoice-btn">
                   <Copy className="w-4 h-4 mr-1" />Clone Invoice
-                </Button>
+                </Button>}
                 <Button variant="outline" className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => {
                   setCreditNoteForm({ reason: "", total: 0, subtotal: 0, tax: 0, line_items: [] });
                   setCreditNoteDialog(true);
                 }} data-testid="credit-note-btn">
                   <Receipt className="w-4 h-4 mr-1" />Issue Credit Note
                 </Button>
-                {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
+                {canModifyInvoice && inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
                 {canEditFinancialRecord && <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
                   <ArrowRightLeft className="w-4 h-4 mr-1" />Move to Client
                 </Button>}
@@ -1721,26 +1959,21 @@ export default function InvoicesPage() {
   return (
     <PageShell className="nx-page-stage" data-testid="invoices-page">
       <div className="flex-1 space-y-6 overflow-y-auto">
-      <div className="nx-ambient-surface flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_16px_42px_rgba(0,0,0,0.18)]" data-nx-signal={(stats.unpaid || 0) > 0 || (stats.total_outstanding || 0) > 0 ? "attention" : "healthy"}>
-        <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Finance operations</p>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><Receipt className="h-5 w-5 text-emerald-300" /></span>
-            <div><h1 className="text-2xl font-bold tracking-tight">Invoices</h1><p className="text-sm text-muted-foreground">Billing command centre · {invoices.length} invoices</p></div>
-          </div>
-        </div>
-        <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Zap className="w-3.5 h-3.5 mr-1.5" />Billing Command</Button>
-          <Button variant="info" size="sm" className="h-9 rounded-lg" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="invoice-xero-button"><Building2 className="w-3.5 h-3.5 mr-1.5" />{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/reports?tab=commercial")} data-testid="aging-report-btn">
-            <Timer className="w-4 h-4 mr-1" />Receivables Report
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn">
-            <BarChart3 className="w-4 h-4 mr-1" />Revenue Analytics
-          </Button>
-          <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New Invoice</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Finance operations"
+        title="Invoices"
+        description={`Billing command centre · ${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`}
+        icon={Receipt}
+        tone="emerald"
+        signal={(stats.unpaid || 0) > 0 || (stats.total_outstanding || 0) > 0 ? "attention" : "healthy"}
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => fetchAll({ quiet: true })} disabled={refreshing} data-testid="refresh-invoices"><RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+          <Button variant="outline" size="sm" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn"><BarChart3 className="mr-1.5 h-4 w-4" />Revenue</Button>
+          {canCreateInvoice && <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New invoice</Button>}
+        </>}
+      />
+
+      <BillingWorkspaceNav />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <HeroTile label="All invoices" value={stats.total || 0} icon={FileText} glow="cyan" testId="stat-total" />
@@ -1750,10 +1983,10 @@ export default function InvoicesPage() {
         <HeroTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={AlertTriangle} glow={stats.total_outstanding > 0 ? "amber" : "emerald"} animated={false} testId="stat-outstanding" />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <HeroTile label="Xero finance link" value={xeroStatus.connected ? "Connected" : xeroStatus.configured ? "Finish setup" : "Not connected"} subtitle={xeroStatus.connected ? (xeroStatus.org_name || "Open reconciliation hub") : "Configure OAuth before sync"} icon={Building2} glow="sky" animated={false} onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} testId="xero-finance-tile" />
-        <HeroTile label="Reconciliation queue" value={`$${Number(reconciliation.pending_total || 0).toFixed(2)}`} subtitle={`${reconciliation.pending_count} payment${reconciliation.pending_count === 1 ? "" : "s"} awaiting Xero match`} icon={Wallet} glow="amber" animated={false} onClick={() => reconciliation.pending_count ? setSettlementOpen(true) : toast.info("No payments are ready to settle")} testId="reconciliation-tile" />
-        <HeroTile label="Client billing controls" value={clients.length} subtitle="Terms, PO and billing contact defaults" icon={Users} glow="emerald" onClick={() => openBillingProfile()} testId="billing-profile-tile" />
+      <div className="grid gap-2 md:grid-cols-3" data-testid="invoice-control-strip">
+        <button type="button" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/[0.55] p-3 text-left transition hover:border-sky-400/30 hover:bg-sky-500/[0.04]" data-testid="xero-finance-tile"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-300"><Building2 className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Xero</span><span className="block truncate text-sm font-semibold">{xeroStatus.connected ? (xeroStatus.org_name || "Connected") : xeroStatus.configured ? "Finish setup" : "Not connected"}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>
+        <button type="button" onClick={() => reconciliation.pending_count ? setSettlementOpen(true) : toast.info("No payments are ready to settle")} className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/[0.55] p-3 text-left transition hover:border-amber-400/30 hover:bg-amber-500/[0.04]" data-testid="reconciliation-tile"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-300"><Wallet className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Awaiting reconciliation</span><span className="block font-mono text-sm font-semibold">${Number(reconciliation.pending_total || 0).toFixed(2)} <span className="font-sans text-[10px] font-normal text-muted-foreground">· {reconciliation.pending_count} payments</span></span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>
+        <button type="button" onClick={() => openBillingProfile()} className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/[0.55] p-3 text-left transition hover:border-emerald-400/30 hover:bg-emerald-500/[0.04]" data-testid="billing-profile-tile"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-300"><Users className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Billing profiles</span><span className="block text-sm font-semibold">{clients.length} clients</span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>
       </div>
 
       {/* Filters */}
@@ -1858,11 +2091,11 @@ export default function InvoicesPage() {
                     <TableCell><Badge className={STATUS_CONFIG[effectiveStatus]?.class + " text-[10px]"}>{STATUS_CONFIG[effectiveStatus]?.label}</Badge></TableCell>
                     <TableCell>
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                        {!isSplitParent && pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-emerald-400 hover:text-emerald-300 text-xs px-2" onClick={() => openPaymentDialog(inv)} data-testid={`pay-btn-${inv.id}`}><Banknote className="w-3 h-3 mr-1" />Record</Button>}
+                        {canRecordPayment && !isSplitParent && pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-emerald-400 hover:text-emerald-300 text-xs px-2" onClick={() => openPaymentDialog(inv)} data-testid={`pay-btn-${inv.id}`}><Banknote className="w-3 h-3 mr-1" />Record</Button>}
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-400" title="Preview PDF" onClick={() => handlePdfPreview(inv)} data-testid={`print-btn-${inv.id}`}><Printer className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-400" title="Download" onClick={() => handlePdfDownload(inv)} data-testid={`download-btn-${inv.id}`}><Download className="w-3 h-3" /></Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Clone" onClick={() => handleCloneInvoice(inv)}><Copy className="w-3 h-3" /></Button>
-                        {pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete draft" onClick={() => setDeleteTarget(inv)}><Trash2 className="w-3 h-3" /></Button>}
+                        {canCreateInvoice && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Clone" onClick={() => handleCloneInvoice(inv)}><Copy className="w-3 h-3" /></Button>}
+                        {canVoidInvoice && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete draft" onClick={() => setDeleteTarget(inv)}><Trash2 className="w-3 h-3" /></Button>}
                       </div>
                     </TableCell>
                   </TableRow>

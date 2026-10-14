@@ -95,7 +95,7 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
       >
         <DialogHeader className="sr-only" aria-hidden="true">
           <DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-amber-400" />Schedule Maintenance Window</DialogTitle>
-          <DialogDescription>Autonomous overnight maintenance — bundle N devices + N actions + a time. AI summary auto-posts to the parent ticket on completion.</DialogDescription>
+          <DialogDescription>Plan approved actions for selected devices at a recorded time. Nexus keeps the endpoint-returned outcome and can post a factual completion record to the linked ticket.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
@@ -204,7 +204,7 @@ export function MaintenanceWindowHistory({ open, onClose }) {
         <DialogContent className="max-w-4xl" data-testid="maintenance-history-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><History className="w-5 h-5 text-amber-400" />Maintenance Windows</DialogTitle>
-            <DialogDescription>Scheduled, running and completed windows. AI summary appears once each window completes.</DialogDescription>
+            <DialogDescription>Scheduled, running and completed windows. Completion is based on endpoint-returned command results, not dispatch alone.</DialogDescription>
           </DialogHeader>
           {loading ? <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin" /></div> :
             <ScrollArea className="max-h-[60vh]">

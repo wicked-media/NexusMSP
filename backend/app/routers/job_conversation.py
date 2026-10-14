@@ -151,6 +151,7 @@ async def send_job_email(job_type: str, job_id: str, data: dict, current_user: d
     delivery = await send_email(recipients, subject, body if body_type == "html" else f"<pre>{body}</pre>", category="service_job_replies", cc_addresses=data.get("cc") or [], bcc_addresses=data.get("bcc") or [], client_id=job.get("client_id"), related_type=f"{job_type}_job", related_id=job_id, initiated_by=current_user.get("id"), initiated_by_name=current_user.get("name"))
     email = {"id": str(uuid.uuid4()), "job_type": job_type, "job_id": job_id, "client_id": job.get("client_id"), "job_number": number, "user_id": current_user.get("id"), "avatar_url": current_user.get("avatar"), "from_address": current_user.get("email", ""), "from_name": current_user.get("name", ""), "to_addresses": recipients, "cc_addresses": data.get("cc") or [], "bcc_addresses": data.get("bcc") or [], "subject": subject, "body": body, "body_type": body_type, "direction": "outbound", "status": delivery.get("status", "failed"), "delivery_message": delivery.get("message", ""), "sender_mailbox": delivery.get("sender"), "created_at": datetime.now(timezone.utc).isoformat()}
     await db.job_emails.insert_one(email)
+    email.pop("_id", None)
     await _audit(config, job_id, current_user, "conversation_email_sent", f"Email sent to {', '.join(recipients)}")
     return email
 

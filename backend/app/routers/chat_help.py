@@ -38,8 +38,7 @@ _HELP_ICON_ALIASES = {
 }
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _slugify(s: str) -> str:
@@ -1517,55 +1516,6 @@ async def reseed(current_user: dict = Depends(get_current_user)):
         "pruned": res.deleted_count or 0,
     }
 
-    # Compatibility body retained below only for source-history readability.
-    try:
-        from app.routers._help_seed_modern import HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES
-    except Exception:
-        HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES = "", [], []
-
-    stale = set(STALE_SLUGS or [])
-
-    # 1) Overwrite the legacy default articles (idempotent) â€” but skip any that are now stale
-    default_to_seed = [a for a in DEFAULT_ARTICLES if a["slug"] not in stale]
-    await db.help_articles.delete_many({"slug": {"$in": [a["slug"] for a in DEFAULT_ARTICLES]}})
-    for a in default_to_seed:
-        await db.help_articles.insert_one({
-            **a,
-            "created_at": _now_iso(),
-            "updated_at": _now_iso(),
-        })
-
-    # 2) Prune any leftover stale slugs (e.g. custom-authored copies)
-    pruned_count = 0
-    if stale:
-        res = await db.help_articles.delete_many({"slug": {"$in": list(stale)}})
-        pruned_count = res.deleted_count or 0
-
-    # 3) Upsert the modern (post-dedup) articles â€” overwrite any prior versions
-    modern_seeded = 0
-    for a in MODERN_ARTICLES:
-        doc = {**a, "updated_at": _now_iso()}
-        existing = await db.help_articles.find_one({"slug": a["slug"]}, {"_id": 0})
-        if existing:
-            await db.help_articles.update_one({"slug": a["slug"]}, {"$set": doc})
-        else:
-            doc["created_at"] = _now_iso()
-            await db.help_articles.insert_one(doc)
-        modern_seeded += 1
-
-    if HELP_CATALOG_VERSION:
-        await db.help_center_metadata.update_one(
-            {"key": "catalog_version"},
-            {"$set": {"value": HELP_CATALOG_VERSION, "updated_at": _now_iso()}},
-            upsert=True,
-        )
-
-    return {
-        "seeded": len(default_to_seed),
-        "modern_seeded": modern_seeded,
-        "pruned": pruned_count,
-    }
-
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• HELP CO-PILOT (AI ask anything) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
@@ -1631,7 +1581,7 @@ async def help_copilot(payload: dict = Body(...), current_user: dict = Depends(g
         }
     except Exception as e:
         return {
-            "answer": f"AI temporarily unavailable. Top relevant articles below.",
+            "answer": "AI temporarily unavailable. Top relevant articles below.",
             "citations": [{"slug": c["slug"], "title": c["title"], "category": c.get("category")} for c in candidates],
             "fallback": True,
             "error": str(e)[:200],

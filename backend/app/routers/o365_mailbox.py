@@ -1,16 +1,113 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 from datetime import datetime, timezone, timedelta
+import base64
+import binascii
+import hashlib
 import uuid
 import httpx
 import re
 from html import escape
 from app.database import db
 from app.auth import get_current_user
-from app.models import *
+from app.services.microsoft365_credentials import (
+    has_microsoft365_client_secret,
+    load_microsoft365_client_secret,
+)
+from app.services.microsoft_graph_connection import (
+    acquire_graph_access_token,
+    load_connection as load_microsoft_mail_connection,
+)
+from app.services.secret_store import encrypt_secret
+from app.services.ticket_subscriptions import notify_ticket_subscribers
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
+from app.routers.lead_studio import create_email_intake_item
 
 router = APIRouter()
-OUTBOUND_ROLES = {"ticket_comments", "ticket_replies", "billing", "lead_responses", "notifications"}
+# Every shared sender is selected centrally in Mailbox & Email.  Keep this
+# list aligned with the categories used by the delivery gateway so a workflow
+# never silently falls back to an unrelated mailbox merely because it gained a
+# dedicated conversation surface.
+OUTBOUND_ROLES = {
+    "ticket_comments",
+    "ticket_replies",
+    "service_job_comments",
+    "service_job_replies",
+    "billing",
+    "lead_responses",
+    "notifications",
+}
+
+
+def _managed_mailboxes(settings: Optional[dict]) -> list[dict]:
+    """Return managed mailboxes, including the read-compatible legacy record.
+
+    Earlier Nexus installations stored one mailbox only at the top level.  Do
+    not make a customer reconnect it just because they add routing or a second
+    mailbox: promote that record in-memory and persist it on the next safe
+    settings write.
+    """
+    settings = settings or {}
+    stored = settings.get("mailboxes")
+    if isinstance(stored, list):
+        return [dict(mailbox) for mailbox in stored if isinstance(mailbox, dict)]
+
+    legacy_email = str(settings.get("mailbox_email") or "").strip()
+    if not legacy_email:
+        return []
+    return [{
+        "id": "legacy-primary",
+        "mailbox_email": legacy_email,
+        "tenant_id": settings.get("tenant_id", ""),
+        "client_id": settings.get("client_id", ""),
+        "connected": settings.get("connected", False),
+        "connection_status": settings.get("connection_status", "disconnected"),
+        "email_to_lead_enabled": settings.get("email_to_lead_enabled", True),
+        "email_to_ticket_enabled": settings.get("email_to_ticket_enabled", False),
+        "last_sync": settings.get("last_sync"),
+    }]
+
+
+def _normalise_outbound_delivery_state(settings: dict, mailboxes: list[dict]) -> dict:
+    """Return a valid shared sender and role map for the remaining mailboxes.
+
+    Removing a mailbox used to leave ``outbound_mailbox_email`` and one or
+    more role assignments pointed at a mailbox which no longer existed.  The
+    next invoice or ticket reply would then be accepted by Nexus but rejected
+    by Microsoft Graph.  Treat the connected mailbox list as the authority
+    and repair stale selections whenever that list changes.
+    """
+    addresses = {
+        str(mailbox.get("mailbox_email") or "").strip().lower(): str(mailbox.get("mailbox_email") or "").strip()
+        for mailbox in mailboxes
+        if str(mailbox.get("mailbox_email") or "").strip()
+    }
+    preferred = str(
+        settings.get("outbound_mailbox_email") or settings.get("mailbox_email") or ""
+    ).strip().lower()
+    sender = addresses.get(preferred) or next(iter(addresses.values()), "")
+
+    saved_routing = settings.get("outbound_routing")
+    saved_routing = saved_routing if isinstance(saved_routing, dict) else {}
+    routing = {
+        role: addresses.get(str(saved_routing.get(role) or "").strip().lower()) or sender
+        for role in OUTBOUND_ROLES
+    }
+    return {
+        "mailbox_email": sender,
+        "outbound_mailbox_email": sender,
+        "outbound_routing": routing if sender else {},
+    }
+
+
+async def _require_mailbox_admin(current_user: dict, *, allow_system_sync: bool = False) -> None:
+    """Protect operational mailbox controls from ordinary technician sessions."""
+    if allow_system_sync and isinstance(current_user, dict) and current_user.get("role") == "system":
+        return
+    caller_id = current_user.get("id") if isinstance(current_user, dict) else None
+    caller = await db.users.find_one({"id": caller_id}, {"_id": 0, "role": 1, "is_admin": 1}) if caller_id else None
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 # ============== OFFICE 365 ONE-CLICK MAILBOX SETUP ==============
 
@@ -20,19 +117,18 @@ async def get_o365_mailbox_settings(current_user: dict = Depends(get_current_use
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
     settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
-    if settings and "mailboxes" not in settings:
-        # Preserve older single-mailbox settings as the first managed mailbox.
-        legacy_email = settings.get("mailbox_email")
-        settings["mailboxes"] = ([{
-            "id": "legacy-primary", "mailbox_email": legacy_email,
-            "tenant_id": settings.get("tenant_id", ""), "client_id": settings.get("client_id", ""),
-            "connected": settings.get("connected", False), "connection_status": settings.get("connection_status", "disconnected"),
-            "email_to_lead_enabled": settings.get("email_to_lead_enabled", True),
-            "email_to_ticket_enabled": settings.get("email_to_ticket_enabled", False),
-            "last_sync": settings.get("last_sync"),
-        }] if legacy_email else [])
     if settings:
-        safe_settings = {**settings, "client_secret": "", "client_secret_set": bool(settings.get("client_secret"))}
+        mailboxes = _managed_mailboxes(settings)
+        safe_settings = {
+            **settings,
+            "mailboxes": mailboxes,
+            **_normalise_outbound_delivery_state(settings, mailboxes),
+            "client_secret": "",
+            "client_secret_set": has_microsoft365_client_secret(settings),
+        }
+        # The encrypted representation is still a reusable service credential
+        # and must never leave the Nexus API boundary for a browser client.
+        safe_settings.pop("client_secret_encrypted", None)
         return safe_settings
     return settings or {
         "type": "o365_mailbox",
@@ -71,46 +167,76 @@ async def update_o365_mailbox_settings(data: dict, current_user: dict = Depends(
         "mail_sync_enabled", "mail_sync_interval_minutes",
     }
     updated = {key: value for key, value in data.items() if key in allowed}
+    mailboxes = _managed_mailboxes(existing)
     requested_sender = (updated.get("outbound_mailbox_email") or "").strip().lower()
     if requested_sender:
-        available = {str(mailbox.get("mailbox_email") or "").strip().lower() for mailbox in existing.get("mailboxes", [])}
+        available = {str(mailbox.get("mailbox_email") or "").strip().lower() for mailbox in mailboxes}
         if requested_sender not in available:
             raise HTTPException(status_code=400, detail="Select one of the connected mailboxes as the outbound sender")
     if "outbound_routing" in updated:
         routing = updated["outbound_routing"]
         if not isinstance(routing, dict) or set(routing) != OUTBOUND_ROLES:
             raise HTTPException(status_code=400, detail="Assign exactly one connected mailbox to every outbound email role")
-        available = {str(mailbox.get("mailbox_email") or "").strip().lower() for mailbox in existing.get("mailboxes", [])}
+        available = {str(mailbox.get("mailbox_email") or "").strip().lower() for mailbox in mailboxes}
         for role, address in routing.items():
             if not str(address or "").strip().lower() or str(address).strip().lower() not in available:
                 raise HTTPException(status_code=400, detail=f"{role} must use one connected mailbox")
+    if "mail_sync_interval_minutes" in updated:
+        try:
+            interval = int(updated["mail_sync_interval_minutes"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Mailbox sync interval must be a whole number of minutes")
+        if not 1 <= interval <= 30:
+            raise HTTPException(status_code=400, detail="Mailbox sync interval must be between 1 and 30 minutes")
+        updated["mail_sync_interval_minutes"] = interval
     updated["type"] = "o365_mailbox"
     updated["updated_at"] = datetime.now(timezone.utc).isoformat()
     if "mailboxes" not in existing:
-        updated["mailboxes"] = []
+        updated["mailboxes"] = mailboxes
     await db.settings.update_one({"type": "o365_mailbox"}, {"$set": updated}, upsert=True)
     return {"message": "O365 mailbox settings updated"}
 
 @router.post("/o365/connect")
 async def connect_o365_mailbox(data: dict, current_user: dict = Depends(get_current_user)):
-    """One-click connect to Office 365 mailbox. 
-    In production, this initiates OAuth flow. Currently stores credentials for when Azure AD app is registered."""
+    """Connect a shared Microsoft 365 mailbox using an Entra app credential."""
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
     
     existing = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
-    tenant_id = data.get("tenant_id", "")
-    client_id = data.get("client_id", "")
-    client_secret = data.get("client_secret", "")
-    if str(client_secret).strip() in {"", "********"}:
-        client_secret = existing.get("client_secret", "")
-    mailbox_email = data.get("mailbox_email", "")
+    tenant_id = str(data.get("tenant_id") or "").strip()
+    client_id = str(data.get("client_id") or "").strip()
+    incoming_client_secret = data.get("client_secret", "")
+    if str(incoming_client_secret).strip() in {"", "********"}:
+        client_secret = await load_microsoft365_client_secret(
+            existing,
+            collection=db.settings,
+            query={"type": "o365_mailbox"},
+        )
+    else:
+        client_secret = str(incoming_client_secret).strip()
+    mailbox_email = str(data.get("mailbox_email") or "").strip()
     
     if not all([tenant_id, client_id, client_secret, mailbox_email]):
         raise HTTPException(status_code=400, detail="All Azure AD credentials and mailbox email are required")
+
+    # A mailbox collection is one Microsoft Graph application connection.  The
+    # root record carries the client credential used for *all* listed inboxes,
+    # so silently accepting a different tenant or app here would overwrite the
+    # existing connection and break every previously connected mailbox.
+    if existing.get("connected"):
+        existing_tenant = str(existing.get("tenant_id") or "").strip()
+        existing_client = str(existing.get("client_id") or "").strip()
+        if (
+            (existing_tenant and existing_tenant.casefold() != tenant_id.casefold())
+            or (existing_client and existing_client.casefold() != client_id.casefold())
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Additional inboxes must use the tenant and Graph application already connected to Nexus. Create a separate connection only after disconnecting the current mailbox group.",
+            )
     
-    mailboxes = existing.get("mailboxes", [])
+    mailboxes = _managed_mailboxes(existing)
     mailboxes = [m for m in mailboxes if m.get("mailbox_email", "").lower() != mailbox_email.lower()]
     mailbox = {
         "id": f"mbx-{uuid.uuid4().hex[:8]}", "tenant_id": tenant_id, "client_id": client_id,
@@ -120,18 +246,15 @@ async def connect_o365_mailbox(data: dict, current_user: dict = Depends(get_curr
         "email_to_ticket_enabled": data.get("email_to_ticket_enabled", False),
     }
     mailboxes.append(mailbox)
-    primary_sender = existing.get("outbound_mailbox_email") or existing.get("mailbox_email") or mailbox_email
-    routing = existing.get("outbound_routing") or {role: primary_sender for role in OUTBOUND_ROLES}
+    delivery_state = _normalise_outbound_delivery_state(existing, mailboxes)
     settings = {
         "type": "o365_mailbox",
         "enabled": True,
         "tenant_id": tenant_id,
         "client_id": client_id,
-        "client_secret": client_secret,
+        "client_secret_encrypted": encrypt_secret(client_secret),
         "redirect_uri": data.get("redirect_uri", ""),
-        "mailbox_email": primary_sender,
-        "outbound_mailbox_email": primary_sender,
-        "outbound_routing": routing,
+        **delivery_state,
         "connected": True,
         "live_sync_enabled": False,
         "mail_sync_enabled": existing.get("mail_sync_enabled", True),
@@ -148,7 +271,11 @@ async def connect_o365_mailbox(data: dict, current_user: dict = Depends(get_curr
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     
-    await db.settings.update_one({"type": "o365_mailbox"}, {"$set": settings}, upsert=True)
+    await db.settings.update_one(
+        {"type": "o365_mailbox"},
+        {"$set": settings, "$unset": {"client_secret": ""}},
+        upsert=True,
+    )
     return {"message": "Office 365 mailbox connected successfully", "status": "connected", "mailbox": mailbox_email}
 
 @router.delete("/o365/mailboxes/{mailbox_id}")
@@ -159,11 +286,24 @@ async def remove_o365_mailbox(mailbox_id: str, current_user: dict = Depends(get_
     settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
     if not settings:
         raise HTTPException(status_code=404, detail="Mailbox settings not found")
-    mailboxes = settings.get("mailboxes", [])
+    mailboxes = _managed_mailboxes(settings)
     remaining = [m for m in mailboxes if m.get("id") != mailbox_id]
     if len(remaining) == len(mailboxes):
         raise HTTPException(status_code=404, detail="Mailbox not found")
-    await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"mailboxes": remaining, "connected": bool(remaining), "enabled": bool(remaining), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    delivery_state = _normalise_outbound_delivery_state(settings, remaining)
+    has_mailboxes = bool(remaining)
+    await db.settings.update_one(
+        {"type": "o365_mailbox"},
+        {"$set": {
+            "mailboxes": remaining,
+            "connected": has_mailboxes,
+            "enabled": has_mailboxes,
+            "connection_status": "connected" if has_mailboxes else "disconnected",
+            "live_sync_enabled": bool(settings.get("live_sync_enabled")) if has_mailboxes else False,
+            **delivery_state,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
     return {"message": "Mailbox removed", "remaining": len(remaining)}
 
 
@@ -214,31 +354,41 @@ async def disconnect_o365_mailbox(current_user: dict = Depends(get_current_user)
 
 @router.post("/o365/test-connection")
 async def test_o365_connection(current_user: dict = Depends(get_current_user)):
-    """Verify the saved Microsoft Graph app credentials and shared mailbox access."""
-    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
-    if not settings or not settings.get("connected"):
-        return {"success": False, "message": "O365 mailbox not connected"}
-    mailbox = settings.get("outbound_mailbox_email") or settings.get("mailbox_email", "")
-    required = ("tenant_id", "client_id", "client_secret")
-    if not mailbox or not all(settings.get(field) for field in required):
-        return {"success": False, "message": "Mailbox or Microsoft Graph credentials are incomplete", "mailbox": mailbox}
+    """Verify the active Microsoft Graph credential and mailbox access."""
+    await _require_mailbox_admin(current_user)
+    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    connection = await load_microsoft_mail_connection()
+    delegated = connection if (connection and connection.get("status") == "connected") else None
+    if delegated:
+        mailbox = settings.get("outbound_mailbox_email") or settings.get("mailbox_email") or delegated.get("connected_account", "")
+    else:
+        if not settings.get("connected"):
+            return {"success": False, "message": "O365 mailbox not connected"}
+        mailbox = settings.get("outbound_mailbox_email") or settings.get("mailbox_email", "")
+        required = ("tenant_id", "client_id")
+        if not mailbox or not has_microsoft365_client_secret(settings) or not all(settings.get(field) for field in required):
+            return {"success": False, "message": "Mailbox or Microsoft Graph credentials are incomplete", "mailbox": mailbox}
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            token_response = await client.post(
-                f"https://login.microsoftonline.com/{settings['tenant_id']}/oauth2/v2.0/token",
-                data={"client_id": settings["client_id"], "client_secret": settings["client_secret"], "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
+        access_token, token_mode = await acquire_graph_access_token()
+        if not access_token:
+            message = (
+                "The Microsoft 365 sign-in has expired. Reconnect Microsoft 365 to restore mail access."
+                if delegated
+                else "Microsoft 365 authentication failed. Verify the Tenant ID, Client ID, secret, and admin consent."
             )
-            if token_response.status_code != 200:
-                message = "Microsoft 365 authentication failed. Verify the Tenant ID, Client ID, secret, and admin consent."
-                await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"live_sync_enabled": False, "last_connection_test_at": datetime.now(timezone.utc).isoformat(), "last_connection_test_status": "failed"}})
-                return {"success": False, "message": message, "mailbox": mailbox, "token_valid": False}
-            access_token = token_response.json().get("access_token")
+            await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"live_sync_enabled": False, "last_connection_test_at": datetime.now(timezone.utc).isoformat(), "last_connection_test_status": "failed"}})
+            return {"success": False, "message": message, "mailbox": mailbox, "token_valid": False}
+        async with httpx.AsyncClient(timeout=20) as client:
             graph_response = await client.get(
                 f"https://graph.microsoft.com/v1.0/users/{mailbox}/mailFolders/inbox/messages?$top=1&$select=id",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         if graph_response.status_code != 200:
-            message = "Microsoft 365 authenticated, but the shared mailbox cannot be read. Grant Mail.Read application permission and admin consent."
+            message = (
+                "Microsoft 365 authenticated, but the mailbox cannot be read. Reconnect the Microsoft sign-in including Mail.Read."
+                if token_mode == "delegated"
+                else "Microsoft 365 authenticated, but the shared mailbox cannot be read. Grant Mail.Read application permission and admin consent."
+            )
             await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"live_sync_enabled": False, "last_connection_test_at": datetime.now(timezone.utc).isoformat(), "last_connection_test_status": "mailbox_access_failed"}})
             return {"success": False, "message": message, "mailbox": mailbox, "token_valid": True, "permissions": ["Mail.Read required"]}
         now = datetime.now(timezone.utc).isoformat()
@@ -250,15 +400,21 @@ async def test_o365_connection(current_user: dict = Depends(get_current_user)):
 @router.post("/o365/sync-emails")
 async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
     """Pull newly received Graph messages and feed them through the normal lead/ticket router."""
-    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
-    if not settings or not settings.get("connected"):
-        raise HTTPException(status_code=400, detail="O365 mailbox not connected")
-    required = ("tenant_id", "client_id", "client_secret")
-    if not all(settings.get(field) for field in required):
-        raise HTTPException(status_code=400, detail="Microsoft Graph credentials are incomplete")
+    await _require_mailbox_admin(current_user, allow_system_sync=True)
+    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    connection = await load_microsoft_mail_connection()
+    delegated = connection if (connection and connection.get("status") == "connected") else None
+    if not delegated:
+        if not settings.get("connected"):
+            raise HTTPException(status_code=400, detail="O365 mailbox not connected")
+        required = ("tenant_id", "client_id")
+        if not has_microsoft365_client_secret(settings) or not all(settings.get(field) for field in required):
+            raise HTTPException(status_code=400, detail="Microsoft Graph credentials are incomplete")
     mailboxes = [mailbox for mailbox in settings.get("mailboxes", []) if mailbox.get("mailbox_email")]
     if not mailboxes and settings.get("mailbox_email"):
         mailboxes = [{"mailbox_email": settings["mailbox_email"]}]
+    if not mailboxes and delegated and delegated.get("connected_account"):
+        mailboxes = [{"mailbox_email": delegated["connected_account"]}]
     if not mailboxes:
         raise HTTPException(status_code=400, detail="No connected mailbox is available to sync")
 
@@ -268,16 +424,13 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
         since = cursor.replace("+00:00", "Z")
     else:
         since = (now - timedelta(days=7)).isoformat().replace("+00:00", "Z")
-    fetched = leads_created = tickets_created = activities_added = skipped = errors = 0
+    fetched = intake_created = leads_created = tickets_created = activities_added = skipped = errors = 0
+    access_token, _ = await acquire_graph_access_token()
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Microsoft 365 authentication failed")
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(
-                f"https://login.microsoftonline.com/{settings['tenant_id']}/oauth2/v2.0/token",
-                data={"client_id": settings["client_id"], "client_secret": settings["client_secret"], "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
-            )
-            if token_response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Microsoft 365 authentication failed")
-            headers = {"Authorization": f"Bearer {token_response.json().get('access_token')}"}
+            headers = {"Authorization": f"Bearer {access_token}"}
             for mailbox in mailboxes:
                 address = mailbox["mailbox_email"]
                 next_url = f"https://graph.microsoft.com/v1.0/users/{address}/mailFolders/inbox/messages"
@@ -311,6 +464,7 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
                                 "mailbox_email": address,
                             })
                             status = result.get("status")
+                            intake_created += status == "intake_created"
                             leads_created += status == "lead_created"
                             tickets_created += status == "ticket_created"
                             activities_added += status == "activity_added"
@@ -325,9 +479,9 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
     sync_time = now.isoformat()
     await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"last_sync": sync_time, "last_graph_sync": sync_time, "live_sync_enabled": errors == 0}})
     return {
-        "message": f"Synced {fetched} email(s): {leads_created} lead(s), {tickets_created} ticket(s), {activities_added} activity update(s)",
+        "message": f"Synced {fetched} email(s): {intake_created} intake item(s), {leads_created} lead(s), {tickets_created} ticket(s), {activities_added} activity update(s)",
         "mode": "live_graph", "emails_fetched": fetched, "leads_created": leads_created,
-        "tickets_created": tickets_created, "activities_added": activities_added, "skipped": skipped, "errors": errors,
+        "intake_created": intake_created, "tickets_created": tickets_created, "activities_added": activities_added, "skipped": skipped, "errors": errors,
     }
 
 # ============== EMAIL-TO-LEAD WEBHOOK ==============
@@ -360,6 +514,117 @@ def _incoming_message_id(data: dict) -> str:
     ).strip()
 
 
+def _incoming_headers(data: dict) -> dict[str, str]:
+    """Return a lower-cased, bounded header map from a trusted mail relay payload."""
+    raw_headers = data.get("internetMessageHeaders") or data.get("headers") or []
+    if isinstance(raw_headers, dict):
+        return {
+            str(name).strip().lower(): str(value).strip()
+            for name, value in raw_headers.items()
+            if str(name).strip() and len(str(value)) <= 512
+        }
+    if not isinstance(raw_headers, list):
+        return {}
+    headers: dict[str, str] = {}
+    for item in raw_headers:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip().lower()
+        value = str(item.get("value") or "").strip()
+        if name and len(name) <= 128 and len(value) <= 512:
+            headers[name] = value
+    return headers
+
+
+def _normalise_thread_subject(subject: str) -> str:
+    return re.sub(r"^(?:(?:re|fw|fwd)\s*:\s*)+", "", (subject or "").strip(), flags=re.I).casefold()
+
+
+async def _threaded_ticket_for_inbound(headers: dict[str, str], subject: str, known_client: dict | None) -> dict | None:
+    """Resolve a ticket only when its stored client matches the verified sender."""
+    if not known_client or not known_client.get("id"):
+        return None
+    client_id = known_client["id"]
+    header_ticket_id = headers.get("x-nexus-ticket-id")
+    if not header_ticket_id:
+        thread_key = str(headers.get("x-nexus-thread") or "")
+        if thread_key.startswith("ticket:"):
+            header_ticket_id = thread_key.split(":", 1)[1]
+    if header_ticket_id and re.fullmatch(r"[A-Za-z0-9_-]{1,160}", header_ticket_id):
+        ticket = await db.tickets.find_one({"id": header_ticket_id, "client_id": client_id}, {"_id": 0})
+        if ticket:
+            return ticket
+
+    normalised_subject = _normalise_thread_subject(subject)
+    if not normalised_subject:
+        return None
+    candidates = await db.tickets.find(
+        {"client_id": client_id}, {"_id": 0}
+    ).sort("updated_at", -1).to_list(250)
+    return next(
+        (
+            ticket for ticket in candidates
+            if str(ticket.get("ticket_number") or "").strip()
+            and str(ticket.get("ticket_number") or "").casefold() in normalised_subject
+        ),
+        None,
+    )
+
+
+async def _possible_auto_reply_loop(headers: dict[str, str], sender_email: str, mailbox: str | None, subject: str) -> bool:
+    """Suppress acknowledgement storms without dropping the inbound record itself."""
+    automated = str(headers.get("auto-submitted") or "").casefold() not in {"", "no"}
+    fingerprint = hashlib.sha256(
+        f"{sender_email.casefold()}|{(mailbox or '').casefold()}|{_normalise_thread_subject(subject)}".encode("utf-8")
+    ).hexdigest()
+    now = datetime.now(timezone.utc)
+    previous = await db.email_loop_guards.find_one({"fingerprint": fingerprint}, {"_id": 0, "last_seen_at": 1})
+    await db.email_loop_guards.update_one(
+        {"fingerprint": fingerprint},
+        {"$set": {"last_seen_at": now.isoformat(), "automated": automated}, "$setOnInsert": {"created_at": now.isoformat()}},
+        upsert=True,
+    )
+    if automated:
+        return True
+    if not previous or not previous.get("last_seen_at"):
+        return False
+    try:
+        last_seen = datetime.fromisoformat(str(previous["last_seen_at"]).replace("Z", "+00:00"))
+        return (now - last_seen) < timedelta(minutes=10)
+    except ValueError:
+        return False
+
+
+def _inbound_email_attachments(data: dict) -> list[dict]:
+    """Decode bounded file attachments from a trusted Graph/relay payload.
+
+    Inline assets are intentionally excluded: they are frequently tracking or
+    signature images and do not belong in the operational ticket evidence.
+    """
+    raw_attachments = data.get("attachments") or []
+    if not isinstance(raw_attachments, list):
+        return []
+    decoded: list[dict] = []
+    for item in raw_attachments[:10]:
+        if not isinstance(item, dict) or item.get("isInline"):
+            continue
+        encoded = item.get("contentBytes") or item.get("content_base64")
+        if not isinstance(encoded, str) or not encoded or len(encoded) > 35 * 1024 * 1024:
+            continue
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        if len(content) > 25 * 1024 * 1024:
+            continue
+        decoded.append({
+            "filename": str(item.get("name") or item.get("filename") or "email-attachment"),
+            "content_type": str(item.get("contentType") or item.get("content_type") or "application/octet-stream"),
+            "content": content,
+        })
+    return decoded
+
+
 @router.post("/o365/webhook/incoming-email")
 async def handle_incoming_email(data: dict, current_user: dict = Depends(get_current_user)):
     """Authenticated inbox ingestion for tests and trusted internal processing.
@@ -371,6 +636,7 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
     sender_name = data.get("from_name", data.get("sender_name", "Unknown"))
     subject = data.get("subject", "No Subject")
     body = data.get("body", "")
+    incoming_headers = _incoming_headers(data)
     
     if not sender_email:
         raise HTTPException(status_code=400, detail="from_address is required")
@@ -399,6 +665,7 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             sender_email=sender_email, sender_name=sender_name, subject=subject,
             mailbox=routed_mailbox, client_id=known_client.get("id"), related_type="email_intake",
         )
+    threaded_ticket = await _threaded_ticket_for_inbound(incoming_headers, subject, known_client)
 
     # Replies to a job update must return to that job rather than creating a
     # duplicate service ticket or CRM lead. Match a known client's recent job
@@ -449,13 +716,98 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
     if job_reply:
         return await remember({"status": "job_reply_recorded", "job_id": job_reply.get("job_id"), "job_type": job_reply.get("job_type"), "mailbox": routed_mailbox, "message": "Email reply added to the service-job conversation"})
 
+    if threaded_ticket:
+        received_at = datetime.now(timezone.utc).isoformat()
+        stored_attachments = []
+        rejected_attachment_count = 0
+        from app.routers.ticket_attachments import store_ticket_attachment
+        for inbound_attachment in _inbound_email_attachments(data):
+            try:
+                stored_attachments.append(await store_ticket_attachment(
+                    ticket=threaded_ticket,
+                    content=inbound_attachment["content"],
+                    filename=inbound_attachment["filename"],
+                    content_type=inbound_attachment["content_type"],
+                    uploaded_by="external-email",
+                    uploaded_by_name=sender_name or sender_email,
+                    source="email_inbound",
+                    source_message_id=inbound_message_id or None,
+                ))
+            except HTTPException:
+                rejected_attachment_count += 1
+        comment = {
+            "id": str(uuid.uuid4()),
+            "ticket_id": threaded_ticket["id"],
+            "user_id": "external-email",
+            "user_name": sender_name or sender_email,
+            "content": body[:20000] if body else "(No message content)",
+            "is_internal": False,
+            "visibility": "public",
+            "portal_visible": True,
+            "client_notified": False,
+            "source": "email_reply",
+            "sender_email": sender_email,
+            "subject": subject,
+            "internet_message_id": inbound_message_id or None,
+            "in_reply_to": incoming_headers.get("in-reply-to"),
+            "references": incoming_headers.get("references"),
+            "thread_key": incoming_headers.get("x-nexus-thread"),
+            "attachment_count": len(stored_attachments),
+            "rejected_attachment_count": rejected_attachment_count,
+            "created_at": received_at,
+        }
+        await db.ticket_comments.insert_one(comment)
+        try:
+            await notify_ticket_subscribers(ticket=threaded_ticket, comment=comment, actor_id=None)
+        except Exception:
+            # The customer email is already durably captured. Subscriber
+            # delivery may be retried independently and must not reject it.
+            pass
+        await db.tickets.update_one(
+            {"id": threaded_ticket["id"], "client_id": known_client.get("id")},
+            {"$set": {
+                "updated_at": received_at,
+                "last_activity_at": received_at,
+                "last_customer_reply_at": received_at,
+                "last_activity_by_id": "external-email",
+                "last_activity_by_name": sender_name or sender_email,
+            }},
+        )
+        await db.ticket_audit_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "ticket_id": threaded_ticket["id"],
+            "user_id": "external-email",
+            "user_name": sender_name or sender_email,
+            "action": "ticket_email_reply_received",
+            "details": f"Customer email reply matched to the existing ticket thread ({len(stored_attachments)} attachment(s) retained)",
+            "created_at": received_at,
+        })
+        from app.services.ticket_participants import sync_ticket_participants
+        await sync_ticket_participants(
+            ticket=threaded_ticket,
+            addresses=[sender_email],
+            role="sender",
+            direction="inbound",
+            delivery_status="received",
+            display_name=sender_name,
+        )
+        return await remember({
+            "status": "ticket_reply_added",
+            "ticket_id": threaded_ticket["id"],
+            "mailbox": routed_mailbox,
+            "attachment_count": len(stored_attachments),
+            "rejected_attachment_count": rejected_attachment_count,
+            "message": "Email reply added to the existing ticket conversation",
+        })
+
     # An acknowledgement is useful for new enquiries, but avoid obvious mail
     # loops and automated senders. The delivery is also captured in the shared
     # outbound audit trail through send_email.
     sender_local_part = sender_email.split("@", 1)[0].lower()
     automated_sender = sender_local_part in {"no-reply", "noreply", "postmaster", "mailer-daemon"} or (subject or "").strip().lower().startswith(("auto:", "automatic reply:"))
+    auto_reply_loop = await _possible_auto_reply_loop(incoming_headers, sender_email, routed_mailbox, subject)
     auto_reply_enabled = routing.get("auto_reply_enabled", (settings or {}).get("auto_reply_enabled", False))
-    if auto_reply_enabled and not automated_sender:
+    if auto_reply_enabled and not automated_sender and not auto_reply_loop:
         auto_reply_message = (routing.get("auto_reply_message") or (settings or {}).get("auto_reply_message") or "Thank you for contacting us. We have received your inquiry and will respond shortly.").strip()
         if auto_reply_message:
             from app.routers.email_utils import send_email
@@ -521,7 +873,7 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
     if not email_to_lead:
         return await remember({"status": "skipped", "mailbox": routed_mailbox, "reason": "email-to-lead disabled for this mailbox"})
     
-    existing_lead = await db.leads.find_one({"email": email_match}, {"_id": 0})
+    existing_lead = await db.leads.find_one(tenant_scoped_query(current_user, {"email": email_match}), {"_id": 0})
     if existing_lead:
         activity = {
             "id": str(uuid.uuid4()),
@@ -536,65 +888,36 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             "mailbox_email": routed_mailbox,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        activity["tenant_id"] = platform_tenant_id(current_user)
         await db.lead_activities.insert_one(activity)
-        await db.leads.update_one({"id": existing_lead["id"]}, {"$set": {"last_contact": datetime.now(timezone.utc).isoformat()}})
+        await db.leads.update_one(tenant_scoped_query(current_user, {"id": existing_lead["id"]}), {"$set": {"last_contact": datetime.now(timezone.utc).isoformat()}})
         return await remember({"status": "activity_added", "lead_id": existing_lead["id"], "mailbox": routed_mailbox, "message": "Email logged as activity on existing lead"})
-    
-    company_name = sender_name if sender_name != "Unknown" else sender_email.split("@")[1].split(".")[0].title()
-    
-    lead = Lead(
-        company_name=company_name,
-        contact_name=sender_name,
-        email=sender_email,
-        source="email",
-        notes=f"Auto-created from incoming email.\n\nSubject: {subject}\n\n{body[:1000] if body else ''}",
-        status="new",
-        pipeline_stage=1,
-        estimated_value=0,
+
+    intake = await create_email_intake_item(
+        current_user=current_user, sender_email=sender_email, sender_name=sender_name,
+        subject=subject, body=body, mailbox=routed_mailbox, message_id=inbound_message_id,
     )
-    doc = lead.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["updated_at"] = doc["updated_at"].isoformat()
-    if doc.get("last_contact"):
-        doc["last_contact"] = doc["last_contact"].isoformat()
-    if doc.get("next_follow_up"):
-        doc["next_follow_up"] = doc["next_follow_up"].isoformat()
-    doc["source_mailbox"] = routed_mailbox
-    await db.leads.insert_one(doc)
 
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": "all",
         "type": "new_lead",
-        "title": f"New email lead: {company_name}",
+        "title": f"New lead intake: {sender_name or sender_email}",
         "message": f"{sender_name} ({sender_email}) emailed: {subject}",
         "mailbox_email": routed_mailbox,
-        "ref_id": lead.id,
-        "ref_type": "lead",
+        "ref_id": intake["id"],
+        "ref_type": "lead_intake",
         "severity": "info",
         "read": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": platform_tenant_id(current_user),
     })
     
-    activity = {
-        "id": str(uuid.uuid4()),
-        "lead_id": lead.id,
-        "lead_name": company_name,
-        "user_id": "system",
-        "user_name": "Email Bot",
-        "activity_type": "email",
-        "subject": f"Initial email: {subject}",
-        "description": body[:500] if body else "",
-        "outcome": "positive",
-        "mailbox_email": routed_mailbox,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.lead_activities.insert_one(activity)
-    
-    return await remember({"status": "lead_created", "lead_id": lead.id, "mailbox": routed_mailbox, "message": f"New lead created from email: {company_name}"})
+    return await remember({"status": "intake_created", "intake_id": intake["id"], "mailbox": routed_mailbox, "message": "Inbound email queued for Lead Intake review"})
 
 @router.get("/o365/email-leads")
 async def get_email_generated_leads(current_user: dict = Depends(get_current_user)):
     """Get leads that were auto-generated from emails"""
+    await _require_mailbox_admin(current_user)
     leads = await db.leads.find({"source": "email"}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return leads

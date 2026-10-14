@@ -4,7 +4,7 @@
 NexusOps RMM/PSA platform with 200+ routers, 75+ pages, live Acronis Cyber Cloud integration.
 
 ## Credentials
-- Admin: `aaron@stech.com.au` / `Lucky@2871$!`
+- Admin: `aaron@stech.com.au` / `[redacted-test-password]`
 - Portal: `john@acmecorp.com` / `portal123`
 
 ## 2026-06-28 — NexusOps Agent Auto-Update on Heartbeat

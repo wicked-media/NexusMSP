@@ -102,7 +102,7 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
       headline: Number(clientPanel.count || 0) > 0
         ? `${clientPanel.count} client-impact signal${Number(clientPanel.count) === 1 ? "" : "s"} need attention.`
         : "The client portfolio is stable.",
-      detail: `${metricValue(clientPanel, "Active clients")} active clients · ${metricValue(clientPanel, "Active tickets")} active tickets`,
+      detail: `${metricValue(clientPanel, "Active clients")} active clients · ${metricValue(clientPanel, "SLA breaches")} SLA breach${metricValue(clientPanel, "SLA breaches") === 1 ? "" : "es"}`,
     },
   };
 

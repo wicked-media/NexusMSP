@@ -163,7 +163,7 @@ export default function DomotzPage() {
                   Get your API key from Domotz Portal: Settings → API Keys
                 </p>
                 <DialogFooter>
-                  <Button type="submit">Save & Connect</Button>
+                  <Button type="submit">Save & connect</Button>
                 </DialogFooter>
               </form>
             </DialogContent>

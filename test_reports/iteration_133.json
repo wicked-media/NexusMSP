@@ -22,7 +22,7 @@
     "backend": "100% (21/21 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Using existing TEST_ prefixed tickets from iteration 132",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -83,5 +83,5 @@
     "patterns-panel",
     "patterns-refresh"
   ],
-  "notes": "The suggest dialog auto-open only triggers when the matching pattern exists in the Pattern Discovery panel's loaded patterns. Since Pattern Discovery uses min_tickets=3 by default and test data has patterns with only 2 tickets, the auto-open doesn't trigger. This is intentional behavior as documented: 'If no patterns exist for a given URL, the auto-open simply does nothing — that's intentional, not a bug.'"
+  "notes": "The suggest dialog auto-open only triggers when the matching pattern exists in the Pattern Discovery panel's loaded patterns. Since Pattern Discovery uses min_tickets=3 by default and test data has patterns with only 2 tickets, the auto-open doesn't trigger. This is intentional behavior as documented: 'If no patterns exist for a given URL, the auto-open simply does nothing â€” that's intentional, not a bug.'"
 }

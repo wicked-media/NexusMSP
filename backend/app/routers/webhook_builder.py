@@ -1,11 +1,23 @@
 """Webhook Builder - Full CRUD for custom webhook integrations with testing and logging"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
-import uuid, json, random
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_global_scope
+from app.services.webhook_security import redact_webhook_for_response, validate_legacy_webhook_url
+import uuid, random
 
 router = APIRouter(prefix="/webhook-builder", tags=["webhook-builder"])
+
+
+async def _require_webhook_administration(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    _permission: dict = Depends(require_action("platform.webhooks.manage")),
+) -> dict:
+    await assert_global_scope(current_user, operation="platform.webhooks.manage", request=request)
+    return current_user
 
 EVENT_TRIGGERS = [
     {"value": "ticket.created", "label": "Ticket Created", "category": "tickets"},
@@ -65,29 +77,33 @@ def _gen_default_hooks():
 
 
 @router.get("/list")
-async def list_webhooks(current_user: dict = Depends(get_current_user)):
+async def list_webhooks(current_user: dict = Depends(_require_webhook_administration)):
     hooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
     if not hooks:
         hooks = _gen_default_hooks()
         for h in hooks:
             await db.webhooks.insert_one(h)
         hooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
-    return hooks
+    return [redact_webhook_for_response(hook) for hook in hooks]
 
 
 @router.get("/triggers")
-async def get_event_triggers(current_user: dict = Depends(get_current_user)):
+async def get_event_triggers(current_user: dict = Depends(_require_webhook_administration)):
     return {"triggers": EVENT_TRIGGERS, "sample_payloads": SAMPLE_PAYLOADS}
 
 
 @router.post("/create")
-async def create_webhook(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_webhook(data: dict, current_user: dict = Depends(_require_webhook_administration)):
+    try:
+        endpoint_url = validate_legacy_webhook_url(data.get("url"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     hook = {
         "id": f"WH-{uuid.uuid4().hex[:6].upper()}",
         "name": data.get("name", "Untitled Webhook"),
         "trigger": data.get("trigger", "ticket.created"),
         "method": data.get("method", "POST"),
-        "url": data.get("url", ""),
+        "url": endpoint_url,
         "headers": data.get("headers", {"Content-Type": "application/json"}),
         "payload_template": data.get("payload_template", "{}"),
         "status": "active",
@@ -102,12 +118,17 @@ async def create_webhook(data: dict, current_user: dict = Depends(get_current_us
     }
     await db.webhooks.insert_one(hook)
     hook.pop("_id", None)
-    return hook
+    return redact_webhook_for_response(hook)
 
 
 @router.put("/{hook_id}")
-async def update_webhook(hook_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+async def update_webhook(hook_id: str, data: dict, current_user: dict = Depends(_require_webhook_administration)):
     updates = {k: v for k, v in data.items() if k in ["name", "trigger", "method", "url", "headers", "payload_template", "status", "filters", "retry_count", "retry_delay"]}
+    if "url" in updates:
+        try:
+            updates["url"] = validate_legacy_webhook_url(updates["url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.webhooks.update_one({"id": hook_id}, {"$set": updates})
     if r.matched_count == 0:
@@ -116,7 +137,7 @@ async def update_webhook(hook_id: str, data: dict, current_user: dict = Depends(
 
 
 @router.delete("/{hook_id}")
-async def delete_webhook(hook_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_webhook(hook_id: str, current_user: dict = Depends(_require_webhook_administration)):
     r = await db.webhooks.delete_one({"id": hook_id})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
@@ -124,7 +145,7 @@ async def delete_webhook(hook_id: str, current_user: dict = Depends(get_current_
 
 
 @router.post("/{hook_id}/toggle")
-async def toggle_webhook(hook_id: str, current_user: dict = Depends(get_current_user)):
+async def toggle_webhook(hook_id: str, current_user: dict = Depends(_require_webhook_administration)):
     hook = await db.webhooks.find_one({"id": hook_id}, {"_id": 0})
     if not hook:
         raise HTTPException(status_code=404, detail="Not found")
@@ -134,7 +155,7 @@ async def toggle_webhook(hook_id: str, current_user: dict = Depends(get_current_
 
 
 @router.post("/{hook_id}/test")
-async def test_webhook(hook_id: str, current_user: dict = Depends(get_current_user)):
+async def test_webhook(hook_id: str, current_user: dict = Depends(_require_webhook_administration)):
     hook = await db.webhooks.find_one({"id": hook_id}, {"_id": 0})
     if not hook:
         raise HTTPException(status_code=404, detail="Not found")
@@ -155,7 +176,7 @@ async def test_webhook(hook_id: str, current_user: dict = Depends(get_current_us
 
 
 @router.get("/{hook_id}/logs")
-async def get_webhook_logs(hook_id: str, current_user: dict = Depends(get_current_user)):
+async def get_webhook_logs(hook_id: str, current_user: dict = Depends(_require_webhook_administration)):
     hook = await db.webhooks.find_one({"id": hook_id}, {"_id": 0, "log": 1, "name": 1})
     if not hook:
         raise HTTPException(status_code=404, detail="Not found")

@@ -4,35 +4,101 @@ from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
+
+VALID_SHIFT_TYPES = {"primary", "secondary", "lead"}
+VALID_SHIFT_CATEGORIES = {"general", "sla", "security", "network", "wisp", "workshop", "cabling", "emergency"}
+
+
+def _scope(user: dict, **query) -> dict:
+    return tenant_scoped_query(user, query)
+
+
+def _parse_utc(value: object, field: str) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field} required")
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"{field} must be an ISO date-time") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _normalise_shift_payload(data: dict, *, partial: bool = False) -> dict:
+    payload = {}
+    for key in ("tech_id", "tech_name", "notes"):
+        if key in data or not partial:
+            payload[key] = str(data.get(key) or "").strip()[:500 if key == "notes" else 200]
+
+    if "shift_type" in data or not partial:
+        shift_type = str(data.get("shift_type") or "primary").strip().lower()
+        if shift_type not in VALID_SHIFT_TYPES:
+            raise HTTPException(status_code=400, detail="shift_type must be primary, secondary or lead")
+        payload["shift_type"] = shift_type
+
+    if "category" in data or not partial:
+        category = str(data.get("category") or "general").strip().lower()
+        if category not in VALID_SHIFT_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Unsupported on-call category")
+        payload["category"] = category
+
+    if "start_time" in data or "end_time" in data or not partial:
+        start = _parse_utc(data.get("start_time"), "start_time")
+        end = _parse_utc(data.get("end_time"), "end_time")
+        if end <= start:
+            raise HTTPException(status_code=400, detail="end_time must be after start_time")
+        if end - start > timedelta(days=31):
+            raise HTTPException(status_code=400, detail="A single on-call shift cannot exceed 31 days")
+        payload["start_time"] = start.isoformat()
+        payload["end_time"] = end.isoformat()
+
+    if not partial and not payload.get("tech_id"):
+        raise HTTPException(status_code=400, detail="tech_id required")
+    if "status" in data:
+        status = str(data.get("status") or "").strip().lower()
+        if status not in {"scheduled", "cancelled"}:
+            raise HTTPException(status_code=400, detail="status must be scheduled or cancelled")
+        payload["status"] = status
+    return payload
+
+
+async def _scoped_roster_contact(user: dict, tech_id: str) -> dict:
+    contact = await db.tech_roster.find_one(_scope(user, id=tech_id), {"_id": 0})
+    if not contact or contact.get("active") is False:
+        raise HTTPException(status_code=400, detail="Choose an active contact from this organisation's roster")
+    return contact
 
 # ============== ON-CALL ROSTER ==============
 
 @router.get("/on-call/roster")
 async def get_on_call_roster(current_user: dict = Depends(get_current_user)):
-    shifts = await db.on_call_roster.find({}, {"_id": 0}).sort("start_time", 1).to_list(500)
+    shifts = await db.on_call_roster.find(_scope(current_user), {"_id": 0, "tenant_id": 0}).sort("start_time", 1).to_list(500)
     return shifts
 
 @router.get("/on-call/active")
 async def get_active_on_call(current_user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc).isoformat()
-    active = await db.on_call_roster.find({
+    active = await db.on_call_roster.find(_scope(current_user, **{
         "start_time": {"$lte": now}, "end_time": {"$gte": now}, "status": {"$ne": "cancelled"}
-    }, {"_id": 0}).to_list(50)
+    }), {"_id": 0, "tenant_id": 0}).to_list(50)
     return active
 
 @router.post("/on-call/roster")
-async def create_on_call_shift(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_on_call_shift(data: dict, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    clean = _normalise_shift_payload(data)
+    contact = await _scoped_roster_contact(current_user, clean["tech_id"])
     shift = {
         "id": str(uuid.uuid4()),
-        "tech_id": data.get("tech_id", ""),
-        "tech_name": data.get("tech_name", ""),
-        "shift_type": data.get("shift_type", "primary"),
-        "category": data.get("category", "general"),
-        "start_time": data.get("start_time", ""),
-        "end_time": data.get("end_time", ""),
-        "notes": data.get("notes", ""),
+        "tenant_id": platform_tenant_id(current_user),
+        **clean,
+        "tech_name": contact.get("name") or clean.get("tech_name") or "Roster contact",
         "status": "scheduled",
         "swapped_from": None,
         "swapped_by": None,
@@ -45,38 +111,57 @@ async def create_on_call_shift(data: dict, current_user: dict = Depends(get_curr
     # Notify tech
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()), "user_id": shift["tech_id"],
+        "tenant_id": platform_tenant_id(current_user),
         "title": "On-Call Shift Assigned",
         "message": f"You are scheduled on-call ({shift['category']}) from {shift['start_time'][:10]} to {shift['end_time'][:10]}.",
         "severity": "info", "type": "on_call_assigned", "read": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
+    await log_activity(
+        current_user, "on_call_shift_created", "on_call_shift", shift["id"], shift["tech_name"],
+        "Scheduled an on-call shift.",
+        metadata={"tier": shift["shift_type"], "category": shift["category"], "start_time": shift["start_time"], "end_time": shift["end_time"], "tenant_id": platform_tenant_id(current_user)},
+    )
+    shift.pop("tenant_id", None)
     return shift
 
 @router.put("/on-call/roster/{shift_id}")
-async def update_on_call_shift(shift_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = {"tech_id", "tech_name", "shift_type", "category", "start_time", "end_time", "notes", "status"}
-    update = {k: v for k, v in data.items() if k in allowed}
+async def update_on_call_shift(shift_id: str, data: dict, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    before = await db.on_call_roster.find_one(_scope(current_user, id=shift_id), {"_id": 0})
+    if not before:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    update = _normalise_shift_payload({**before, **data})
+    if "tech_id" in update:
+        contact = await _scoped_roster_contact(current_user, update["tech_id"])
+        update["tech_name"] = contact.get("name") or update.get("tech_name") or "Roster contact"
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.on_call_roster.update_one({"id": shift_id}, {"$set": update})
+    await db.on_call_roster.update_one(_scope(current_user, id=shift_id), {"$set": update})
+    await log_activity(current_user, "on_call_shift_updated", "on_call_shift", shift_id, before.get("tech_name", "Roster contact"), "Updated an on-call shift.", changes=update, metadata={"tenant_id": platform_tenant_id(current_user)})
     return {"message": "Shift updated"}
 
 @router.delete("/on-call/roster/{shift_id}")
-async def delete_on_call_shift(shift_id: str, current_user: dict = Depends(get_current_user)):
-    await db.on_call_roster.delete_one({"id": shift_id})
+async def delete_on_call_shift(shift_id: str, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    shift = await db.on_call_roster.find_one(_scope(current_user, id=shift_id), {"_id": 0})
+    if not shift:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    await db.on_call_roster.delete_one(_scope(current_user, id=shift_id))
+    await log_activity(current_user, "on_call_shift_deleted", "on_call_shift", shift_id, shift.get("tech_name", "Roster contact"), "Deleted an on-call shift.", metadata={"tenant_id": platform_tenant_id(current_user)})
     return {"message": "Shift deleted"}
 
 @router.post("/on-call/roster/{shift_id}/swap")
-async def swap_on_call_shift(shift_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    shift = await db.on_call_roster.find_one({"id": shift_id}, {"_id": 0})
+async def swap_on_call_shift(shift_id: str, data: dict, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    shift = await db.on_call_roster.find_one(_scope(current_user, id=shift_id), {"_id": 0})
     if not shift:
         raise HTTPException(status_code=404, detail="Shift not found")
     new_tech_id = data.get("new_tech_id")
     new_tech_name = data.get("new_tech_name", "")
     if not new_tech_id:
         raise HTTPException(status_code=400, detail="New tech required")
+    contact = await _scoped_roster_contact(current_user, str(new_tech_id))
+    new_tech_name = contact.get("name") or new_tech_name or "Roster contact"
     old_tech_id = shift["tech_id"]
     old_tech_name = shift["tech_name"]
-    await db.on_call_roster.update_one({"id": shift_id}, {"$set": {
+    await db.on_call_roster.update_one(_scope(current_user, id=shift_id), {"$set": {
         "tech_id": new_tech_id, "tech_name": new_tech_name,
         "swapped_from": old_tech_id, "swapped_by": current_user.get("name", ""),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -88,28 +173,32 @@ async def swap_on_call_shift(shift_id: str, data: dict, current_user: dict = Dep
     ]:
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()), "user_id": uid,
+            "tenant_id": platform_tenant_id(current_user),
             "title": "On-Call Shift Swap", "message": msg,
             "severity": "warning", "type": "on_call_swap", "read": False,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+    await log_activity(current_user, "on_call_shift_reassigned", "on_call_shift", shift_id, new_tech_name, "Reassigned on-call coverage.", changes={"tech_id": new_tech_id, "tech_name": new_tech_name}, metadata={"previous_tech_id": old_tech_id, "tenant_id": platform_tenant_id(current_user)})
     return {"message": f"Shift swapped from {old_tech_name} to {new_tech_name}"}
 
 @router.post("/on-call/ping-active")
-async def ping_active_on_call(current_user: dict = Depends(get_current_user)):
+async def ping_active_on_call(current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
     now = datetime.now(timezone.utc).isoformat()
-    active = await db.on_call_roster.find({
+    active = await db.on_call_roster.find(_scope(current_user, **{
         "start_time": {"$lte": now}, "end_time": {"$gte": now}, "status": {"$ne": "cancelled"}
-    }, {"_id": 0}).to_list(50)
+    }), {"_id": 0}).to_list(50)
     pings = 0
     for shift in active:
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()), "user_id": shift["tech_id"],
+            "tenant_id": platform_tenant_id(current_user),
             "title": "You are ON CALL",
             "message": f"Reminder: You are currently on-call ({shift.get('category', 'general')}). Shift ends {shift['end_time'][:16]}.",
             "severity": "warning", "type": "on_call_ping", "read": False,
             "created_at": now,
         })
         pings += 1
+    await log_activity(current_user, "on_call_coverage_pinged", "on_call_roster", platform_tenant_id(current_user), "Active on-call coverage", f"Pinged {pings} active on-call contacts.", metadata={"active_shift_ids": [shift.get("id") for shift in active], "tenant_id": platform_tenant_id(current_user)})
     return {"message": f"Pinged {pings} on-call technicians"}
 
 # ============== WORKSHOP / REPAIR JOBS ==============

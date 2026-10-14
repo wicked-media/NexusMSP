@@ -310,7 +310,7 @@ async def copilot_chat(data: dict, current_user: dict = Depends(get_current_user
             if score >= 2:
                 relevant.append(f"KB: {art['title']}: {(art.get('content','') or '')[:200]}")
         if relevant:
-            context_parts.append(f"\nRelevant Knowledge Base Articles:\n" + "\n".join(relevant[:3]))
+            context_parts.append("\nRelevant Knowledge Base Articles:\n" + "\n".join(relevant[:3]))
     
     system_msg = "\n".join(context_parts)
     

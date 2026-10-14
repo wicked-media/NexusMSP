@@ -6,7 +6,7 @@ category (feature|merge|fix|polish), and optional links.
 """
 from fastapi import APIRouter, Depends
 from app.auth import get_current_user
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 router = APIRouter()
@@ -123,7 +123,7 @@ async def get_changelog(limit: int = 20, current_user: dict = Depends(get_curren
     return {
         "entries": CHANGELOG[:max(1, min(limit, 100))],
         "total": len(CHANGELOG),
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 

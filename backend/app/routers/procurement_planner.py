@@ -12,13 +12,7 @@ router = APIRouter(prefix="/procurement-planner", tags=["Procurement Planner"])
 USEFUL_LIFE_YEARS = {"server": 5, "hardware": 4, "laptop": 3, "mobile": 3, "network": 7, "peripheral": 5, "other": 4}
 
 
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
+from app.services.time_utils import parse_iso_datetime as _parse_date
 
 
 def _estimated_replacement_cost(asset: dict):
