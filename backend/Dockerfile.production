@@ -16,7 +16,8 @@ ARG NEXUS_AGENT_VERSION=0.1.11-endpoint-readiness
 RUN mkdir -p /out \
     && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-agent.exe ./cmd/nexus-agent \
     && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-client-chat.exe ./cmd/nexus-chat \
-    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-agent-tray.exe ./cmd/nexus-tray
+    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-agent-tray.exe ./cmd/nexus-tray \
+    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-remote-companion.exe ./cmd/nexus-remote-companion
 
 
 FROM python:3.12-slim AS runtime
@@ -43,6 +44,7 @@ COPY --chown=nexus:nexus backend/scripts/nexus_migrate.py ./scripts/nexus_migrat
 COPY --from=agent-build --chown=nexus:nexus /out/nexus-agent.exe ./agent/dist/nexus-agent.exe
 COPY --from=agent-build --chown=nexus:nexus /out/nexus-client-chat.exe ./agent/dist/nexus-client-chat.exe
 COPY --from=agent-build --chown=nexus:nexus /out/nexus-agent-tray.exe ./agent/dist/nexus-agent-tray.exe
+COPY --from=agent-build --chown=nexus:nexus /out/nexus-remote-companion.exe ./agent/dist/nexus-remote-companion.exe
 RUN mkdir -p /app/data/agent-installers /app/uploads /app/private_uploads && chown -R nexus:nexus /app
 
 USER nexus

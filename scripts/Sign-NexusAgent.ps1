@@ -1,6 +1,6 @@
 # Authenticode signing scaffold for the Nexus Windows Agent release components.
 #
-# Signs nexus-agent.exe, nexus-client-chat.exe and nexus-agent-tray.exe with
+# Signs the Nexus Agent service and every shipped user-session companion with
 # Windows signtool, verifies each signature, and writes a signing evidence JSON
 # (signer identity, certificate thumbprint, RFC3161 timestamp and per-file
 # SHA-256 before/after) for the release evidence record.
@@ -36,7 +36,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$releaseComponents = @('nexus-agent.exe', 'nexus-client-chat.exe', 'nexus-agent-tray.exe')
+$releaseComponents = @('nexus-agent.exe', 'nexus-client-chat.exe', 'nexus-agent-tray.exe', 'nexus-remote-companion.exe')
 
 $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
 if (-not $signtool) {

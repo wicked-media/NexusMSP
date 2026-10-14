@@ -106,6 +106,7 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-agent.exe ./cmd/nexus-agent
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-client-chat.exe ./cmd/nexus-chat
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS -H=windowsgui" -o dist/nexus-agent-tray.exe ./cmd/nexus-tray
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-remote-companion.exe ./cmd/nexus-remote-companion
       - uses: actions/upload-artifact@v4
         with:
           name: nexus-agent-windows-components
@@ -113,6 +114,7 @@ jobs:
             agent/dist/nexus-agent.exe
             agent/dist/nexus-client-chat.exe
             agent/dist/nexus-agent-tray.exe
+            agent/dist/nexus-remote-companion.exe
           if-no-files-found: error
 
   container-build:

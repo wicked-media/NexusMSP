@@ -15,7 +15,7 @@ def test_production_image_builds_agent_components_from_source_not_local_dist():
     assert "COPY agent ./" in dockerfile
     assert "COPY --from=agent-build" in dockerfile
     assert "agent/dist ./agent/dist" not in dockerfile
-    for component in ("nexus-agent.exe", "nexus-client-chat.exe", "nexus-agent-tray.exe"):
+    for component in ("nexus-agent.exe", "nexus-client-chat.exe", "nexus-agent-tray.exe", "nexus-remote-companion.exe"):
         assert f"/out/{component}" in dockerfile
     assert "agent/dist" in dockerignore
     assert "backend/.env" in dockerignore
@@ -24,6 +24,13 @@ def test_production_image_builds_agent_components_from_source_not_local_dist():
 def test_ci_builds_every_distributed_agent_component_and_production_image():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
-    for component in ("nexus-agent.exe", "nexus-client-chat.exe", "nexus-agent-tray.exe"):
+    for component in ("nexus-agent.exe", "nexus-client-chat.exe", "nexus-agent-tray.exe", "nexus-remote-companion.exe"):
         assert component in workflow
     assert "--file backend/Dockerfile.production ." in workflow
+
+
+def test_signing_evidence_covers_every_distributed_agent_component():
+    signing_script = (ROOT / "scripts" / "Sign-NexusAgent.ps1").read_text(encoding="utf-8")
+
+    for component in ("nexus-agent.exe", "nexus-client-chat.exe", "nexus-agent-tray.exe", "nexus-remote-companion.exe"):
+        assert component in signing_script
