@@ -4,7 +4,7 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, CheckCircle2, Loader2, RefreshCw, ShieldAlert, ShieldQuestion } from "lucide-react";
+import { Activity, CheckCircle2, Loader2, RefreshCw, ShieldAlert, ShieldQuestion, Scale } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import {
@@ -45,17 +45,20 @@ export default function OperationsAssurancePage() {
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [contract, setContract] = useState(null);
   const [report, setReport] = useState(null);
+  const [serviceGap, setServiceGap] = useState(null);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [contractRes, reportRes] = await Promise.all([
+      const [contractRes, reportRes, serviceGapRes] = await Promise.all([
         axios.get(`${API}/operations-assurance/contract`, { headers }),
         axios.get(`${API}/operations-assurance/commitments`, { headers }),
+        axios.get(`${API}/operations-assurance/service-gap`, { headers }),
       ]);
       setContract(contractRes.data);
       setReport(reportRes.data);
+      setServiceGap(serviceGapRes.data);
     } catch (err) {
       setError(apiErrorMessage(err, "The assurance report could not be loaded. Nothing is being claimed."));
     }
@@ -124,6 +127,66 @@ export default function OperationsAssurancePage() {
           </CardContent>
         </Card>
       </div>
+
+      {serviceGap && (
+        <Card className="border-cyan-500/20" data-testid="service-gap">
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <Scale className="w-4 h-4 mt-0.5 text-cyan-500" />
+                <div>
+                  <p className="text-sm font-semibold">Service Gap</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Contracted, observed and billed quantities reconcile only where an explicit service identifier exists.
+                  </p>
+                </div>
+              </div>
+              <Badge variant="outline" className="text-[10px]">
+                {serviceGap.summary?.services_evaluated || 0} services evaluated
+              </Badge>
+            </div>
+
+            <div className="grid gap-2 grid-cols-2 md:grid-cols-5 text-xs">
+              {[
+                ["Under-delivery", serviceGap.summary?.under_delivery || 0, "text-rose-400"],
+                ["Under-billing", serviceGap.summary?.under_billing || 0, "text-amber-500"],
+                ["Over-billing", serviceGap.summary?.over_billing || 0, "text-rose-400"],
+                ["Unverified", serviceGap.summary?.unverified_delivery || 0, "text-violet-400"],
+                ["Unmapped", serviceGap.summary?.unmapped_records || 0, "text-slate-400"],
+              ].map(([label, count, tone]) => (
+                <div key={label} className="rounded border border-border/60 px-2.5 py-2">
+                  <p className="text-[10px] text-muted-foreground">{label}</p>
+                  <p className={`mt-0.5 font-semibold tabular-nums ${tone}`}>{count}</p>
+                </div>
+              ))}
+            </div>
+
+            {serviceGap.findings?.length > 0 ? (
+              <ul className="space-y-2" data-testid="service-gap-findings">
+                {serviceGap.findings.slice(0, 8).map((finding) => (
+                  <li key={`${finding.client_id}:${finding.service_key}`} className="rounded border border-border/60 p-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-medium font-mono">{finding.service_key}</p>
+                      <Badge variant="outline" className={`text-[10px] ${stateStyle(finding.state)}`}>
+                        {String(finding.state || "").replaceAll("_", " ")}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">{finding.reason}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Contracted: {finding.contracted ?? "unverified"} · Provisioned: {finding.provisioned ?? "unverified"} · Billed: {finding.billed ?? "unverified"}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No verified service discrepancy is currently recorded for this scope.
+              </p>
+            )}
+            <p className="text-[11px] text-muted-foreground">{serviceGap.boundary}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {unmeasured.length > 0 && (
         <Card className="border-violet-500/30 bg-violet-500/5" data-testid="assurance-unmeasured">

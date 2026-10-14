@@ -1,8 +1,17 @@
+import base64
+import logging
 from datetime import datetime, timezone, timedelta
+from io import BytesIO
+
+import barcode
+from barcode.writer import SVGWriter
+
 from app.database import db
 from app.auth import hash_password
 from app.models import *
 import random; random = random.SystemRandom()
+
+logger = logging.getLogger(__name__)
 
 PERMISSION_PRESETS = {
     "L1 Technician": {
@@ -101,6 +110,20 @@ PERMISSION_PRESETS = {
         "agent_commands": {"view": False, "execute": False},
     },
 }
+
+
+def generate_barcode_svg_data(code: str, barcode_type: str = "code128") -> str:
+    """Generate a barcode image for seeded catalogue records without route coupling."""
+    try:
+        barcode_class = barcode.get_barcode_class(barcode_type.lower())
+        barcode_value = barcode_class(code, writer=SVGWriter())
+        output = BytesIO()
+        barcode_value.write(output)
+        encoded = base64.b64encode(output.getvalue()).decode()
+        return f"data:image/svg+xml;base64,{encoded}"
+    except Exception:
+        logger.exception("Unable to generate barcode for seeded product")
+        return ""
 
 
 async def seed_data():

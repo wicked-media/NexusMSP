@@ -257,6 +257,7 @@ export default function ProductionReadinessPage() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [data, setData] = useState(null);
+  const [platformHealth, setPlatformHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
@@ -270,8 +271,16 @@ export default function ProductionReadinessPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const response = await axios.get(`${API}/production-readiness/overview`, { headers });
-      setData(response.data);
+      const [readiness, health] = await Promise.allSettled([
+        axios.get(`${API}/production-readiness/overview`, { headers }),
+        axios.get(`${API}/platform-health/overview`, { headers }),
+      ]);
+      if (readiness.status !== "fulfilled") throw readiness.reason;
+      setData(readiness.value.data);
+      // Platform Health is deliberately restricted to global-scope operators.
+      // A technician can still review their authorised release controls without
+      // learning platform-wide operational state.
+      setPlatformHealth(health.status === "fulfilled" ? health.value.data : null);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Production readiness could not be loaded");
     } finally {
@@ -362,6 +371,26 @@ export default function ProductionReadinessPage() {
         <HeroTile label="Failed tests" value={summary.failed_tests || 0} icon={XCircle} glow={(summary.failed_tests || 0) ? "rose" : "zinc"} subtitle="Evidence requires action" testId="readiness-tests-tile" />
         <HeroTile label="Launch decision" value={humanise(launchDecision)} animated={false} icon={Flag} glow={launchDecision === "candidate" ? "emerald" : launchDecision === "pilot_only" ? "amber" : "rose"} subtitle="Derived—not manually promoted" testId="readiness-decision-tile" />
       </div>
+
+      {platformHealth && (
+        <Card className="border-cyan-500/15" data-testid="platform-health-panel">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base"><Activity className="h-4 w-4 text-cyan-300" />Platform Health</CardTitle>
+            <CardDescription>Operator evidence for the Nexus platform. Missing telemetry is disclosed rather than reported as healthy.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {(platformHealth.components || []).map((component) => (
+              <div key={component.id} className="rounded-xl border border-border/70 bg-muted/[0.06] p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-medium">{component.label}</p>
+                  <Badge variant="outline" className={STATUS_STYLES[component.state] || STATUS_STYLES.not_started}>{humanise(component.state)}</Badge>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">{component.detail}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
         <Card className="border-cyan-500/15">

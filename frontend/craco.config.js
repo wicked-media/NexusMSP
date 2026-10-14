@@ -63,6 +63,14 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
+  // Nexus uses browser-history routes for every workspace.  Explicitly retain
+  // CRA's SPA fallback after applying the custom proxy configuration so a
+  // refresh or deep link such as /login is served by React rather than 404ing.
+  devServerConfig.historyApiFallback = {
+    ...(typeof devServerConfig.historyApiFallback === "object" ? devServerConfig.historyApiFallback : {}),
+    disableDotRule: true,
+  };
+
   // In the sandboxed full-stack preview the browser reaches the app through a
   // single origin, so same-origin /api calls are forwarded to the FastAPI
   // backend started by scripts/dev-stack.sh. NEXUS_PROXY_TARGET overrides the

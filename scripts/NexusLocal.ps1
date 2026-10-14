@@ -15,6 +15,10 @@ $backendLog = Join-Path $root "backend_live.stdout.log"
 $backendErrorLog = Join-Path $root "backend_live.stderr.log"
 $frontendLog = Join-Path $root "frontend_live.stdout.log"
 $frontendErrorLog = Join-Path $root "frontend_live.stderr.log"
+$portableMongoRoot = Join-Path $root ".tools"
+$portableMongoDataPath = Join-Path $root "tmp\mongodb-data"
+$portableMongoLog = Join-Path $root "tmp\mongodb.stdout.log"
+$portableMongoErrorLog = Join-Path $root "tmp\mongodb.stderr.log"
 $bundledNodeBins = @(
   (Join-Path $env:USERPROFILE ".cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin"),
   (Join-Path $env:LOCALAPPDATA "codex-runtimes\codex-primary-runtime\dependencies\node\bin")
@@ -35,6 +39,35 @@ function Test-NexusMongo {
   return [bool](Get-NetTCPConnection -LocalPort 27017 -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalAddress -in @("127.0.0.1", "::1", "0.0.0.0", "::") } |
     Select-Object -First 1)
+}
+
+function Get-NexusPortableMongo {
+  if (-not (Test-Path $portableMongoRoot)) { return $null }
+  return Get-ChildItem -Path $portableMongoRoot -Filter "mongod.exe" -File -Recurse -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+}
+
+function Start-NexusMongo {
+  if (Test-NexusMongo) { return $true }
+
+  $mongod = Get-NexusPortableMongo
+  if (-not $mongod) { return $false }
+
+  New-Item -ItemType Directory -Force -Path $portableMongoDataPath | Out-Null
+  Write-Host "[Nexus] Starting workspace-local MongoDB..."
+  Start-Process -FilePath $mongod -ArgumentList @(
+    "--dbpath", $portableMongoDataPath,
+    "--bind_ip", "127.0.0.1",
+    "--port", "27017"
+  ) -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $portableMongoLog -RedirectStandardError $portableMongoErrorLog
+
+  foreach ($attempt in 1..20) {
+    Start-Sleep -Milliseconds 500
+    if (Test-NexusMongo) { return $true }
+  }
+
+  Write-Warning "[Nexus] Workspace-local MongoDB did not become ready. Check $portableMongoLog and $portableMongoErrorLog."
+  return $false
 }
 
 function Get-NexusBackendPids {
@@ -134,8 +167,8 @@ function Wait-NexusUrl([string]$Url, [string]$Name) {
 }
 
 function Start-NexusLocal {
-  if (-not (Test-NexusMongo)) {
-    Write-Warning "[Nexus] MongoDB is not listening on port 27017. Start the MongoDB service, then run Nexus Local again."
+  if (-not (Start-NexusMongo)) {
+    Write-Warning "[Nexus] MongoDB is not listening on port 27017. Install MongoDB or place its portable runtime under .tools, then run Nexus Local again."
     return
   }
 

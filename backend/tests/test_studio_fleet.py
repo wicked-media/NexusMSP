@@ -138,9 +138,21 @@ BATCH_6_CATALOGUE = {
     "laboratory-equipment", "broadcast", "satellite", "edge",
 }
 
+# Batch 7 (186-210): provider operations, identity and service assurance.
+# These entries extend the portfolio without turning every idea into a sidebar
+# workspace or an unsupported implementation claim.
+BATCH_7_CATALOGUE = {
+    "sd-wan", "bgp", "ip-transit", "ip-address-management", "carrier-interconnect",
+    "radius", "network-access-control", "wireless-isp", "gpon", "carrier-billing",
+    "privileged-access", "service-accounts", "access-reviews", "zero-trust",
+    "identity-lifecycle", "service-gap", "service-acceptance", "environment-comparison",
+    "change-risk", "operational-readiness", "msp-acquisition", "multi-msp",
+    "procurement-intelligence", "customer-value", "platform-health",
+}
+
 CATALOGUE = (
     BATCH_2_CATALOGUE | BATCH_3_CATALOGUE | BATCH_4_CATALOGUE | BATCH_5_CATALOGUE
-    | BATCH_6_CATALOGUE
+    | BATCH_6_CATALOGUE | BATCH_7_CATALOGUE
 )
 
 # Work items the consolidation created, which are the merge target of concepts
@@ -326,7 +338,7 @@ def test_products_hold_each_studio_exactly_once():
 
 
 def test_every_catalogue_idea_is_recorded_exactly_once():
-    """The consolidation records every proposal from batches 2-5, and drops none."""
+    """The consolidation records every proposal through batch 7, and drops none."""
     covered = [
         concept
         for proposal in studio_proposals.PROPOSALS.values()
@@ -472,10 +484,12 @@ def test_endpoint_and_commerce_hold_the_specialisations_the_batch_names():
     assert {"windows", "endpoint-performance"} <= set(endpoint["studios"])
     commerce = catalogue["nexus-commerce"]
     assert commerce["studios"] == ["finance"]
-    # Batch 5 proposed four commerce studios. The consolidation keeps one new one
-    # (Stockroom), records the batch-4 catalogue as the other, and turns Quoting,
-    # Subscription and Customer Profitability into work on engines that exist.
-    assert commerce["planned_studios"] == ["service-catalogue", "stockroom"]
+    # Batch 5 proposed four commerce studios. Batch 7 adds carrier settlement and
+    # procurement intelligence as gated specialist work, while Quoting,
+    # Subscription and Customer Profitability remain work on existing engines.
+    assert commerce["planned_studios"] == [
+        "service-catalogue", "stockroom", "carrier-billing", "procurement-intelligence",
+    ]
     dispositions = {p["id"]: p["disposition"] for p in commerce["proposals"]}
     assert dispositions["quoting"] == "extend"
     assert dispositions["subscription"] == "extend"
@@ -537,6 +551,29 @@ def test_batch_6_plans_name_the_decision_that_blocks_them():
         "messaging-compliance", "data-governance", "data-loss-prevention",
         "ediscovery", "privacy-operations",
     }
+
+
+def test_batch_7_consolidates_assurance_and_privileged_operations_into_existing_homes():
+    """Batch 7 grows the portfolio without duplicating evidence or access owners."""
+    proposals = studio_proposals.PROPOSALS
+    assert proposals["service-gap"]["disposition"] == "section"
+    assert proposals["service-gap"]["merges_into"] == "operations-assurance"
+    assert proposals["operational-readiness"]["disposition"] == "section"
+    assert proposals["operational-readiness"]["merges_into"] == "operations-assurance"
+    assert proposals["privileged-access"]["disposition"] == "extend"
+    assert proposals["privileged-access"]["already_exists_at"] == "backend/app/routers/nexus_access.py"
+
+
+def test_batch_7_plans_name_the_provider_or_evidence_decision_that_blocks_them():
+    """A provider/identity/assurance plan must disclose the gate before it ships."""
+    for proposal_id in BATCH_7_CATALOGUE:
+        proposal = studio_proposals.PROPOSALS[proposal_id]
+        assert proposal["sources"] and proposal["sources"][0].startswith("batch 7 #"), proposal_id
+        assert proposal["note"], proposal_id
+        if proposal["disposition"] in {"studio", "section", "extend"}:
+            assert proposal["gates"], proposal_id
+            for gate_id in proposal["gates"]:
+                assert "batch 7" in studio_proposals.GATES[gate_id]["recorded_in"], gate_id
 
 
 # ============== COMMERCIAL TIERS ==============

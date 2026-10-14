@@ -172,7 +172,7 @@ GATES: dict[str, dict] = {
               "recoverable.", "batch 2 #5, batch 3 Recovery Confidence Map, batch 5 #112"),
         _gate("authentication-journey", "Identity-provider sign-in ingestion",
               "Why an authentication attempt failed cannot be inferred; sign-in and "
-              "Conditional Access ingestion comes first.", "batch 2, batch 3, batch 4 #82, batch 5 #110"),
+              "Conditional Access ingestion comes first.", "batch 2, batch 3, batch 4 #82, batch 5 #110, batch 7 #199"),
         _gate("assurance-evidence-model", "Evidence model for Nexus's own claims",
               "Access reviews, attestations and residency are assurance claims about "
               "Nexus itself and need an evidence model and a review cadence owner.",
@@ -356,6 +356,69 @@ GATES: dict[str, dict] = {
               "Edge nodes, remote gateways, local applications and synchronisation state "
               "are not collected by the agent yet, so resilient offline operation cannot "
               "be observed.", "batch 6 #185"),
+        # --- Batch 7 gates: service-provider operations, identity and assurance. ---
+        # These are deliberately capability gates rather than a promise to stand up
+        # network control planes or a second identity authority.  Nexus starts by
+        # reading provider evidence and can only propose governed changes after an
+        # adapter, scope, approval and rollback contract has been admitted.
+        _gate("carrier-routing-read-contract", "Carrier routing read contract",
+              "BGP, transit and interconnect explanations require authorised reads from "
+              "the relevant routing and carrier systems with per-provider rate, scope and "
+              "retention rules.", "batch 7 #186, #187, #188, #190"),
+        _gate("network-address-authority", "Authoritative IP address allocation source",
+              "Address ownership, reservations and overlap detection need one declared "
+              "allocation authority; Nexus must not infer allocations from scans.",
+              "batch 7 #189"),
+        _gate("network-access-provider-contract", "Network access provider contract",
+              "RADIUS, 802.1X and access-control explanations require provider logs, "
+              "policy reads and an identity-to-device correlation boundary.",
+              "batch 7 #191, #192"),
+        _gate("access-network-provider-contract", "Access-network provider contract",
+              "Wireless and GPON diagnostics require authorised telemetry from radios, "
+              "OLTs and subscriber equipment, with subscriber scope and retention defined.",
+              "batch 7 #193, #194"),
+        _gate("carrier-settlement-source", "Carrier settlement source of truth",
+              "Wholesale rating, provider charges and disputes need a reconciled provider "
+              "statement source and an approved relationship to Nexus contracts and invoices.",
+              "batch 7 #195"),
+        _gate("privileged-session-provider-contract", "Privileged-session provider contract",
+              "Just-in-time elevation, session evidence and expiry must be read from or "
+              "executed through an approved identity or access provider; Nexus never stores credentials.",
+              "batch 7 #196"),
+        _gate("nonhuman-identity-ingestion", "Non-human identity inventory",
+              "Service accounts, application registrations and automation identities need "
+              "provider ingestion with dependency evidence before rotation risk can be assessed.",
+              "batch 7 #197"),
+        _gate("access-review-provider-contract", "Access-review decision contract",
+              "A review campaign needs provider-effective access reads, named reviewers, "
+              "retention and an approved removal adapter before it can change access.",
+              "batch 7 #198"),
+        _gate("identity-lifecycle-adapters", "Identity lifecycle provider adapters",
+              "Joiner, mover and leaver automation needs a verified adapter and completion "
+              "evidence for every connected system; an incomplete deprovision is never a pass.",
+              "batch 7 #199, #200"),
+        _gate("service-entitlement-evidence", "Service entitlement and delivery evidence",
+              "Contracted quantities, provisioned objects, billing records and verification "
+              "evidence need stable relationship keys and a documented owner before reconciliation.",
+              "batch 7 #201, #202, #203, #205"),
+        _gate("change-risk-evidence-model", "Change risk evidence model",
+              "Risk scoring requires attributed dependencies, maintenance restrictions and "
+              "rollback evidence; it must explain inputs rather than manufacture a score.",
+              "batch 7 #204"),
+        _gate("partner-delegation-contract", "Delegated provider scope contract",
+              "Multi-MSP and acquisition workflows require an approved provider-to-client "
+              "delegation boundary before any shared customer evidence is surfaced.",
+              "batch 7 #206, #207"),
+        _gate("procurement-intelligence-source", "Procurement intelligence source",
+              "Quote, availability, warranty and lifecycle recommendations require supplier "
+              "data contracts and a defensible compatibility/evidence model.", "batch 7 #208"),
+        _gate("customer-outcome-baseline", "Customer outcome baseline",
+              "Customer-value claims need a recorded baseline, methodology and evidence; "
+              "Nexus must not state financial savings it cannot substantiate.", "batch 7 #209"),
+        _gate("platform-slo-evidence", "Platform SLO and isolation evidence",
+              "Platform Health needs bounded operational telemetry plus tenant-isolation and "
+              "integration evidence; it cannot treat a process heartbeat as an availability claim.",
+              "batch 7 #210"),
     )
 }
 
@@ -1354,6 +1417,89 @@ PROPOSALS: dict[str, dict] = {
                  "applications and offline behaviour, so the studio belongs to the "
                  "endpoint estate but is blocked on inventory the agent does not collect.",
         ),
+
+        # --- Batch 7, studios 186-210: provider operations, identity and assurance ---
+        #
+        # The point of this batch is not 25 new navigation items.  Network and
+        # carrier operations are specialist provider families; assurance is an
+        # extension of the existing evidence-first studio; identity work extends
+        # the existing control plane; and platform health is an owned platform
+        # concern.  Each idea is recorded once, in its existing product home.
+        _proposal("sd-wan", "SD-WAN Studio", "nexus-infrastructure", "studio", ("batch 7 #186",),
+                  gates=("carrier-routing-read-contract",),
+                  note="Application path explanations need appliance, tunnel and link evidence from an authorised provider adapter before Nexus can explain a route."),
+        _proposal("bgp", "BGP Studio", "nexus-infrastructure", "studio", ("batch 7 #187",),
+                  gates=("carrier-routing-read-contract",),
+                  note="Read-only route diagnostics and simulation come before any BGP change; peer-specific approval and verified rollback remain admission requirements."),
+        _proposal("ip-transit", "IP Transit Studio", "nexus-infrastructure", "studio", ("batch 7 #188",),
+                  gates=("carrier-routing-read-contract",),
+                  note="Upstream utilisation, route health and customer impact require an interconnect and routing evidence contract, not a synthetic status card."),
+        _proposal("ip-address-management", "IP Address Management Studio", "nexus-infrastructure", "studio", ("batch 7 #189",),
+                  gates=("network-address-authority",),
+                  note="Allocation, reservation and overlap decisions need a single authoritative address source; discovered addresses are observations, not allocations."),
+        _proposal("carrier-interconnect", "Carrier Interconnect Studio", "nexus-infrastructure", "studio", ("batch 7 #190",),
+                  gates=("carrier-routing-read-contract",),
+                  note="Carrier handoffs and demarcation dependencies are provider-owned evidence and must be traceable before fault attribution is offered."),
+        _proposal("radius", "RADIUS Studio", "nexus-identity", "studio", ("batch 7 #191",),
+                  gates=("network-access-provider-contract",),
+                  note="Authentication failures are explained from provider policy and log evidence, never inferred from an endpoint being unable to join a network."),
+        _proposal("network-access-control", "Network Access Control Studio", "nexus-identity", "studio", ("batch 7 #192",),
+                  gates=("network-access-provider-contract",),
+                  note="802.1X admission and quarantine decisions need device identity, certificates and provider-effective policy evidence."),
+        _proposal("wireless-isp", "Wireless ISP Studio", "nexus-infrastructure", "studio", ("batch 7 #193",),
+                  gates=("access-network-provider-contract",),
+                  note="Radio, subscriber and signal evidence needs explicit provider access and subscriber scope before Nexus correlates degradation with services."),
+        _proposal("gpon", "GPON Studio", "nexus-infrastructure", "studio", ("batch 7 #194",),
+                  gates=("access-network-provider-contract",),
+                  note="OLT, ONT and optical telemetry are provider observations; Nexus cannot diagnose a fibre subscriber from inventory alone."),
+        _proposal("carrier-billing", "Carrier Billing Studio", "nexus-commerce", "studio", ("batch 7 #195",),
+                  gates=("carrier-settlement-source",),
+                  note="Carrier charges may be reconciled only against a declared settlement source and stable contract relationships; no invoice is changed automatically."),
+        _proposal("privileged-access", "Privileged Access Studio", "nexus-identity", "extend", ("batch 7 #196",),
+                  already_exists_at="backend/app/routers/nexus_access.py", gates=("privileged-session-provider-contract",),
+                  note="Nexus Access/Elevate already owns governed privileged boundaries; session recording and external JIT-provider evidence are named expansion work, not a duplicate vault."),
+        _proposal("service-accounts", "Service Account Studio", "nexus-identity", "studio", ("batch 7 #197",),
+                  gates=("nonhuman-identity-ingestion",),
+                  note="Non-human account hygiene needs provider inventory and dependency evidence before Nexus can recommend or execute any rotation."),
+        _proposal("access-reviews", "Access Review Studio", "nexus-identity", "studio", ("batch 7 #198",),
+                  gates=("access-review-provider-contract",),
+                  note="Periodic review decisions and removals need effective-access evidence, named accountable reviewers and an auditable provider action contract."),
+        _proposal("zero-trust", "Zero Trust Studio", "nexus-identity", "studio", ("batch 7 #199",),
+                  gates=("authentication-journey", "network-access-provider-contract"),
+                  note="A permitted-or-denied explanation crosses identity, endpoint posture and network evidence; it remains unbuilt until those provider facts can be joined safely."),
+        _proposal("identity-lifecycle", "Identity Lifecycle Studio", "nexus-identity", "studio", ("batch 7 #200",),
+                  gates=("identity-lifecycle-adapters",),
+                  note="Lifecycle completion is verified per connected system, and an unavailable adapter is disclosed rather than shown as a completed offboarding."),
+        _proposal("service-gap", "Service Gap Studio", "nexus-service", "section", ("batch 7 #201",),
+                  merges_into="operations-assurance", gates=("service-entitlement-evidence",),
+                  note="Under-delivery, under-billing, over-billing and unverified delivery are an assurance projection over contracts, provisioned objects and billing—not a second commercial owner."),
+        _proposal("service-acceptance", "Service Acceptance Studio", "nexus-service", "studio", ("batch 7 #202",),
+                  gates=("service-entitlement-evidence",),
+                  note="A delivered service can only be accepted against an explicit evidence checklist and handover record; it cannot be accepted because a task was marked done."),
+        _proposal("environment-comparison", "Environment Comparison Studio", "nexus-service", "studio", ("batch 7 #203",),
+                  gates=("service-entitlement-evidence",),
+                  note="Baselines and exceptions must be evaluated inside each authorised tenant boundary; cross-customer comparisons never expose a second customer's facts."),
+        _proposal("change-risk", "Change Risk Studio", "nexus-automation", "studio", ("batch 7 #204",),
+                  gates=("change-risk-evidence-model",),
+                  note="Risk assessment must list dependency, change-window and rollback inputs, then require the appropriate approval; it is not a black-box score."),
+        _proposal("operational-readiness", "Operational Readiness Studio", "nexus-service", "section", ("batch 7 #205",),
+                  merges_into="operations-assurance", gates=("service-entitlement-evidence",),
+                  note="Event and rollout readiness is an evidence-first assurance checklist with accountable owners, so it belongs in Operations Assurance."),
+        _proposal("msp-acquisition", "MSP Acquisition Studio", "nexus-growth", "studio", ("batch 7 #206",),
+                  gates=("partner-delegation-contract",),
+                  note="Acquisition consolidation crosses customer, identity, contract and provider boundaries; it needs delegated scope and migration evidence before any import workflow exists."),
+        _proposal("multi-msp", "Multi-MSP Studio", "nexus-growth", "studio", ("batch 7 #207",),
+                  gates=("partner-delegation-contract",),
+                  note="Provider responsibility and evidence sharing require a server-enforced delegation model; client filtering in a browser is never sufficient."),
+        _proposal("procurement-intelligence", "Technology Procurement Intelligence Studio", "nexus-commerce", "studio", ("batch 7 #208",),
+                  gates=("procurement-intelligence-source",),
+                  note="Recommendations must cite supplier, warranty, availability and compatibility evidence instead of optimising a claimed price or lifecycle cost from guesses."),
+        _proposal("customer-value", "Customer Value Studio", "nexus-growth", "studio", ("batch 7 #209",),
+                  gates=("customer-outcome-baseline",),
+                  note="Customer outcomes are reported only against a stated baseline and methodology; unmeasured value is disclosed, not converted into savings."),
+        _proposal("platform-health", "Platform Health Studio", "nexus-platform", "studio", ("batch 7 #210",),
+                  gates=("platform-slo-evidence",),
+                  note="Nexus health is a platform reliability product: API, worker, integration, agent and isolation evidence need declared SLOs before a healthy claim is displayed."),
     )
 }
 

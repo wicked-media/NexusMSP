@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Query
 from app.auth import get_current_user
 from app.database import db
 from app.services import operations_assurance as policy
+from app.services import service_gap
 from app.services.scope_permissions import assert_client_scope, scoped_query, tenant_scoped_query
 
 router = APIRouter(prefix="/operations-assurance", tags=["Operations Assurance"])
@@ -67,6 +68,32 @@ async def _evidence(user: dict[str, Any], client_id: str | None) -> dict[str, li
     }
 
 
+async def _service_gap_evidence(user: dict[str, Any], client_id: str | None) -> dict[str, list[dict[str, Any]]]:
+    """Read the three authoritative evidence sets for Service Gap.
+
+    The source collections retain ownership. This projection intentionally makes
+    no name-based links and does not update a contract, service or invoice.
+    """
+    client_scope = {"client_id": client_id} if client_id else {}
+    contracts = await db.contracts.find(
+        _scoped(user, {**client_scope, "status": "active"}), {"_id": 0, "id": 1}
+    ).to_list(5000)
+    contract_ids = [str(row.get("id") or "") for row in contracts if row.get("id")]
+    contract_query: dict[str, Any] = {**client_scope, "contract_id": {"$in": contract_ids}}
+    contracted = await db.line_items.find(_scoped(user, contract_query), {"_id": 0}).to_list(20000)
+    provisioned = await db.core_services.find(_scoped(user, client_scope), {"_id": 0}).to_list(20000)
+    billed = await db.recurring_invoices.find(
+        _scoped(user, {**client_scope, "status": "active"}), {"_id": 0, "client_id": 1, "line_items": 1}
+    ).to_list(5000)
+    billed_lines = [
+        {**line, "client_id": invoice.get("client_id")}
+        for invoice in billed
+        for line in (invoice.get("line_items") or [])
+        if isinstance(line, dict)
+    ]
+    return {"contracted": contracted, "provisioned": provisioned, "billed": billed_lines}
+
+
 @router.get("/contract")
 async def assurance_contract(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """The promises this studio evaluates, and the evidence each one needs."""
@@ -100,5 +127,19 @@ async def assurance_commitments(
         await assert_client_scope(user, client_id, operation="operations-assurance.evaluate")
     evidence = await _evidence(user, client_id)
     report = policy.evaluate_all(evidence)
+    report["client_id"] = client_id
+    return report
+
+
+@router.get("/service-gap")
+async def assurance_service_gap(
+    client_id: str | None = Query(None),
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Compare contracted, observed and billed service quantities without mutation."""
+    if client_id:
+        await assert_client_scope(user, client_id, operation="operations-assurance.service-gap")
+    evidence = await _service_gap_evidence(user, client_id)
+    report = service_gap.reconcile(**evidence)
     report["client_id"] = client_id
     return report

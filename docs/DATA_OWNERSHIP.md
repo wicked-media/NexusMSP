@@ -326,3 +326,19 @@ projection over lifecycle, warranty, licence, contract and estimate records that
 already have owners here — no new datum, so no new row is required. One trap is
 recorded with it: `services/product_roadmap.py` is **NexusMSP's own** product
 roadmap contract and must not be repurposed as a customer technology roadmap.
+
+## Batch 7: provider operations, identity and service assurance
+
+Batch 7 records Studios 186–210 in the static Studio Capability Registry. It
+creates no persistence and changes no authoritative owner. In particular,
+Service Gap and Operational Readiness are read-only, evidence-first sections of
+Operations Assurance; they do not own contracts, provisioned service objects or
+invoices and cannot make billing changes. Privileged Access extends the existing
+Nexus Access/Elevate boundary and continues to store no credential material.
+
+The batch deliberately leaves the following future data decisions open until a
+capability admission is approved: address-allocation authority, carrier routing
+and settlement observations, access-review decisions, delegated provider scope,
+service entitlement-to-delivery relationships and platform SLO evidence. Each
+future datum needs one authoritative owner and stable Nexus relationship IDs
+before a write path is introduced.

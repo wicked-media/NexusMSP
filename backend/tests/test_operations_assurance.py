@@ -29,6 +29,7 @@ os.environ.setdefault("DB_NAME", "nexusops-tests")
 from app.auth import get_current_user  # noqa: E402
 from app.routers import operations_assurance as routes  # noqa: E402
 from app.services import operations_assurance as policy  # noqa: E402
+from app.services import service_gap  # noqa: E402
 from app.services import scope_permissions  # noqa: E402
 from test_studio_fleet import _mounted_operation  # noqa: E402
 
@@ -205,6 +206,41 @@ def test_monitoring_is_met_inside_the_window_and_not_measured_without_endpoints(
     assert _by_id(empty)["monitoring_reporting_window"]["state"] == "not_measured"
 
 
+# ============== SERVICE GAP ==============
+
+
+def test_service_gap_matches_only_explicit_stable_service_keys():
+    report = service_gap.reconcile(
+        contracted=[{"client_id": "acme", "service_id": "backup", "quantity": 15}],
+        provisioned=[{"client_id": "acme", "service_id": "backup", "quantity": 14}],
+        billed=[{"client_id": "acme", "service_id": "backup", "quantity": 15}],
+    )
+    assert report["findings"][0]["state"] == "under_delivery"
+    assert report["summary"]["under_delivery"] == 1
+    assert "billing mutation" in report["boundary"]
+
+
+def test_service_gap_discloses_missing_evidence_and_never_matches_names():
+    report = service_gap.reconcile(
+        contracted=[{"client_id": "acme", "name": "Managed Backup", "quantity": 15}],
+        provisioned=[{"client_id": "acme", "service_key": "backup", "quantity": 15}],
+        billed=[],
+    )
+    assert report["summary"]["services_evaluated"] == 1
+    assert report["findings"][0]["state"] == "unverified_delivery"
+    assert report["summary"]["unmapped_records"] == 1
+
+
+def test_service_gap_can_report_more_than_one_discrepancy_for_a_service():
+    report = service_gap.reconcile(
+        contracted=[{"client_id": "acme", "product_id": "m365", "quantity": 48}],
+        provisioned=[{"client_id": "acme", "product_id": "m365", "quantity": 46}],
+        billed=[{"client_id": "acme", "product_id": "m365", "quantity": 45}],
+    )
+    kinds = {gap["kind"] for gap in report["findings"][0]["gaps"]}
+    assert kinds == {"under_delivery", "under_billing"}
+
+
 # ============== HTTP BOUNDARY ==============
 
 
@@ -276,6 +312,10 @@ def database(monkeypatch):
         nexus_agents=_Collection([
             {"device_id": "dev-1", "client_id": "acme", "name": "PC-1", "last_seen": _recent(hours=2)},
         ]),
+        contracts=_Collection([{"id": "contract-1", "client_id": "acme", "status": "active"}]),
+        line_items=_Collection([{"id": "line-1", "contract_id": "contract-1", "client_id": "acme", "service_id": "backup", "quantity": 15}]),
+        core_services=_Collection([{"id": "service-1", "client_id": "acme", "service_id": "backup", "quantity": 14}]),
+        recurring_invoices=_Collection([{"id": "ri-1", "client_id": "acme", "status": "active", "line_items": [{"service_id": "backup", "quantity": 15}]}]),
         scope_denials=_Collection(),
     )
     monkeypatch.setattr(routes, "db", fake)
@@ -289,6 +329,7 @@ def test_assurance_endpoints_are_mounted_behind_authentication():
     for method, path, handler in (
         ("GET", "/api/operations-assurance/contract", routes.assurance_contract),
         ("GET", "/api/operations-assurance/commitments", routes.assurance_commitments),
+        ("GET", "/api/operations-assurance/service-gap", routes.assurance_service_gap),
     ):
         route = _mounted_operation(method, path)
         assert route is not None, f"{method} {path} is not mounted"
@@ -323,3 +364,13 @@ def test_a_restricted_technician_cannot_evaluate_another_customers_assurance(dat
         asyncio.run(routes.assurance_commitments(client_id="other-client", user=RESTRICTED))
     assert excinfo.value.status_code == 403
     assert database.scope_denials.rows, "a refused scope check must leave a denial record"
+
+
+def test_service_gap_is_scoped_and_read_only(database):
+    report = asyncio.run(routes.assurance_service_gap(client_id="acme", user=RESTRICTED))
+    assert report["client_id"] == "acme"
+    assert report["summary"]["under_delivery"] == 1
+    assert database.line_items.rows[0]["quantity"] == 15
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(routes.assurance_service_gap(client_id="other-client", user=RESTRICTED))
+    assert excinfo.value.status_code == 403
