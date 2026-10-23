@@ -3,6 +3,7 @@ package telemetry
 
 import (
 	"runtime"
+	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
@@ -57,6 +58,9 @@ type Snapshot struct {
 	Security   *SecurityInfo  `json:"security,omitempty"`
 	Software   []SoftwareInfo `json:"software,omitempty"`
 	Hardware   *HardwareInfo  `json:"hardware,omitempty"`
+	// WindowsOperations is a bounded operational summary. It contains no raw
+	// event-log messages, command output or user content.
+	WindowsOperations *WindowsOperations `json:"windows_operations,omitempty"`
 }
 
 type DiskInfo struct {
@@ -142,6 +146,38 @@ func Collect() Snapshot {
 	s.Security = collectSecurity()
 	s.Software = collectSoftware()
 	s.Hardware = collectHardware()
+	s.WindowsOperations = collectWindowsOperations()
+	return s
+}
+
+// CollectPerformance returns the small, frequently changing part of an
+// endpoint observation.  It deliberately avoids software, security and
+// hardware inventory so a technician can see current CPU and memory pressure
+// without turning a high-frequency graph into a high-frequency inventory scan.
+func CollectPerformance() Snapshot {
+	s := Snapshot{Arch: runtime.GOARCH, OS: runtime.GOOS}
+	if pcts, err := cpu.Percent(250*time.Millisecond, false); err == nil && len(pcts) > 0 {
+		s.CPUPercent = round2(pcts[0])
+	}
+	if v, err := mem.VirtualMemory(); err == nil && v != nil {
+		s.MemTotalMB = v.Total / (1024 * 1024)
+		s.MemUsedMB = v.Used / (1024 * 1024)
+		s.MemPercent = round2(v.UsedPercent)
+	}
+	if parts, err := disk.Partitions(false); err == nil {
+		for _, p := range parts {
+			u, err := disk.Usage(p.Mountpoint)
+			if err != nil || u == nil {
+				continue
+			}
+			s.Disks = append(s.Disks, DiskInfo{
+				Device: p.Device, Mount: p.Mountpoint, FSType: p.Fstype,
+				TotalGB: round2(float64(u.Total) / (1024 * 1024 * 1024)),
+				UsedGB:  round2(float64(u.Used) / (1024 * 1024 * 1024)),
+				Percent: round2(u.UsedPercent),
+			})
+		}
+	}
 	return s
 }
 
@@ -193,4 +229,17 @@ type HardwareInfo struct {
 	SerialNumber string `json:"serial_number,omitempty"`
 	BIOSVersion  string `json:"bios_version,omitempty"`
 	Domain       string `json:"domain,omitempty"`
+}
+
+// WindowsOperations contains low-cardinality, technician-useful state. A zero
+// is only meaningful alongside its ObservedAt timestamp; nil means unavailable.
+type WindowsOperations struct {
+	ObservedAt                  string   `json:"observed_at,omitempty"`
+	SystemErrorCount24h         int      `json:"system_error_count_24h,omitempty"`
+	ApplicationErrorCount24h    int      `json:"application_error_count_24h,omitempty"`
+	CriticalEventCount24h       int      `json:"critical_event_count_24h,omitempty"`
+	UnexpectedShutdownCount7d   int      `json:"unexpected_shutdown_count_7d,omitempty"`
+	WindowsUpdateFailureCount7d int      `json:"windows_update_failure_count_7d,omitempty"`
+	FailedAutomaticServices     []string `json:"failed_automatic_services,omitempty"`
+	WindowsUpdateServiceState   string   `json:"windows_update_service_state,omitempty"`
 }

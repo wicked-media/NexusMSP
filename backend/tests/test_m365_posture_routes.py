@@ -35,7 +35,36 @@ def test_microsoft_mail_and_intune_posture_routes_remain_available():
         "/m365/onboarding/tenants",
         "/m365/onboarding/tenants/{connection_id}/mapping",
         "/m365/sync/readiness",
+        "/m365/capabilities/{area}",
     }.issubset(paths)
+
+
+def test_capability_catalogue_exposes_governed_operations_without_secrets(monkeypatch):
+    async def visible_tenants(_user):
+        return set()
+
+    async def connection_payload(*_args, **_kwargs):
+        return {
+            "mode": "configured_unverified",
+            "app_id": "app-id-is-not-secret",
+            "partner_tenant_id": "partner-tenant",
+            "secret_configured": True,
+            "verified_at": None,
+            "last_tested_at": None,
+            "last_synced": None,
+        }
+
+    monkeypatch.setattr(m365, "_visible_tenant_ids", visible_tenants)
+    monkeypatch.setattr(m365, "_connection_payload", connection_payload)
+
+    response = asyncio.run(m365.microsoft_capabilities("administration", {"id": "admin-1", "role": "admin"}))
+
+    assert response["connection"]["state"] == "configured_unverified"
+    assert [item["id"] for item in response["capabilities"]] == [
+        "tenant-onboarding", "identity-lifecycle", "licence-operations",
+    ]
+    assert all("permissions" in item and "requires" in item for item in response["capabilities"])
+    assert "app_secret" not in str(response)
 
 
 def test_collector_readiness_reports_explicit_streams_without_claiming_live_evidence(monkeypatch):

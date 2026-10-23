@@ -338,11 +338,13 @@ func (l *Loop) assessPerformance(ctx context.Context, now time.Time) {
 	}
 
 	evidence := &PerfEvidence{
-		Supported: true,
-		Band:      verdict.Band,
-		Score:     verdict.Score,
-		Samples:   baseline.Samples,
-		Reasons:   verdict.Reasons,
+		Supported:  true,
+		Band:       verdict.Band,
+		Score:      verdict.Score,
+		Samples:    baseline.Samples,
+		Reasons:    verdict.Reasons,
+		Details:    sample.Details,
+		AssessedAt: sample.At,
 	}
 	l.mu.Lock()
 	if l.repairing {

@@ -217,10 +217,15 @@ const RECURRENCE = {
 };
 
 const EMPTY_RECURRENCE = { ...RECURRENCE, shapes: [] };
+const WINDOWS_HEALTH = {
+  summary: { action_required: 1, attention: 2, insufficient_evidence: 3, healthy_observed: 4 },
+  boundary: "Windows Health correlates retained endpoint observations. It does not prove root cause.",
+};
 
 function mockApi({ deviations = DEVIATIONS, recurrence = RECURRENCE } = {}) {
   axios.get.mockImplementation((url) => {
     if (url.endsWith("/fleet-baseline/contract")) return Promise.resolve({ data: CONTRACT });
+    if (url.endsWith("/windows-health/fleet")) return Promise.resolve({ data: WINDOWS_HEALTH });
     if (url.includes("/deviations")) return Promise.resolve({ data: deviations });
     if (url.includes("/recurrence")) return Promise.resolve({ data: recurrence });
     return Promise.reject(new Error(`unexpected url ${url}`));
@@ -270,6 +275,21 @@ describe("FleetBaselinePage estate comparison", () => {
     const thresholds = host.querySelector('[data-testid="fleet-baseline-thresholds"]').textContent;
     expect(thresholds).toContain("Measured endpoints a baseline needs");
     expect(thresholds).toContain("±20% / ±50%");
+  });
+
+  test("renders the Windows Health Engine without claiming a root cause", async () => {
+    mockParams = new URLSearchParams("?platform=windows");
+    mockApi();
+    await render();
+    await flush();
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/windows-health/fleet`, {
+      headers: { Authorization: "Bearer session-token" },
+    });
+    const health = host.querySelector('[data-testid="windows-health-summary"]');
+    expect(health.textContent).toContain("Windows Health Engine");
+    expect(health.textContent).toContain("It does not confirm root cause");
+    expect(health.textContent).toContain("Action required");
   });
 
   test("renders a metric the cohort never measured as not reported, never as zero", async () => {

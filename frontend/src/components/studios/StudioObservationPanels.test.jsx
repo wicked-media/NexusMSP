@@ -6,11 +6,18 @@ import axios from "axios";
 import AgentFleetPanel from "./AgentFleetPanel";
 import BackupRecoveryPanel from "./BackupRecoveryPanel";
 import ClientEstatePanel from "./ClientEstatePanel";
+import ClientPortfolioPanel from "./ClientPortfolioPanel";
+import ClientRenewalWatchPanel from "./ClientRenewalWatchPanel";
 import CommunicationsPanel from "./CommunicationsPanel";
 import DeviceEstatePanel from "./DeviceEstatePanel";
 import DocumentationInventoryPanel from "./DocumentationInventoryPanel";
 import LeadPipelinePanel from "./LeadPipelinePanel";
 import M365TenantPanel from "./M365TenantPanel";
+import MicrosoftOperationsPanel from "./MicrosoftOperationsPanel";
+import MonitoringPulsePanel from "./MonitoringPulsePanel";
+import MonitoringResourcesPanel from "./MonitoringResourcesPanel";
+import NetworkEvidencePanel from "./NetworkEvidencePanel";
+import NetworkOperationsPanel from "./NetworkOperationsPanel";
 import NetworkSitesPanel from "./NetworkSitesPanel";
 import PatchPosturePanel from "./PatchPosturePanel";
 import SecurityPosturePanel from "./SecurityPosturePanel";
@@ -36,7 +43,7 @@ jest.mock("@/components/ui/card", () => ({
   CardContent: ({ children, className, ...props }) => <div className={className} {...props}>{children}</div>,
 }), { virtual: true });
 jest.mock("@/components/ui/button", () => ({
-  Button: ({ children, variant: _variant, size: _size, className, ...props }) => (
+  Button: ({ children, variant: _variant, size: _size, asChild: _asChild, className, ...props }) => (
     <button className={className} {...props}>{children}</button>
   ),
 }), { virtual: true });
@@ -169,6 +176,14 @@ const NETWORK = [
   { id: "site-2", name: "Fabrikam warehouse", client_id: "client-2", status: "offline" },
 ];
 
+const NETWORK_BANDWIDTH = {
+  sites: [{ id: "site-1", name: "Contoso HQ" }],
+  bandwidth_data: [
+    { id: "sample-1", site_id: "site-1", source: "controller_telemetry", status: "recorded", timestamp: "2026-10-17T09:02:00Z", api_key: "must-not-render" },
+  ],
+  meta: { source: "controller_telemetry" },
+};
+
 const PATCH = {
   summary: {
     total_devices: 5, assessed_devices: 3, compliant: 2, needs_attention: 1, critical: 0,
@@ -251,21 +266,79 @@ const CSAT_EMPTY = {
   avg_score: 0, total_responses: 0, by_tech: [], by_client: [], trend: [], distribution: {},
 };
 
+// Pulse is an already-scoped composition. These are retained observations, not
+// a claim that every source is currently reporting or that an outage has a
+// confirmed root cause.
+const MONITORING = {
+  boundary: "Nexus shows retained, scoped operational evidence. Missing, stale or unconfigured sources are not proven rather than healthy.",
+  summary: {
+    devices: 2, fresh_devices: 1, agents: 2, online_agents: 1,
+    open_tickets: 4, backup_attention: 0,
+  },
+  signals: [
+    { id: "managed-fleet", label: "Managed fleet", state: "attention", value: "1/2 fresh", detail: "One device observation is stale." },
+    { id: "recovery-evidence", label: "Recovery evidence", state: "not_proven", value: "No attention retained", detail: "Backup evidence has not established recovery coverage." },
+  ],
+  attention: [
+    { id: "device-dev-1", label: "Old endpoint", detail: "Latest evidence is stale.", state: "stale" },
+  ],
+};
+
+const MONITORING_RESOURCES = {
+  boundary: "This resource register identifies observation coverage only; it does not prove availability.",
+  summary: { resources: 3, observed: 1, stale: 1, not_monitored: 1 },
+  resources: [
+    { id: "dev-stale", kind: "endpoint", label: "Old endpoint", client_name: "Contoso", state: "stale", observed_at: "2026-10-13T07:00:00Z", source: "Devices and Nexus Agent observations" },
+    { id: "dev-unobserved", kind: "endpoint", label: "Unobserved endpoint", state: "not_monitored", source: "Devices and Nexus Agent observations" },
+    { id: "dev-fresh", kind: "endpoint", label: "Fresh endpoint", client_name: "Contoso", state: "observed", observed_at: "2026-10-13T08:00:00Z", source: "Devices and Nexus Agent observations" },
+  ],
+};
+
+const MICROSOFT_OPERATIONS = {
+  connection: { state: "configured_unverified", configured: true, verified_at: null, last_tested_at: null, last_sync: null },
+  capabilities: [{
+    id: "identity-lifecycle", label: "Identity lifecycle", execution_state: "provider_required",
+    description: "Create users through the optional CIPP adapter.",
+    permissions: ["entra.user.create", "entra.user.disable"],
+    requires: ["Verified CIPP adapter", "Exactly one mapped Nexus client"],
+    routes: ["POST /cipp/tenants/{tenant_id}/users"],
+    href: "/control-plane?module=microsoft365&view=users",
+  }],
+  boundary: "This catalogue describes Nexus-governed Microsoft workflows. It never grants provider access.",
+};
+
 const DEVICE_SPEC = { state: "wired", summary: "The canonical endpoint estate.", endpoint: "/devices", evidence: "app.routers.devices" };
 const AGENT_SPEC = { state: "wired", summary: "The enrolled agent fleet.", endpoint: "/nexus-agent/agents", evidence: "app.routers.nexus_agent" };
 const CLIENT_SPEC = { state: "wired", summary: "The account rollup.", endpoint: "/clients-enriched", evidence: "app.routers.clients" };
+const CLIENT_HEALTH_SPEC = { state: "wired", summary: "The health portfolio.", endpoint: "/client-health/dashboard", evidence: "app.routers.client_health" };
+const CLIENT_RENEWAL_SPEC = { state: "wired", summary: "The renewal watch.", endpoint: "/client-studio/renewal-watch", evidence: "app.routers.client_studio" };
 const BACKUP_SPEC = { state: "wired", summary: "Protected workloads.", endpoint: "/backup-dashboard/overview", evidence: "app.routers.backup_center" };
 const M365_SPEC = { state: "wired", summary: "The observed Microsoft tenants.", endpoint: "/m365/tenants", evidence: "app.routers.m365" };
 const VOICE_SPEC = { state: "wired", summary: "The linked voice estate.", endpoint: "/yeastar/pbxs", evidence: "app.routers.yeastar" };
 const WEB_SPEC = { state: "wired", summary: "The managed website estate.", endpoint: "/web-studio/fleet", evidence: "app.routers.web_studio" };
 const NETWORK_SPEC = { state: "wired", summary: "The network site register.", endpoint: "/networking/sites", evidence: "app.routers.networking" };
+const NETWORK_OPERATIONS_SPEC = { state: "wired", summary: "The scoped NOC projection.", endpoint: "/networking/dashboard", evidence: "app.routers.networking.get_networking_dashboard" };
 const PATCH_SPEC = { state: "wired", summary: "Observed endpoint patch state.", endpoint: "/patch-compliance/overview", evidence: "app.routers.patch_compliance" };
 const SECURITY_SPEC = { state: "wired", summary: "Recorded security evidence.", endpoint: "/security-dashboard/overview", evidence: "app.routers.security_dashboard" };
 const LEAD_SPEC = { state: "wired", summary: "The CRM's lead records.", endpoint: "/leads", evidence: "app.routers.crm" };
 const DOCS_SPEC = { state: "wired", summary: "The documentation pages in scope.", endpoint: "/documentation", evidence: "app.routers.it_docs" };
 const CSAT_SPEC = { state: "wired", summary: "Recorded customer feedback.", endpoint: "/csat/dashboard", evidence: "app.routers.csat_surveys" };
+const MONITORING_SPEC = { state: "wired", summary: "The scoped Pulse composition.", endpoint: "/nexus-pulse/overview", evidence: "app.routers.nexus_pulse" };
+const MONITORING_RESOURCES_SPEC = { state: "wired", summary: "The scoped resource coverage register.", endpoint: "/nexus-pulse/resources", evidence: "app.routers.nexus_pulse" };
+const MICROSOFT_OPERATIONS_SPEC = { state: "wired", summary: "Governed Microsoft operations.", endpoint: "/m365/capabilities/administration", evidence: "app.routers.m365.microsoft_capabilities" };
 
 const STUDIO = { id: "devices", name: "Devices Studio" };
+
+const NETWORK_OPERATIONS = {
+  summary: { total_sites: 2, online_sites: 1, offline_sites: 1, total_devices: 4, online_devices: 3, total_clients: 14, total_rx_gb: 12.75, total_tx_gb: 1.5 },
+  device_types: { gateway: 1, switch: 2, ap: 1 },
+  site_bandwidth: [
+    { site_id: "site-1", name: "Contoso HQ", client_name: "Contoso", status: "online", device_count: 4, client_count: 14, isp: "BT", download_mbps: 500, upload_mbps: 100 },
+    { site_id: "site-2", name: "Fabrikam depot", status: "offline", device_count: 0, client_count: 0 },
+  ],
+  offline_devices: [{ name: "Receiving AP", status: "offline" }],
+  alerts: [{ type: "site_offline", severity: "critical", message: "Site 'Fabrikam depot' is offline" }],
+};
 
 function mockApi(payload) {
   axios.get.mockImplementation(() => (
@@ -277,7 +350,12 @@ describe("the observation kit", () => {
   test("only an adopted projection endpoint is mapped to a panel", () => {
     expect(studioObservationView("/devices")).toBe("device-estate");
     expect(studioObservationView("/nexus-agent/agents")).toBe("agent-fleet");
+    expect(studioObservationView("/nexus-pulse/overview")).toBe("monitoring-pulse");
+    expect(studioObservationView("/nexus-pulse/resources")).toBe("monitoring-resources");
+    expect(studioObservationView("/m365/capabilities/administration")).toBe("microsoft-operations");
     expect(studioObservationView("/clients-enriched")).toBe("client-estate");
+    expect(studioObservationView("/client-health/dashboard")).toBe("client-portfolio");
+    expect(studioObservationView("/client-studio/renewal-watch")).toBe("client-renewal-watch");
     expect(studioObservationView("/backup-dashboard/overview")).toBe("backup-recovery");
     expect(studioObservationView("/security-dashboard/overview")).toBe("security-posture");
     // A studio pointed somewhere else renders the generic tab, not a panel whose
@@ -287,9 +365,13 @@ describe("the observation kit", () => {
   });
 
   test("every projection adopted in the second batch is mapped to its own panel", () => {
+    expect(studioObservationView("/m365/studio-overview")).toBe("microsoft-studio");
+    expect(studioObservationView("/m365/sync/readiness")).toBe("microsoft-evidence");
+    expect(studioObservationView("/m365/security/posture")).toBe("microsoft-evidence");
     expect(studioObservationView("/m365/tenants")).toBe("m365-tenants");
     expect(studioObservationView("/yeastar/pbxs")).toBe("voice-estate");
     expect(studioObservationView("/web-studio/fleet")).toBe("web-estate");
+    expect(studioObservationView("/networking/dashboard")).toBe("network-operations");
     expect(studioObservationView("/networking/sites")).toBe("network-sites");
     expect(studioObservationView("/patch-compliance/overview")).toBe("patch-posture");
     expect(studioObservationView("/leads")).toBe("lead-pipeline");
@@ -404,6 +486,35 @@ describe("an adopted projection panel", () => {
     expect(host.querySelector('[data-testid="studio-observation-totals"]').textContent).toContain("0");
   });
 
+  test("the client portfolio preserves assessed versus unassessed evidence", async () => {
+    mockApi({
+      total: 3, assessed_clients: 2, avg_health: 62.5,
+      at_risk: [{ client_id: "client-2", client_name: "Fabrikam", health_score: 31, status: "critical", evidence_coverage_pct: 60, details: { open_tickets: 4, devices: 3 } }],
+      top_clients: [{ client_id: "client-1", client_name: "Contoso", health_score: 94, status: "healthy", evidence_coverage_pct: 80, details: { open_tickets: 0, devices: 12 } }],
+      alerts: [{ id: "health-client-2-0", client_name: "Fabrikam", severity: "critical", message: "4 recorded open tickets", source: "computed_from_recorded_evidence" }],
+    });
+    await render(ClientPortfolioPanel, CLIENT_HEALTH_SPEC, { id: "client", name: "Client Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/client-health/dashboard`, expect.any(Object));
+    expect(host.querySelector('[data-testid="observation-total-Assessed clients"]').textContent).toContain("2");
+    const riskRow = host.querySelector('[data-testid="observation-row-client-2"]');
+    expect(riskRow.textContent).toContain("Fabrikam");
+    expect(riskRow.querySelector("a").getAttribute("href")).toBe("/clients?client=client-2");
+    expect(host.textContent).toContain("invent a score for incomplete evidence");
+  });
+
+  test("renewal watch makes its bounded contract evidence explicit", async () => {
+    mockApi({ at_risk: [{ contract_id: "contract-1", client_id: "client-2", client_name: "Fabrikam", renewal_date: "2026-11-01", days_to_renewal: 15, risk_level: "high", risk_signals: ["4 open tickets"] }] });
+    await render(ClientRenewalWatchPanel, CLIENT_RENEWAL_SPEC, { id: "client", name: "Client Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/client-studio/renewal-watch`, expect.any(Object));
+    const row = host.querySelector('[data-testid="observation-row-contract-1"]');
+    expect(row.textContent).toContain("Fabrikam");
+    expect(row.textContent).toContain("4 open tickets");
+    expect(row.querySelector("a").getAttribute("href")).toBe("/clients?client=client-2");
+    expect(host.textContent).toContain("not a prediction of churn");
+  });
+
   test("a backup workload with no recorded outcome is not reported, never a success", async () => {
     mockApi(BACKUP);
     await render(BackupRecoveryPanel, BACKUP_SPEC, { id: "backup", name: "Backup Studio" });
@@ -419,6 +530,44 @@ describe("an adopted projection panel", () => {
     const boundary = host.querySelector('[data-testid="studio-backup-boundary"]').textContent;
     expect(boundary).toContain("Acronis-sourced rows");
     expect(boundary).toContain("never a verified restore");
+  });
+
+  test("the Monitoring overview reuses scoped Pulse evidence and preserves uncertainty", async () => {
+    mockApi(MONITORING);
+    await render(MonitoringPulsePanel, MONITORING_SPEC, { id: "monitoring", name: "Monitoring Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/nexus-pulse/overview`, expect.any(Object));
+    expect(host.querySelector('[data-testid="studio-monitoring-pulse"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="studio-monitoring-totals"]').textContent).toContain("2");
+    expect(host.querySelector('[data-testid="studio-monitoring-signals"]').textContent).toContain("not proven");
+    expect(host.querySelector('[data-testid="studio-monitoring-attention"]').textContent).toContain("Old endpoint");
+    expect(host.querySelector('[data-testid="studio-monitoring-boundary"]').textContent).toContain(MONITORING.boundary);
+  });
+
+  test("the Monitoring resource register reports coverage without inventing availability", async () => {
+    mockApi(MONITORING_RESOURCES);
+    await render(MonitoringResourcesPanel, MONITORING_RESOURCES_SPEC, { id: "monitoring", name: "Monitoring Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/nexus-pulse/resources`, expect.any(Object));
+    expect(host.querySelector('[data-testid="studio-monitoring-resource-totals"]').textContent).toContain("3");
+    expect(host.querySelector('[data-testid="studio-monitoring-resources-list"]').textContent).toContain("not monitored");
+    expect(host.querySelector('[data-testid="observation-row-dev-unobserved"]').textContent).toContain("Not reported (observation time)");
+    expect(host.querySelector('[data-testid="studio-monitoring-resources-boundary"]').textContent)
+      .toContain("does not prove availability");
+  });
+
+  test("the Microsoft capability catalogue makes provider prerequisites explicit", async () => {
+    mockApi(MICROSOFT_OPERATIONS);
+    await render(MicrosoftOperationsPanel, MICROSOFT_OPERATIONS_SPEC, { id: "m365", name: "Microsoft Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/m365/capabilities/administration`, expect.any(Object));
+    expect(host.querySelector('[data-testid="studio-microsoft-operations"]')).not.toBeNull();
+    const capability = host.querySelector('[data-testid="studio-microsoft-capability-list"]').textContent;
+    expect(capability).toContain("Identity lifecycle");
+    expect(capability).toContain("Provider required");
+    expect(capability).toContain("Verified CIPP adapter");
+    expect(host.querySelector('a[href="/control-plane?module=microsoft365&view=users"]')).not.toBeNull();
+    expect(host.textContent).toContain("never grants provider access");
   });
 
   test("no protected workload in scope is stated, not rendered as a clean posture", async () => {
@@ -454,7 +603,7 @@ describe("an adopted projection panel", () => {
 
   test("the M365 estate reads the tenant mapping and never turns an unreported figure into a zero", async () => {
     mockApi(M365);
-    await render(M365TenantPanel, M365_SPEC, { id: "m365", name: "M365 Studio" });
+    await render(M365TenantPanel, M365_SPEC, { id: "m365", name: "Microsoft Studio" });
 
     expect(axios.get).toHaveBeenCalledWith(`${BASE}/m365/tenants`, expect.any(Object));
     expect(host.querySelector('[data-testid="studio-m365-tenants"]')).not.toBeNull();
@@ -563,6 +712,33 @@ describe("an adopted projection panel", () => {
     // Credentials and operator notes are not part of this read.
     expect(host.textContent).not.toContain("network-controller-secret");
     expect(host.textContent).not.toContain("Operator note");
+  });
+
+  test("the network NOC exposes retained evidence without presenting counters as live throughput", async () => {
+    mockApi(NETWORK_OPERATIONS);
+    await render(NetworkOperationsPanel, NETWORK_OPERATIONS_SPEC, { id: "network", name: "Network Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/networking/dashboard`, expect.any(Object));
+    expect(host.querySelector('[data-testid="studio-network-operations"]')).not.toBeNull();
+    expect(host.textContent).toContain("Contoso HQ");
+    expect(host.textContent).toContain("12.75 GB received");
+    expect(host.textContent).toContain("These are not live Mbps measurements");
+    expect(host.textContent).toContain("no admitted universal SNMP collector");
+    const sparse = host.querySelector('[data-testid="observation-row-site-2"]').textContent;
+    expect(sparse).toContain("Not reported (client)");
+    expect(sparse).toContain("Not reported (ISP)");
+  });
+
+  test("network evidence views disclose retained controller samples without exposing provider credentials", async () => {
+    mockApi(NETWORK_BANDWIDTH);
+    await render(NetworkEvidencePanel, { state: "wired", endpoint: "/bandwidth-monitor/overview", summary: "Retained controller observations." }, { id: "network", name: "Network Studio" });
+
+    expect(axios.get).toHaveBeenCalledWith(`${BASE}/bandwidth-monitor/overview`, expect.any(Object));
+    expect(host.querySelector('[data-testid="studio-network-evidence"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="observation-total-Telemetry samples"]').textContent).toContain("1");
+    expect(host.textContent).toContain("Contoso HQ");
+    expect(host.textContent).toContain("does not present this evidence as a universal SNMP poller");
+    expect(host.textContent).not.toContain("must-not-render");
   });
 
   test("patch posture turns neither an unassessed percentage into 0% nor a hardcoded zero into an all-clear", async () => {

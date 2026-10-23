@@ -73,30 +73,19 @@ async def _write_soc_audit(user: dict, action: str, alert: dict, metadata: dict 
 
 @router.get("/huntress/settings")
 async def get_huntress_settings(user=Depends(get_current_user)):
-    settings = await db.integration_settings.find_one({"type": "huntress"}, {"_id": 0})
-    if not settings:
-        return {"type": "huntress", "configured": False, "api_key": "", "secret_key": "", "base_url": "https://api.huntress.io/v1", "auto_sync": False, "sync_interval_min": 15, "last_sync": None}
-    settings.pop("secret_key_raw", None)
-    return settings
+    # One credential owner: the supported Huntress integration in
+    # ``huntress.py``. This legacy GET remains only for backward compatibility
+    # and returns safe state, never a credential or a parallel config record.
+    from app.routers.huntress import huntress_status
+    return await huntress_status(current_user=user)
 
 
 @router.put("/huntress/settings")
 async def save_huntress_settings(body: dict, user=Depends(get_current_user)):
-    now = datetime.now(timezone.utc).isoformat()
-    settings = {
-        "type": "huntress",
-        "configured": bool(body.get("api_key")),
-        "api_key": body.get("api_key", ""),
-        "secret_key": body.get("secret_key", "")[:4] + "****" if body.get("secret_key") else "",
-        "secret_key_raw": body.get("secret_key", ""),
-        "base_url": body.get("base_url", "https://api.huntress.io/v1"),
-        "auto_sync": body.get("auto_sync", False),
-        "sync_interval_min": body.get("sync_interval_min", 15),
-        "updated_at": now,
-        "updated_by": user.get("name", "System"),
-    }
-    await db.integration_settings.update_one({"type": "huntress"}, {"$set": settings}, upsert=True)
-    return {"message": "Huntress settings saved", "configured": settings["configured"]}
+    # Preserve the old PUT method without preserving its unsafe second secret
+    # registry. The canonical handler validates access and encrypts both keys.
+    from app.routers.huntress import save_huntress_settings as save_canonical_huntress_settings
+    return await save_canonical_huntress_settings(data=body, current_user=user)
 
 
 @router.get("/huntress/test-connection")

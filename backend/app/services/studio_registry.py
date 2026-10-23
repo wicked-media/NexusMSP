@@ -497,6 +497,15 @@ _register(_studio(
         owner="Experience + Platform",
     ),
     tabs={
+        "overview": _tab(
+            "wired",
+            "The evidence-weighted Client Health portfolio projection (GET /client-health/dashboard): "
+            "assessed and unassessed client health, priority reviews and recorded critical evidence. "
+            "It reuses canonical client, device, ticket, invoice, contract, backup, security, Microsoft "
+            "and network records without creating a second customer register.",
+            endpoint="/client-health/dashboard",
+            evidence="app.routers.client_health",
+        ),
         "inventory": _tab(
             "wired",
             "The managed website estate the Web workspace already derives (GET /web-studio/fleet): "
@@ -536,6 +545,15 @@ _register(_studio(
         owner="Experience",
     ),
     tabs={
+        "overview": _tab(
+            "wired",
+            "The evidence-weighted Client Health portfolio projection (GET /client-health/dashboard): "
+            "assessed and unassessed client health, priority reviews and recorded critical evidence. "
+            "It reuses canonical client, device, ticket, invoice, contract, backup, security, Microsoft "
+            "and network records without creating a second customer register.",
+            endpoint="/client-health/dashboard",
+            evidence="app.routers.client_health",
+        ),
         "inventory": _tab(
             "wired",
             "The account rollup the Clients workspace already reads (GET /clients-enriched): "
@@ -543,6 +561,23 @@ _register(_studio(
             "counts, patch debt and last activity, per client in scope. Read, not re-counted.",
             endpoint="/clients-enriched",
             evidence="app.routers.clients",
+        ),
+        "administration": _tab(
+            "wired",
+            "The recorded 90-day contract renewal watch (GET /client-studio/renewal-watch): active "
+            "contracts with an explicit renewal/end date, their bounded evidence signals and a route to "
+            "the canonical client record. It is a review queue, not a churn or revenue forecast.",
+            endpoint="/client-studio/renewal-watch",
+            evidence="app.routers.client_studio",
+        ),
+        "activity": _tab(
+            "wired",
+            "Recorded account-adjacent platform events within the caller's client scope: ticket intake, "
+            "endpoint-health changes, failed backup runs and billing reconciliation failures. This is a "
+            "bounded recent event window, not a complete client audit history.",
+            endpoint=ACTIVITY_ENDPOINT,
+            subjects=("ticket.created", "device.health.changed", "backup.job.failed", "invoice.reconciliation.failed"),
+            evidence="app.routers.event_bus",
         ),
     },
 ))
@@ -600,6 +635,36 @@ _register(_studio(
         owner="Remote",
     ),
     tabs={
+        "inventory": _tab(
+            "wired",
+            "Tenant-scoped remote session records (GET /remote/sessions): the device, technician, "
+            "lifecycle state and recorded timing for governed sessions. This is session evidence, "
+            "not a claim that every enrolled device is currently remote-ready.",
+            endpoint="/remote/sessions",
+            evidence="app.routers.remote",
+        ),
+        "diagnostics": _tab(
+            "wired",
+            "The first-party remote transport status (GET /remote/status). It reports the active "
+            "Nexus Native control path only; per-device readiness remains on the device record.",
+            endpoint="/remote/status",
+            evidence="app.routers.remote",
+        ),
+        "security": _tab(
+            "wired",
+            "The tenant-governed remote-access policy (GET /remote-access/policy), including consent, "
+            "standing-authorisation and ticket-reference controls. This tab is read-only; policy changes "
+            "remain permission-gated in Nexus Remote.",
+            endpoint="/remote-access/policy",
+            evidence="app.routers.remote",
+        ),
+        "settings": _tab(
+            "wired",
+            "The current technician's bounded Nexus Remote viewer preferences (GET /remote/studio/preferences). "
+            "They are tenant- and user-scoped and do not expose desktop content, credentials or endpoint paths.",
+            endpoint="/remote/studio/preferences",
+            evidence="app.routers.remote_studio",
+        ),
         "activity": _tab("wired", "Remote session lifecycle events, scoped to your client boundary.",
                          endpoint=ACTIVITY_ENDPOINT,
                          subjects=("remote.session.started", "remote.session.ended", "remote.repair.queued")),
@@ -647,11 +712,11 @@ _register(_studio(
 # --- Plan-named specialist domains ------------------------------------------
 
 _register(_studio(
-    studio_id="m365", name="M365 Studio", domain="Microsoft 365",
+    studio_id="m365", name="Microsoft Studio", domain="Microsoft 365",
     product="nexus-identity",
-    tagline="Microsoft tenants, consent, token health and audited tenant actions.",
+    tagline="A governed Microsoft command centre for tenant evidence, access posture and operational readiness.",
     status="Partially implemented", priority="P1", release="R2",
-    owner="Microsoft", home_route="/control-plane?module=microsoft365",
+    owner="Microsoft", home_route="/studios/m365",
     provider={"name": "microsoft_graph", "state": "partial",
               "reference": "app.services.microsoft_graph_connection"},
     admission=_admission(
@@ -668,6 +733,14 @@ _register(_studio(
         owner="Microsoft",
     ),
     tabs={
+        "overview": _tab(
+            "wired",
+            "A unified, read-only command-centre view over the verified Microsoft tenant, identity, "
+            "security and GDAP evidence already held by Nexus. Missing evidence is explicitly disclosed "
+            "rather than presented as a healthy zero.",
+            endpoint="/m365/studio-overview",
+            evidence="app.routers.m365.microsoft_studio_overview",
+        ),
         "inventory": _tab(
             "wired",
             "The observed Microsoft tenants the Control Plane already maps (GET /m365/tenants): "
@@ -676,6 +749,46 @@ _register(_studio(
             "are not part of this projection.",
             endpoint="/m365/tenants",
             evidence="app.routers.m365",
+        ),
+        "diagnostics": _tab(
+            "wired",
+            "Microsoft collector readiness: declared least-privilege evidence streams, connection state and the provider-record count for each stream. This is not a live permission test.",
+            endpoint="/m365/sync/readiness",
+            evidence="app.routers.m365.microsoft_sync_readiness",
+        ),
+        "administration": _tab(
+            "wired",
+            "Governed Microsoft tenant, identity and licence workflows. Each operation names its server-side permission, client-mapping and provider-verification requirement before the Control Plane can offer an action.",
+            endpoint="/m365/capabilities/administration",
+            evidence="app.routers.m365.microsoft_capabilities + app.routers.cipp",
+        ),
+        "changes": _tab(
+            "wired",
+            "Reference standards, GDAP and Conditional Access change workflows. Nexus does not deploy or extend provider configuration until a verified adapter can execute and read back the result.",
+            endpoint="/m365/capabilities/changes",
+            evidence="app.routers.m365.microsoft_capabilities",
+        ),
+        "automation": _tab(
+            "wired",
+            "Microsoft detection drafts and automation admission requirements. Drafts remain unexecuted until a verified evidence stream, noise policy and governed workflow are present.",
+            endpoint="/m365/capabilities/automation",
+            evidence="app.routers.m365.microsoft_capabilities",
+        ),
+        "security": _tab(
+            "wired",
+            "Provider-recorded Microsoft security evidence: Defender alerts, Entra identity risk, Conditional Access inventory and Defender device-risk data. Missing streams remain explicitly unavailable.",
+            endpoint="/m365/security/posture",
+            evidence="app.routers.m365.microsoft_security_posture",
+        ),
+        "activity": _planned(
+            "Microsoft action records exist, but the governed platform event catalogue does not yet carry a Microsoft-specific subject family. "
+            "Nexus will not mix unrelated connector events into a misleading tenant action timeline."
+        ),
+        "settings": _tab(
+            "wired",
+            "Partner Center / Graph and optional CIPP adapter connection setup. Credentials stay encrypted server-side; configuration never reads as a verified provider connection until a test records evidence.",
+            endpoint="/m365/capabilities/settings",
+            evidence="app.routers.m365.microsoft_capabilities + app.routers.cipp",
         ),
     },
 ))
@@ -779,6 +892,14 @@ _register(_studio(
         owner="Infrastructure",
     ),
     tabs={
+        "overview": _tab(
+            "wired",
+            "A scoped NOC projection over the existing site, device and client registers. It discloses "
+            "retained transfer counters and derived attention signals without claiming uncollected "
+            "telemetry is live.",
+            endpoint="/networking/dashboard",
+            evidence="app.routers.networking.get_networking_dashboard",
+        ),
         "inventory": _tab(
             "wired",
             "The network sites already registered against controllers (GET /networking/sites): site "
@@ -788,6 +909,39 @@ _register(_studio(
             "viable topology map.",
             endpoint="/networking/sites",
             evidence="app.routers.networking",
+        ),
+        "administration": _tab(
+            "wired",
+            "Existing UniFi management remains the provider-specific administration surface. Credentials and controller actions stay server-side and permission-gated.",
+            endpoint="/unifi/status",
+            evidence="app.routers.unifi",
+        ),
+        "diagnostics": _tab(
+            "wired",
+            "Source-labelled controller bandwidth observations. Empty data means the collector has not supplied evidence, not that WAN performance is clean.",
+            endpoint="/bandwidth-monitor/overview",
+            evidence="app.routers.bandwidth_monitor",
+        ),
+        "changes": _tab(
+            "wired",
+            "Recorded UniFi provider actions. This is not a generic network change register and does not infer configuration drift.",
+            endpoint="/unifi/actions/log",
+            evidence="app.routers.unifi",
+        ),
+        "automation": _planned(
+            "No network automation recipe is admitted yet. A scheduled collector or configuration action requires a capability contract, target allowlist, approval, audit and verification model.",
+        ),
+        "security": _planned(
+            "Network security findings continue to belong to Security and DNS surfaces until a scoped, source-labelled network security adapter is admitted. No second incident engine is created here.",
+        ),
+        "activity": _planned(
+            "Network provider event subjects are not yet admitted to the governed platform-event catalogue. Action history stays in the existing provider audit surface until every event has a stable subject, tenant/client scope and retention policy.",
+        ),
+        "settings": _tab(
+            "wired",
+            "Safe connection state from the existing UniFi integration. Credentials are never returned to the browser.",
+            endpoint="/unifi/status",
+            evidence="app.routers.unifi",
         ),
     },
 ))
@@ -881,6 +1035,14 @@ _register(_studio(
             "computes (GET /backup-dashboard/overview), in the caller's scope. A green row is a "
             "recorded run outcome, never a verified restore, and an unrecorded status is not reported.",
             endpoint="/backup-dashboard/overview",
+            evidence="app.routers.backup_center",
+        ),
+        "diagnostics": _tab(
+            "wired",
+            "Recorded restore-verification outcomes (GET /backup-verify/overview): pass, fail, "
+            "pending and measured restore-time evidence in the caller's scope. A successful backup "
+            "run does not become a recoverability claim until this evidence exists.",
+            endpoint="/backup-verify/overview",
             evidence="app.routers.backup_center",
         ),
         "activity": _tab("wired", "Failed backup runs reported by protected workloads, scoped to your boundary.",
@@ -1148,6 +1310,23 @@ _register(_studio(
         owner="Platform Operations",
     ),
     tabs={
+        "overview": _tab(
+            "wired",
+            "The tenant- and client-scoped Pulse composition (GET /nexus-pulse/overview): "
+            "freshness-labelled device and agent observations, retained service work and backup "
+            "attention. It does not claim continuous telemetry, availability or a root cause for "
+            "a source that has not reported.",
+            endpoint="/nexus-pulse/overview",
+            evidence="app.routers.nexus_pulse + app.services.nexus_pulse",
+        ),
+        "inventory": _tab(
+            "wired",
+            "A scoped register of endpoint observation coverage (GET /nexus-pulse/resources). "
+            "It identifies fresh, stale and not-monitored resources from retained device evidence; "
+            "it does not make an availability or root-cause claim.",
+            endpoint="/nexus-pulse/resources",
+            evidence="app.routers.nexus_pulse + app.services.nexus_pulse",
+        ),
         "activity": _tab("wired", "Provider connection-health changes from the platform stream.",
                          endpoint=ACTIVITY_ENDPOINT, subjects=("connector.health.changed",)),
     },
@@ -1547,6 +1726,12 @@ def tier_rollup() -> list[dict]:
 
 def list_studios() -> dict:
     """Fleet overview: one honest row per registered studio."""
+    # The master register is a static requirements declaration, not a second
+    # catalogue or persistence owner. Its compact reconciliation belongs here so
+    # the Market Place can show how much of the user's 210-item scope has an
+    # approved canonical record without fetching a separate, conflicting count.
+    from app.services import studio_master_register
+
     rows = []
     for studio in STUDIOS.values():
         wired = [tab for tab, spec in studio["tabs"].items() if spec["state"] == "wired"]
@@ -1600,6 +1785,9 @@ def list_studios() -> dict:
         "product_note": PRODUCT_NOTE,
         "proposal_note": studio_proposals.PROPOSAL_NOTE,
         "tier_note": TIER_NOTE,
+        "master_register": studio_master_register.summary(
+            STUDIOS.values(), studio_proposals.PROPOSALS.values()
+        ),
     }
 
 

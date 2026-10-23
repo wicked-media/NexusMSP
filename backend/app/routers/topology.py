@@ -1,18 +1,48 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.auth import get_current_user
+from app.services.module_permissions import require_module_permission
+from app.services.scope_permissions import scoped_query, tenant_scoped_query
 
 router = APIRouter()
+
+
+def _topology_query(
+    current_user: dict,
+    query: dict | None = None,
+    *,
+    field: str = "client_id",
+    include_site_scope: bool = False,
+) -> dict:
+    """Apply the platform tenant plus technician client boundary to legacy topology records.
+
+    Topology is a projection over canonical client and device records, not an
+    independent discovery source. Its old read-only routes predate the scoped
+    Network Studio surfaces, so this helper keeps the projection from becoming
+    a cross-client or cross-tenant side door.
+    """
+    return tenant_scoped_query(
+        current_user,
+        scoped_query(current_user, query, field=field, site_field="site_id" if include_site_scope else None),
+    )
 
 
 @router.get("/topology/all")
 async def get_all_topologies(current_user: dict = Depends(get_current_user)):
     """Get topology summary for all clients."""
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    await require_module_permission(current_user, "networking", "view")
+    clients = await db.clients.find(
+        _topology_query(current_user, field="id"),
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(200)
     result = []
     for c in clients:
-        count = await db.devices.count_documents({"client_id": c["id"]})
-        online = await db.devices.count_documents({"client_id": c["id"], "status": "online"})
+        count = await db.devices.count_documents(_topology_query(
+            current_user, {"client_id": c["id"]}, include_site_scope=True,
+        ))
+        online = await db.devices.count_documents(_topology_query(
+            current_user, {"client_id": c["id"], "status": "online"}, include_site_scope=True,
+        ))
         if count > 0:
             result.append({
                 "client_id": c["id"], "client_name": c.get("name", ""),
@@ -25,11 +55,21 @@ async def get_all_topologies(current_user: dict = Depends(get_current_user)):
 @router.get("/topology/{client_id}")
 async def get_network_topology(client_id: str, current_user: dict = Depends(get_current_user)):
     """Get network topology for a client as a graph of nodes and edges."""
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(200)
+    await require_module_permission(current_user, "networking", "view")
+    client = await db.clients.find_one(
+        _topology_query(current_user, {"id": client_id}, field="id"),
+        {"_id": 0, "id": 1, "name": 1},
+    )
+    if not client:
+        # A foreign client is deliberately indistinguishable from an unknown
+        # client; topology must not be usable for client enumeration.
+        raise HTTPException(status_code=404, detail="Resource not found")
+    devices = await db.devices.find(
+        _topology_query(current_user, {"client_id": client_id}, include_site_scope=True),
+        {"_id": 0},
+    ).to_list(200)
     if not devices:
-        return {"nodes": [], "edges": [], "client_name": ""}
-
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+        return {"nodes": [], "edges": [], "client_name": client.get("name", "")}
     nodes = []
     edges = []
 

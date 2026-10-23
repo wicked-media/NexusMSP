@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Server, Play, Square, RotateCcw, Power, RefreshCw, CheckCircle, XCircle, Archive, Calendar, Loader2, ShieldAlert } from "lucide-react";
+import { Server, Play, Square, RotateCcw, Power, RefreshCw, CheckCircle, XCircle, Archive, Calendar, Loader2, ShieldAlert, Boxes, Container, Activity, CircleAlert, CircleCheck, Database, Clock3, Network, Search, SlidersHorizontal } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
@@ -62,6 +62,10 @@ export default function ProxmoxPage() {
   const [scheduleDialog, setScheduleDialog] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({ name: "", schedule: "0 2 * * *", type: "full", storage: "local-zfs", retention_days: 30, vms: [] });
+  const [guestQuery, setGuestQuery] = useState("");
+  const [guestState, setGuestState] = useState("all");
+  const [guestType, setGuestType] = useState("all");
+  const [guestSort, setGuestSort] = useState("name");
 
   const fetchData = useCallback(async () => {
     try {
@@ -143,13 +147,46 @@ export default function ProxmoxPage() {
   const reconciliation = reconciliationStatement(connection?.reconciliation);
 
   const statusColor = { running: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", stopped: "bg-red-500/10 text-red-500 border-red-500/20", suspended: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" };
+  const configuredConnections = (connection?.connections || []).filter(item => item.configured);
+  const onlineNodes = nodes.filter(node => node.status === "online");
+  const runningGuests = vms.filter(vm => vm.status === "running");
+  const containers = vms.filter(vm => ["lxc", "container"].includes(String(vm.type || "").toLowerCase()));
+  const activeAlerts = (connection?.connections || []).filter(item => item.configured && item.health !== "ok");
+  const average = (items, field) => {
+    const values = items.map(item => Number(item[field])).filter(Number.isFinite);
+    return values.length ? Math.round(values.reduce((total, value) => total + value, 0) / values.length) : null;
+  };
+  const latestObservation = nodes.map(node => node.observed_at).filter(Boolean).sort().at(-1) || null;
+  const overviewCards = [
+    { label: "Connections", value: configuredConnections.length, detail: configuredConnections.length ? `${configuredConnections.length} provider connection${configuredConnections.length === 1 ? "" : "s"} scoped to your estate` : "No provider connection", icon: Boxes, tone: "cyan" },
+    { label: "Nodes", value: nodes.length, detail: nodes.length ? `${onlineNodes.length} online · ${nodes.length - onlineNodes.length} unavailable` : "No node observation", icon: Server, tone: onlineNodes.length === nodes.length && nodes.length ? "emerald" : "amber" },
+    { label: "Virtual machines", value: vms.length - containers.length, detail: vms.length ? `${runningGuests.filter(vm => !["lxc", "container"].includes(String(vm.type || "").toLowerCase())).length} running` : "No guest inventory", icon: Activity, tone: "violet" },
+    { label: "Containers", value: containers.length, detail: containers.length ? `${containers.filter(item => item.status === "running").length} running` : "No LXC inventory", icon: Container, tone: "cyan" },
+    { label: "Average CPU", value: average(nodes, "cpu_usage") === null ? "—" : `${average(nodes, "cpu_usage")}%`, detail: nodes.length ? "Across observed nodes" : "Requires node telemetry", icon: Activity, tone: "emerald" },
+    { label: "Average memory", value: average(nodes, "memory_usage") === null ? "—" : `${average(nodes, "memory_usage")}%`, detail: nodes.length ? "Across observed nodes" : "Requires node telemetry", icon: Database, tone: "amber" },
+    { label: "Connection health", value: activeAlerts.length ? `${activeAlerts.length} issue${activeAlerts.length === 1 ? "" : "s"}` : configuredConnections.length ? "Healthy" : "—", detail: activeAlerts.length ? "Provider health needs attention" : configuredConnections.length ? "All configured connections answered" : "No connection to assess", icon: activeAlerts.length ? CircleAlert : CircleCheck, tone: activeAlerts.length ? "rose" : "emerald" },
+    { label: "Last provider observation", value: latestObservation ? "Current" : "—", detail: latestObservation ? new Date(latestObservation).toLocaleString() : "No provider observation received", icon: Clock3, tone: latestObservation ? "cyan" : "muted" },
+  ];
+  const visibleGuests = vms
+    .filter(vm => {
+      const type = String(vm.type || "").toLowerCase();
+      const matchesQuery = !guestQuery.trim() || [vm.name, vm.vmid, vm.node_name, vm.client_name, vm.ip_address]
+        .some(value => String(value || "").toLowerCase().includes(guestQuery.trim().toLowerCase()));
+      return matchesQuery && (guestState === "all" || vm.status === guestState) && (guestType === "all" || type === guestType);
+    })
+    .sort((left, right) => {
+      if (guestSort === "cpu") return Number(right.cpu_usage || 0) - Number(left.cpu_usage || 0);
+      if (guestSort === "memory") return Number(right.memory_usage || 0) - Number(left.memory_usage || 0);
+      if (guestSort === "state") return String(left.status || "").localeCompare(String(right.status || ""));
+      return String(left.name || "").localeCompare(String(right.name || ""));
+    });
 
   return (
     <div className="space-y-6">
       <OperationalPageHeader eyebrow="Infrastructure operations · virtual estate" title="Proxmox" description="Manage virtual machines, protected backup jobs and scheduled infrastructure work." icon={Server} tone="cyan" signal={nodes.some(node => node.status === "warning") ? "attention" : nodes.length ? "ready" : undefined} actions={<>
           <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button variant="outline" onClick={() => setScheduleDialog(true)} data-testid="create-schedule-btn"><Calendar className="w-4 h-4 mr-1" />Schedule</Button>
-          <Button onClick={() => setBackupDialog(true)} data-testid="create-backup-btn"><Archive className="w-4 h-4 mr-1" />New backup</Button>
+          <Button variant="outline" onClick={() => setScheduleDialog(true)} disabled={!vms.length} data-testid="create-schedule-btn"><Calendar className="w-4 h-4 mr-1" />Schedule</Button>
+          <Button onClick={() => setBackupDialog(true)} disabled={!vms.length} data-testid="create-backup-btn"><Archive className="w-4 h-4 mr-1" />New backup</Button>
           <WorkspaceActionMenu label="More" testId="proxmox-more-menu">
             <WorkspaceActionMenuItem icon={RefreshCw} onSelect={handleSyncInventory} disabled={syncing} testId="sync-inventory-btn">
               {syncing ? "Syncing inventory..." : "Sync inventory"}
@@ -162,17 +199,16 @@ export default function ProxmoxPage() {
       )}
 
       {connection && !connection.configured && (
-        <Card data-testid="proxmox-unconfigured-banner" className="border-dashed border-yellow-500/40 bg-yellow-500/5">
-          <CardContent className="pt-4 flex items-start gap-3">
-            <ShieldAlert className="w-5 h-5 text-yellow-500 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-medium text-sm">No Proxmox connection configured</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Nexus has never observed a cluster in your scope, so the inventory below is empty rather
-                than demo data. Add a connection in Infrastructure → Proxmox servers to observe nodes and
-                execute verified power actions; until then an execution request is refused and nothing changes.
-              </p>
+        <Card data-testid="proxmox-unconfigured-banner" className="border-dashed border-cyan-500/35 bg-cyan-500/[0.035]">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-4">
+            <div className="flex max-w-3xl items-start gap-3">
+              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+              <div>
+                <p className="font-medium text-sm">No Proxmox connection configured</p>
+                <p className="mt-1 text-xs text-muted-foreground">This studio is empty rather than demo data. Add a scoped, token-authenticated connection; Nexus will validate it server-side, observe real nodes and guests, and keep credentials out of the browser.</p>
+              </div>
             </div>
+            <a href="/infrastructure" className="inline-flex h-9 shrink-0 items-center justify-center rounded-md border border-cyan-500/35 px-3 text-sm font-medium text-cyan-300 transition-colors hover:bg-cyan-500/10"><Network className="mr-2 h-4 w-4" />Configure connection</a>
           </CardContent>
         </Card>
       )}
@@ -193,24 +229,38 @@ export default function ProxmoxPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-3 gap-4">
+      <section aria-label="Proxmox infrastructure overview" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="proxmox-overview-cards">
+        {overviewCards.map(card => {
+          const Icon = card.icon;
+          const tone = card.tone === "rose" ? "text-rose-300 border-rose-500/25 bg-rose-500/[0.04]" : card.tone === "amber" ? "text-amber-300 border-amber-500/25 bg-amber-500/[0.04]" : card.tone === "emerald" ? "text-emerald-300 border-emerald-500/25 bg-emerald-500/[0.04]" : card.tone === "muted" ? "text-muted-foreground border-border/60 bg-muted/20" : "text-cyan-300 border-cyan-500/25 bg-cyan-500/[0.04]";
+          return <Card key={card.label} className={`border ${tone}`}><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{card.label}</p><p className="mt-2 text-2xl font-semibold tracking-tight">{card.value}</p></div><Icon className="h-5 w-5" /></div><p className="mt-2 min-h-8 text-xs leading-4 text-muted-foreground">{card.detail}</p></CardContent></Card>;
+        })}
+      </section>
+
+      {nodes.length > 0 && <section aria-label="Observed Proxmox nodes" className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">Node telemetry</p><h2 className="mt-1 text-base font-semibold">Provider-observed node health</h2></div><p className="text-xs text-muted-foreground">Observed server-side · {latestObservation ? new Date(latestObservation).toLocaleString() : "timestamp unavailable"}</p></div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {nodes.map(n => (
-          <Card key={n.id} className={n.status === "warning" ? "border-yellow-500/30" : ""}><CardContent className="pt-4">
+          <Card key={n.id} className={n.status !== "online" ? "border-amber-500/30" : "border-border/60"}><CardContent className="pt-4">
             <div className="flex items-center justify-between mb-3"><div className="flex items-center gap-2"><Server className="w-5 h-5 text-blue-500" /><span className="font-semibold">{n.name}</span></div><Badge className={n.status === "online" ? "bg-emerald-500/10 text-emerald-500" : "bg-yellow-500/10 text-yellow-500"}>{n.status}</Badge></div>
-            <div className="grid grid-cols-3 gap-2 text-sm"><div><p className="text-[10px] text-muted-foreground">CPU</p><p className="font-medium">{n.cpu_usage}%</p></div><div><p className="text-[10px] text-muted-foreground">RAM</p><p className="font-medium">{n.memory_usage}%</p></div><div><p className="text-[10px] text-muted-foreground">Disk</p><p className="font-medium">{n.disk_usage}%</p></div></div>
+            <div className="grid grid-cols-3 gap-2 text-sm"><div><p className="text-[10px] text-muted-foreground">CPU</p><p className="font-medium">{Number.isFinite(Number(n.cpu_usage)) ? `${Math.round(Number(n.cpu_usage))}%` : "—"}</p></div><div><p className="text-[10px] text-muted-foreground">RAM</p><p className="font-medium">{Number.isFinite(Number(n.memory_usage)) ? `${Math.round(Number(n.memory_usage))}%` : "—"}</p></div><div><p className="text-[10px] text-muted-foreground">Disk</p><p className="font-medium">{Number.isFinite(Number(n.disk_usage)) ? `${Math.round(Number(n.disk_usage))}%` : "—"}</p></div></div>
             <p className="text-xs text-muted-foreground mt-2">{n.vm_count} VMs | {n.ip}</p>
           </CardContent></Card>
         ))}
-      </div>
+      </div></section>}
 
       <Tabs defaultValue="vms">
         <TabsList><TabsTrigger value="vms">Virtual Machines ({vms.length})</TabsTrigger><TabsTrigger value="backups">Backups ({backups.length})</TabsTrigger><TabsTrigger value="schedules">Schedules ({schedules.length})</TabsTrigger></TabsList>
 
         <TabsContent value="vms">
+          <div className="mb-3 flex flex-col gap-2 rounded-xl border border-border/60 bg-card/40 p-3 lg:flex-row lg:items-center lg:justify-between" data-testid="proxmox-guest-controls">
+            <div className="relative min-w-0 flex-1 lg:max-w-md"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input value={guestQuery} onChange={event => setGuestQuery(event.target.value)} className="pl-9" placeholder="Search name, VMID, node, client or IP" aria-label="Search Proxmox guests" /></div>
+            <div className="flex flex-wrap gap-2"><Select value={guestState} onValueChange={setGuestState}><SelectTrigger className="w-[132px]"><SlidersHorizontal className="mr-2 h-3.5 w-3.5" /><SelectValue placeholder="State" /></SelectTrigger><SelectContent><SelectItem value="all">All states</SelectItem><SelectItem value="running">Running</SelectItem><SelectItem value="stopped">Stopped</SelectItem><SelectItem value="suspended">Suspended</SelectItem></SelectContent></Select><Select value={guestType} onValueChange={setGuestType}><SelectTrigger className="w-[132px]"><SelectValue placeholder="Type" /></SelectTrigger><SelectContent><SelectItem value="all">All types</SelectItem><SelectItem value="qemu">Virtual machines</SelectItem><SelectItem value="lxc">Containers</SelectItem></SelectContent></Select><Select value={guestSort} onValueChange={setGuestSort}><SelectTrigger className="w-[150px]"><SelectValue placeholder="Sort" /></SelectTrigger><SelectContent><SelectItem value="name">Sort: name</SelectItem><SelectItem value="state">Sort: state</SelectItem><SelectItem value="cpu">Sort: CPU use</SelectItem><SelectItem value="memory">Sort: memory use</SelectItem></SelectContent></Select></div>
+          </div>
           <Table>
             <TableHeader><TableRow><TableHead>VM</TableHead><TableHead>Node</TableHead><TableHead>Client</TableHead><TableHead>OS</TableHead><TableHead>vCPU</TableHead><TableHead>RAM</TableHead><TableHead>IP</TableHead><TableHead>Backup</TableHead><TableHead className="w-[200px]">Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {vms.map(vm => (
+              {visibleGuests.map(vm => (
                 <TableRow key={vm.id} data-testid={`vm-row-${vm.id}`}>
                   <TableCell><div className="flex items-center gap-2"><div className={`w-2 h-2 rounded-full ${vm.status === "running" ? "bg-emerald-500" : vm.status === "stopped" ? "bg-red-500" : "bg-yellow-500"}`} /><div><p className="font-medium">{vm.name}</p><p className="text-[10px] text-muted-foreground">ID: {vm.vmid} | {vm.type?.toUpperCase()}</p></div><Badge className={statusColor[vm.status] + " text-[9px]"}>{vm.status}</Badge></div></TableCell>
                   <TableCell className="text-xs">{vm.node_name}</TableCell>
@@ -234,6 +284,7 @@ export default function ProxmoxPage() {
                   </TableCell>
                 </TableRow>
               ))}
+              {visibleGuests.length === 0 && <TableRow><TableCell colSpan={9} className="py-12 text-center"><p className="font-medium">{vms.length ? "No guests match these filters" : "No Proxmox guests observed yet"}</p><p className="mt-1 text-xs text-muted-foreground">{vms.length ? "Adjust the search or filters to widen the result set." : "Configure a connection, then sync inventory to populate this scoped list."}</p></TableCell></TableRow>}
             </TableBody>
           </Table>
         </TabsContent>

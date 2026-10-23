@@ -340,7 +340,7 @@ export default function BackupCenterPage() {
       // Map jobs to backups for compatibility
       if (dash.status === "fulfilled") {
         const d = dash.value.data;
-        setDashData({ summary: d.summary, backups: d.jobs || [] });
+        setDashData({ summary: d.summary, backups: d.jobs || [], meta: d.meta || null });
       }
       if (comp.status === "fulfilled") setCompData(comp.value.data);
       if (verify.status === "fulfilled") setVerifyData(verify.value.data);
@@ -618,6 +618,7 @@ export default function BackupCenterPage() {
   if (loadError) return <WorkspaceErrorState title="Backup Centre needs attention" description={loadError} onRetry={fetchData} retryLabel="Retry backup evidence" />;
 
   const ds = dashData?.summary || {};
+  const backupEvidence = dashData?.meta || null;
   const cs = compData?.stats || {};
   const vs = verifyData?.summary || {};
   const assurance = assuranceData?.confidence || { score: null, label: "Not assessed", evidence_coverage: 0, components: [], gaps: [] };
@@ -715,6 +716,17 @@ export default function BackupCenterPage() {
             onConfigure={openAcronisSettings}
             onReviewRecovery={() => selectTab("verify")}
           /> : <>
+          <Card className="border-sky-400/15 bg-sky-500/[0.035]" data-testid="backup-evidence-freshness">
+            <CardContent className="flex flex-col gap-1.5 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+              <span className="font-medium text-sky-100">Recorded backup evidence</span>
+              <span className="text-muted-foreground">
+                {backupEvidence?.latest_observed_at
+                  ? `Latest provider/job timestamp ${formatDistanceToNow(new Date(backupEvidence.latest_observed_at), { addSuffix: true })}`
+                  : "No provider/job timestamp has been recorded in this scope"}
+                {backupEvidence?.source === "acronis_provider_projection" ? " · Acronis provider projection" : backupEvidence?.source === "recorded_backup_jobs" ? " · Nexus recorded jobs" : ""}
+              </span>
+            </CardContent>
+          </Card>
           <div className="flex flex-col gap-3 sm:flex-row">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

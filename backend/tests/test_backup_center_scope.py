@@ -40,12 +40,27 @@ class _Collection:
 
     async def find_one(self, query, _projection=None):
         for row in self.rows:
-            if all(row.get(key) == value for key, value in query.items()):
+            if _matches(row, query):
                 return dict(row)
         return None
 
     async def insert_one(self, record):
         self.inserted.append(dict(record))
+
+
+def _matches(row, query):
+    """Tiny Mongo matcher for the tenant/scope shapes used by this boundary test."""
+    if "$and" in query:
+        return all(_matches(row, clause) for clause in query["$and"])
+    if "$or" in query:
+        return any(_matches(row, clause) for clause in query["$or"])
+    for key, value in query.items():
+        if isinstance(value, dict) and "$exists" in value:
+            if (key in row) != bool(value["$exists"]):
+                return False
+        elif row.get(key) != value:
+            return False
+    return True
 
 
 class _Database:
@@ -149,3 +164,32 @@ def test_selected_client_assurance_ignores_same_named_evidence_from_another_allo
     for collection in (database.backup_jobs, database.backup_records, database.backup_verifications):
         _assert_client_scope_query(collection.queries[0])
         assert "client-a" in str(collection.queries[0])
+
+
+def test_backup_client_summary_groups_by_stable_client_id_not_shared_display_name():
+    groups = backup_center._group_jobs_by_client([
+        {"client_id": "client-a", "client_name": "Shared name", "status": "success", "size_gb": 4},
+        {"client_id": "client-b", "client_name": "Shared name", "status": "failed", "size_gb": 7},
+    ])
+
+    assert [(group["client_id"], group["total"], group["failed"]) for group in groups] == [
+        ("client-a", 1, 0),
+        ("client-b", 1, 1),
+    ]
+
+
+def test_backup_overview_discloses_recorded_evidence_freshness(monkeypatch):
+    database = _Database()
+    database.backup_jobs.rows = [{
+        "id": "job-a",
+        "client_id": "client-a",
+        "status": "success",
+        "completed_at": "2026-10-18T10:00:00+00:00",
+    }]
+    monkeypatch.setattr(backup_center, "db", database)
+
+    result = asyncio.run(backup_center.get_backup_overview(current_user=_restricted_user()))
+
+    assert result["meta"]["source"] == "recorded_backup_jobs"
+    assert result["meta"]["latest_observed_at"] == "2026-10-18T10:00:00+00:00"
+    assert "Missing timestamps" in result["meta"]["freshness_note"]

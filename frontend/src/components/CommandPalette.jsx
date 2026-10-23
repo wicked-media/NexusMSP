@@ -443,14 +443,14 @@ export default function CommandPalette() {
       });
     }
 
-    // The Market Place is the one surface where a topic that names no workspace
+    // Nexus Studios is the one surface where a topic that names no workspace
     // is still a destination: 185+ studios are found by searching them, so the
     // palette hands the words to the catalogue's own address contract instead of
     // reimplementing the search. The row sits last, so it never crowds out a
     // record that really matched.
     if (query.length >= 2) {
       list.push({
-        heading: "Market Place",
+        heading: "Nexus Studios",
         icon: LayoutGrid,
         items: [
           {

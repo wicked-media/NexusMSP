@@ -69,6 +69,24 @@ def _public_wlan(wlan: dict) -> dict:
     return public
 
 
+def _latest_recorded_at(records: list[dict], *fields: str) -> str | None:
+    """Return the newest provider/collector timestamp without inventing freshness.
+
+    Legacy network records do not all carry an observation timestamp.  A missing
+    timestamp is deliberately returned as ``None`` so callers can render an
+    evidence gap instead of calling an old or manually entered record live.
+    ISO-8601 UTC strings sort chronologically, and values outside that contract
+    are ignored rather than guessed at.
+    """
+    candidates = []
+    for record in records:
+        for field in fields:
+            value = record.get(field)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value.strip())
+    return max(candidates) if candidates else None
+
+
 def _normalise_unifi_controller_url(value: object) -> str:
     """Validate the controller origin before Nexus makes an outbound request.
 
@@ -926,7 +944,9 @@ async def get_networking_dashboard(current_user: dict = Depends(get_current_user
         if d.get("status") != "online":
             offline_devices.append({"name": d.get("name"), "site_id": d.get("site_id"), "type": dt, "status": d.get("status"), "last_seen": d.get("last_seen")})
     
-    # Bandwidth aggregation
+    # These are retained byte counters from the current network-client records,
+    # not measured throughput.  The response labels them as counters so a UI
+    # cannot accidentally chart them as Mbps.
     total_rx = sum(c.get("rx_bytes", 0) for c in all_clients)
     total_tx = sum(c.get("tx_bytes", 0) for c in all_clients)
     
@@ -958,6 +978,17 @@ async def get_networking_dashboard(current_user: dict = Depends(get_current_user
             "total_devices": len(all_devices), "online_devices": len([d for d in all_devices if d.get("status") == "online"]),
             "total_clients": len(all_clients),
             "total_rx_gb": round(total_rx / (1024**3), 2), "total_tx_gb": round(total_tx / (1024**3), 2),
+        },
+        "meta": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "inventory_observed_at": _latest_recorded_at(
+                [*sites, *all_devices, *all_clients], "observed_at", "last_seen", "last_sync"
+            ),
+            "counter_kind": "retained_total_bytes",
+            "counter_note": (
+                "RX/TX values are retained totals reported on current inventory records; "
+                "they are not sampled throughput or live Mbps."
+            ),
         },
         "device_types": device_types,
         "firmware_versions": firmware_versions,

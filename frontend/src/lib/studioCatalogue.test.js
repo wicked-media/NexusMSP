@@ -1,5 +1,5 @@
 /**
- * Market Place catalogue tests.
+ * Nexus Studios catalogue tests.
  *
  * The catalogue is the only way a technician will find one of 185+ studios, so
  * these tests pin the behaviour that makes it usable rather than the shape of the
@@ -126,7 +126,7 @@ const FLEET = {
   ],
 };
 
-describe("Market Place catalogue", () => {
+describe("Nexus Studios catalogue", () => {
   test("indexes admitted studios and catalogue ideas separately", () => {
     const entries = buildCatalogueIndex(FLEET);
     expect(entries.map((entry) => entry.key)).toEqual([
@@ -321,7 +321,7 @@ describe("Market Place catalogue", () => {
  * pinning: the page, the command palette and any pasted link all go through
  * these two functions rather than each deciding for themselves.
  */
-describe("Market Place address", () => {
+describe("Nexus Studios address", () => {
   test("reads the three keys it owns and ignores the rest", () => {
     expect(parseCatalogueQuery("?q=call+quality&tier=core&view=kept")).toEqual({
       query: "call quality",

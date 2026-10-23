@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Gauge, Loader2, RefreshCw, Repeat, ShieldAlert } from "lucide-react";
+import { Activity, Gauge, Loader2, RefreshCw, Repeat, ShieldAlert } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import {
@@ -38,6 +38,7 @@ export default function FleetBaselinePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [contract, setContract] = useState(null);
   const [report, setReport] = useState(null);
+  const [health, setHealth] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -81,13 +82,30 @@ export default function FleetBaselinePage() {
     }
   }, [headers, platform, view]);
 
+  const loadHealth = useCallback(async () => {
+    if (platform !== "windows") {
+      setHealth(null);
+      return;
+    }
+    try {
+      const response = await axios.get(`${API}/windows-health/fleet`, { headers });
+      setHealth(response.data);
+    } catch {
+      // The baseline remains useful when an older deployment has not yet
+      // mounted this optional projection; never substitute a green placeholder.
+      setHealth(null);
+    }
+  }, [headers, platform]);
+
   useEffect(() => { loadContract(); }, [loadContract]);
   useEffect(() => { loadReport(); }, [loadReport]);
+  useEffect(() => { loadHealth(); }, [loadHealth]);
 
   const refresh = useCallback(() => {
     loadContract();
     loadReport();
-  }, [loadContract, loadReport]);
+    loadHealth();
+  }, [loadContract, loadHealth, loadReport]);
 
   const params = useCallback((next) => {
     const nextPlatform = next.platform === undefined ? platform : next.platform;
@@ -123,8 +141,8 @@ export default function FleetBaselinePage() {
     <div className="space-y-6" data-testid="fleet-baseline">
       <OperationalPageHeader
         eyebrow="Nexus Endpoint · estate comparison"
-        title="Fleet Baseline"
-        description="Each endpoint against the measured median of your own operating-system cohort. A deviation is a difference from what your estate reported — not a fault, a cause or a prediction."
+        title={platform === "windows" ? "Windows Studio" : "Fleet Baseline"}
+        description={platform === "windows" ? "Evidence-first Windows fleet health and peer comparison. Symptoms, diagnoses and approved remediation remain distinct." : "Each endpoint against the measured median of your own operating-system cohort. A deviation is a difference from what your estate reported — not a fault, a cause or a prediction."}
         icon={Gauge}
         tone="cyan"
         actions={<Button variant="outline" onClick={refresh} data-testid="fleet-baseline-refresh"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>}
@@ -137,6 +155,21 @@ export default function FleetBaselinePage() {
       )}
 
       <CohortThresholds contract={contract} />
+
+      {platform === "windows" && health && (
+        <Card data-testid="windows-health-summary">
+          <CardContent className="pt-4 space-y-3">
+            <div className="flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" /><p className="text-sm font-semibold">Windows Health Engine</p></div>
+            <p className="text-xs text-muted-foreground">Correlates retained agent and endpoint evidence. It does not confirm root cause or run a repair.</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs">
+              {[["action_required", "Action required"], ["attention", "Attention"], ["insufficient_evidence", "Evidence gap"], ["healthy_observed", "Observed healthy"]].map(([key, label]) => (
+                <div key={key} className="rounded-md border border-border/60 p-2"><p className="text-muted-foreground">{label}</p><p className="text-lg font-semibold tabular-nums">{health.summary?.[key] ?? 0}</p></div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">{health.boundary}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {cohorts.length === 0 && (
         <Card data-testid="fleet-baseline-no-cohorts">

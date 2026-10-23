@@ -917,6 +917,9 @@ class HeartbeatPayload(BaseModel):
     update_evidence: dict = Field(default_factory=dict)
     native_remote_evidence: dict = Field(default_factory=dict)
     backup_evidence: dict = Field(default_factory=dict)
+    # A short-cadence resource sample. This has a deliberately smaller shape
+    # than the inventory heartbeat and only updates performance evidence.
+    performance_only: bool = False
 
 
 class BackupPreflightResult(BaseModel):
@@ -1263,6 +1266,10 @@ def _patch_evidence_update(snapshot: dict[str, Any], observed_at: str) -> dict[s
     return agent_runtime.patch_evidence_update(snapshot, observed_at)
 
 
+def _windows_operations_evidence_update(snapshot: dict[str, Any], observed_at: str) -> dict[str, Any] | None:
+    return agent_runtime.windows_operations_evidence_update(snapshot, observed_at)
+
+
 def _bounded_non_negative_int(value: Any, maximum: int = 86_400_000) -> int:
     """Coerce a reported counter without trusting the endpoint's arithmetic."""
     try:
@@ -1283,6 +1290,16 @@ def _self_heal_evidence_update(payload: dict[str, Any], observed_at: str) -> dic
     """
     performance = payload.get("performance") if isinstance(payload.get("performance"), dict) else {}
     reasons = performance.get("reasons") if isinstance(performance.get("reasons"), list) else []
+    # Windows Health needs a few safe state observations to distinguish a pending
+    # restart or a DISM verdict from an absent observation. Keep a fixed, bounded
+    # allowlist only: command output (including raw DISM/SFC text) remains out of
+    # the device record and is available solely through audited command results.
+    raw_details = performance.get("details") if isinstance(performance.get("details"), dict) else {}
+    safe_details = {
+        key: str(raw_details.get(key) or "")[:160]
+        for key in ("pending_reboot", "component_store", "tightest_volume", "elevated")
+        if str(raw_details.get(key) or "").strip()
+    }
     try:
         score = float(performance.get("score") or 0)
     except (TypeError, ValueError):
@@ -1300,6 +1317,8 @@ def _self_heal_evidence_update(payload: dict[str, Any], observed_at: str) -> dic
             "score": round(score, 3),
             "samples": _bounded_non_negative_int(performance.get("samples"), 1_000_000),
             "reasons": [str(reason)[:120] for reason in reasons if isinstance(reason, (str, int, float))][:8],
+            "details": safe_details,
+            "assessed_at": str(performance.get("assessed_at") or observed_at)[:64],
         },
         "repairs": [
             {
@@ -1501,12 +1520,47 @@ async def heartbeat(
     for k in ("hostname", "os", "os_version", "os_platform", "arch",
               "cpu_percent", "cpu_count", "cpu_model",
               "mem_total_mb", "mem_used_mb", "mem_percent",
-              "uptime_sec", "security", "software", "hardware"):
+              "uptime_sec", "security", "software", "hardware", "windows_operations"):
         if k in snap:
             update[k] = snap[k]
     update["disks"] = snap.get("disks", [])
     update["nics"] = snap.get("nics", [])
     await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": update})
+
+    if p.performance_only:
+        # Fast samples are authenticated endpoint evidence, but never run the
+        # inventory, companion reconciliation or alert workflows reserved for
+        # the full heartbeat. This keeps five-second cockpit data bounded.
+        telemetry, _, _ = _agent_device_telemetry(snap)
+        await db.devices.update_one(
+            {"nexus_agent_id": agent["id"], "archived": {"$ne": True}},
+            {"$set": {
+                "status": "online",
+                "last_seen": now,
+                "telemetry_observed_at": now,
+                "cpu_usage": telemetry["cpu_usage"],
+                "memory_usage": telemetry["memory_usage"],
+                "disk_usage": telemetry["disk_usage"],
+                "cpu_load": telemetry["cpu_load"],
+                "memory_pct": telemetry["memory_pct"],
+                "disk_pct": telemetry["disk_pct"],
+                "uptime_sec": telemetry["uptime_sec"],
+                "uptime_hours": telemetry["uptime_hours"],
+                "uptime_display": telemetry["uptime_display"],
+            }},
+        )
+        mirrored = await db.devices.find_one(
+            {"nexus_agent_id": agent["id"], "archived": {"$ne": True}},
+            {"_id": 0, "id": 1},
+        )
+        if mirrored and mirrored.get("id"):
+            await db.device_performance.insert_one({
+                "id": str(uuid.uuid4()), "device_id": mirrored["id"], "timestamp": now,
+                "cpu": telemetry["cpu_usage"], "memory": telemetry["memory_usage"], "disk": telemetry["disk_usage"],
+                "cpu_usage": telemetry["cpu_usage"], "memory_usage": telemetry["memory_usage"], "disk_usage": telemetry["disk_usage"],
+                "source": "nexus-agent-live-sample",
+            })
+        return {"ok": True, "server_time": now}
 
     try:
         elevate_state = await _ensure_elevate_companion_for_agent({**agent, **update})
@@ -1525,6 +1579,7 @@ async def heartbeat(
         # Preserve that uncertainty rather than letting a prior zero count look
         # like a current patch assessment on the Devices/RMM workspace.
         patch_evidence = _patch_evidence_update(snap, now)
+        operations_evidence = _windows_operations_evidence_update(snap, now)
         await db.devices.update_one(
             {"nexus_agent_id": agent["id"], "archived": {"$ne": True}},
             {"$set": {
@@ -1546,6 +1601,7 @@ async def heartbeat(
                 "nexus_backup_evidence": update.get("nexus_backup_evidence", agent.get("nexus_backup_evidence", {})),
                 **telemetry,
                 **patch_evidence,
+                **({"windows_operations": operations_evidence} if operations_evidence else {}),
             }},
         )
         mirrored_device = await db.devices.find_one(

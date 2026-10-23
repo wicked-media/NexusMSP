@@ -45,7 +45,13 @@ def _restricted_user():
 def _has_scope(query):
     if query.get("client_id") == {"$in": ["client-a"]}:
         return True
-    return {"client_id": {"$in": ["client-a"]}} in query.get("$and", [])
+    return any(_has_scope(clause) for clause in query.get("$and", []))
+
+
+def _has_tenant_scope(query):
+    if query.get("tenant_id") == "tenant-a":
+        return True
+    return any(_has_tenant_scope(clause) for clause in query.get("$and", []))
 
 
 def test_security_dashboard_compatibility_reads_are_client_scoped(monkeypatch):
@@ -75,3 +81,8 @@ def test_security_dashboard_compatibility_reads_are_client_scoped(monkeypatch):
     assert all(_has_scope(query) for query in events.find_queries)
     assert all(_has_scope(query) for query in canaries.count_queries)
     assert all(_has_scope(query) for query in snapshots.find_queries)
+    assert all(_has_tenant_scope(query) for query in devices.find_queries)
+    assert all(_has_tenant_scope(query) for query in alerts.find_queries)
+    assert all(_has_tenant_scope(query) for query in events.find_queries)
+    assert all(_has_tenant_scope(query) for query in canaries.count_queries)
+    assert all(_has_tenant_scope(query) for query in snapshots.find_queries)

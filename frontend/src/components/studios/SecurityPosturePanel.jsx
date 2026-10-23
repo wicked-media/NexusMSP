@@ -136,6 +136,12 @@ export default function SecurityPosturePanel({ studio, spec }) {
             evidence only. This projection refuses to generate scores or invent threat history, so
             every figure here is something an agent or a detection actually recorded.
           </ObservationNote>
+          <ObservationNote testId="studio-security-evidence-freshness">
+            {summary.latest_observed_at
+              ? `Latest recorded endpoint, alert, or event timestamp: ${new Date(summary.latest_observed_at).toLocaleString()}.`
+              : "No endpoint, alert, or event observation timestamp is available in this scope."}
+            {" "}This is evidence freshness, not a claim of continuous monitoring.
+          </ObservationNote>
           <ObservationNote>
             This is the evidence Security Studio was admitted against, read with server-side tenant
             and client scope. Per-endpoint observation times are not part of this projection, so the

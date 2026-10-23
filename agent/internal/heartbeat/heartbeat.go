@@ -61,6 +61,54 @@ type payload struct {
 	Update              *config.UpdateEvidence `json:"update_evidence,omitempty"`
 	NativeRemote        map[string]any         `json:"native_remote_evidence,omitempty"`
 	Backup              map[string]any         `json:"backup_evidence,omitempty"`
+	// PerformanceOnly carries a bounded, low-cost telemetry sample. It must
+	// never be used as an inventory replacement by the API.
+	PerformanceOnly bool `json:"performance_only,omitempty"`
+}
+
+// LiveTelemetryLoop sends only rapidly changing resource evidence. Keeping it
+// separate from the full heartbeat makes the device cockpit responsive without
+// repeatedly running application, patch and security inventory collectors.
+type LiveTelemetryLoop struct {
+	tr      *transport.Client
+	version string
+	every   time.Duration
+}
+
+func NewLiveTelemetryLoop(tr *transport.Client, version string, every time.Duration) *LiveTelemetryLoop {
+	if every < 2*time.Second {
+		every = 2 * time.Second
+	}
+	return &LiveTelemetryLoop{tr: tr, version: version, every: every}
+}
+
+func (l *LiveTelemetryLoop) Run(ctx context.Context) {
+	// Wait for the first interval: the full heartbeat supplies the baseline at
+	// startup and this avoids two overlapping collections during enrolment.
+	ticker := time.NewTicker(l.every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			l.sendOnce()
+		}
+	}
+}
+
+func (l *LiveTelemetryLoop) sendOnce() {
+	request := payload{
+		AgentVersion:    l.version,
+		Snapshot:        telemetry.CollectPerformance(),
+		PerformanceOnly: true,
+	}
+	var response struct {
+		OK bool `json:"ok"`
+	}
+	if err := l.tr.Do("POST", "/api/nexus-agent/heartbeat", request, &response); err != nil {
+		log.Printf("[live-telemetry] error: %v", err)
+	}
 }
 
 type heartbeatResponse struct {

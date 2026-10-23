@@ -54,12 +54,21 @@ export function studioObservationView(endpoint) {
   if (path === "/devices") return "device-estate";
   if (path === "/nexus-agent/agents") return "agent-fleet";
   if (path === "/clients-enriched") return "client-estate";
+  if (path === "/client-health/dashboard") return "client-portfolio";
+  if (path === "/client-studio/renewal-watch") return "client-renewal-watch";
   if (path === "/backup-dashboard/overview") return "backup-recovery";
+  if (path === "/m365/studio-overview") return "microsoft-studio";
+  if (["/m365/sync/readiness", "/m365/security/posture", "/m365/mfa-analytics", "/m365/licensing/posture"].includes(path)) return "microsoft-evidence";
+  if (path.startsWith("/m365/capabilities/")) return "microsoft-operations";
   if (path === "/m365/tenants") return "m365-tenants";
   if (path === "/yeastar/pbxs") return "voice-estate";
   if (path === "/web-studio/fleet") return "web-estate";
+  if (path === "/networking/dashboard") return "network-operations";
   if (path === "/networking/sites") return "network-sites";
+  if (["/unifi/status", "/bandwidth-monitor/overview", "/unifi/actions/log"].includes(path)) return "network-evidence";
   if (path === "/patch-compliance/overview") return "patch-posture";
+  if (path === "/nexus-pulse/overview") return "monitoring-pulse";
+  if (path === "/nexus-pulse/resources") return "monitoring-resources";
   if (path === "/security-dashboard/overview") return "security-posture";
   if (path === "/leads") return "lead-pipeline";
   if (path === "/documentation") return "documentation-inventory";
@@ -218,6 +227,7 @@ export function ObservedRows({ rows, testId = "studio-observation-rows", label }
               {row.status && <span className="uppercase mr-2">{row.status}</span>}
               <Observed value={row.observedAt} what="observation time" />
             </span>
+            {row.action ? <span className="shrink-0">{row.action}</span> : null}
           </div>
         ))}
       </CardContent>

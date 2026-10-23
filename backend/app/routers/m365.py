@@ -26,6 +26,7 @@ from app.services.m365_provider_visibility import (
     m365_tenant_connection_query,
     visible_m365_provider_tenant_ids,
 )
+from app.services.m365_studio import build_overview as build_m365_studio_overview
 from app.services.secret_store import decrypt_secret, encrypt_secret
 from app.services.scope_permissions import (
     assert_client_scope,
@@ -95,6 +96,76 @@ M365_COLLECTOR_STREAMS = (
         "collection": "m365_security_alerts",
         "permissions": ["SecurityAlert.Read.All", "IdentityRiskEvent.Read.All"],
         "feeds": ["Defender alerts", "Identity risk", "Security posture"],
+    },
+)
+
+# This is the Nexus command catalogue, not a claim that every endpoint exposed
+# by every CIPP deployment is portable. Each item names the Nexus-governed
+# route family, permission and preconditions a technician must satisfy before
+# the contextual Control Plane can offer an action.
+M365_OPERATION_CATALOGUE = (
+    {
+        "id": "tenant-onboarding", "area": "administration", "label": "Tenant onboarding and mapping",
+        "description": "Discover Partner Center tenants, stage them, and map each one to exactly one Nexus client with an audit reason.",
+        "routes": ["GET /m365/onboarding", "POST /m365/onboarding/discover", "POST /m365/onboarding/tenants", "PUT /m365/onboarding/tenants/{connection_id}/mapping"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Global Microsoft connection access", "Verified client mapping before tenant actions"],
+        "execution_state": "configuration", "href": "/control-plane?module=microsoft365&view=connections",
+    },
+    {
+        "id": "identity-lifecycle", "area": "administration", "label": "Identity lifecycle",
+        "description": "Create users, reset credentials, block sign-in and run the governed offboarding workflow through the optional CIPP adapter.",
+        "routes": ["POST /cipp/tenants/{tenant_id}/users", "POST /cipp/tenants/{tenant_id}/users/{user_id}/reset-password", "POST /cipp/tenants/{tenant_id}/users/{user_id}/block-signin", "POST /cipp/tenants/{tenant_id}/users/{user_id}/offboard"],
+        "permissions": ["entra.user.create", "entra.credential.reset", "entra.user.disable"], "requires": ["Verified CIPP adapter", "Exactly one mapped Nexus client", "Approved high-impact action where required"],
+        "execution_state": "provider_required", "href": "/control-plane?module=microsoft365&view=users",
+    },
+    {
+        "id": "licence-operations", "area": "administration", "label": "Licence operations",
+        "description": "Review provider-recorded capacity and assign licences through a mapped CIPP tenant when the adapter and delegated permission are verified.",
+        "routes": ["GET /m365/licensing/posture", "GET /cipp/tenants/{tenant_id}/licenses", "POST /cipp/tenants/{tenant_id}/users/{user_id}/assign-license"],
+        "permissions": ["entra.license.modify"], "requires": ["Verified CIPP adapter", "Exactly one mapped Nexus client", "Provider licence evidence"],
+        "execution_state": "provider_required", "href": "/control-plane?module=microsoft365&view=licensing",
+    },
+    {
+        "id": "standards-and-baselines", "area": "changes", "label": "Standards and baseline plans",
+        "description": "Configure tenant-scoped reference standards and inspect evidence gaps. Evaluations and remediation remain disabled until a verified Graph collector can read back results.",
+        "routes": ["GET /m365/standards", "PUT /m365/standards/{standard_id}", "POST /m365/standards/{standard_id}/run", "GET /m365/bpa-report"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Verified Graph evidence for evaluation", "Approval before remediation"],
+        "execution_state": "reference_only", "href": "/control-plane?module=microsoft365&view=standards",
+    },
+    {
+        "id": "access-and-conditional-access", "area": "changes", "label": "GDAP and Conditional Access",
+        "description": "Review GDAP evidence and Conditional Access templates. Extension or deployment must stay disabled until a provider can execute and verify the exact tenant change.",
+        "routes": ["GET /m365/gdap", "GET /m365/gdap/role-templates", "POST /m365/gdap/{id}/extend", "GET /m365/ca-templates", "POST /m365/ca-templates/{id}/deploy"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Partner Center or Graph verification", "Tenant mapping", "Approval and post-change verification"],
+        "execution_state": "verification_required", "href": "/control-plane?module=microsoft365&view=security",
+    },
+    {
+        "id": "microsoft-detection-drafts", "area": "automation", "label": "Detection drafts",
+        "description": "Create and manage Nexus detection drafts. Drafts do not evaluate provider telemetry or create tickets until a verified evidence stream and governed automation are admitted.",
+        "routes": ["GET /m365/scripted-alerts", "POST /m365/scripted-alerts", "DELETE /m365/scripted-alerts/{id}"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Declared evidence stream before activation", "Review of alert noise and ticket policy"],
+        "execution_state": "draft_only", "href": "/control-plane?module=microsoft365&view=automation",
+    },
+    {
+        "id": "microsoft-action-history", "area": "activity", "label": "Action and lifecycle history",
+        "description": "Review retained offboarding and provider action evidence. A current snapshot is not treated as a historical action record.",
+        "routes": ["GET /m365/offboardings", "GET /m365/tenants/{tenant_id}/ai-brief"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Mapped tenant scope", "Recorded provider or workflow evidence"],
+        "execution_state": "evidence_required", "href": "/control-plane?module=microsoft365&view=activity",
+    },
+    {
+        "id": "provider-connection", "area": "settings", "label": "Microsoft provider connection",
+        "description": "Save and test the Partner Center / Graph connection. Credentials remain encrypted server-side and a saved secret is never shown as a verified tenant connection.",
+        "routes": ["GET /m365/connection", "PUT /m365/connection", "POST /m365/connection/test"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Global Microsoft connection access", "Dedicated app registration and least-privilege consent"],
+        "execution_state": "configuration", "href": "/control-plane?module=microsoft365&view=connections",
+    },
+    {
+        "id": "cipp-adapter", "area": "settings", "label": "Optional CIPP compatibility adapter",
+        "description": "Configure and smoke-test a dedicated CIPP host key. Nexus owns the technician experience; CIPP is an optional execution adapter, not a source of tenancy authority.",
+        "routes": ["GET /cipp/status", "POST /cipp/settings", "GET /cipp/test", "DELETE /cipp/settings"],
+        "permissions": ["m365.tenant.manage"], "requires": ["Global Microsoft connection access", "Dedicated CIPP host key", "Provider connection test"],
+        "execution_state": "configuration", "href": "/settings?tab=integrations&anchor=cipp-settings-card",
     },
 )
 
@@ -661,6 +732,50 @@ async def microsoft_sync_readiness(current_user: dict = Depends(get_current_user
         },
         "streams": streams,
         "boundary": "Nexus requests only the read permissions listed for the enabled evidence streams. Write permissions and tenant changes belong to separately governed action workflows.",
+    }
+
+
+@router.get("/m365/capabilities/{area}")
+async def microsoft_capabilities(area: str, current_user: dict = Depends(get_current_user)):
+    """Expose the governed Nexus Microsoft command surface for one Studio tab.
+
+    The catalogue contains no secrets and never executes a provider action. It
+    tells the browser which Nexus operations exist, their required permission
+    and the conditions that must be met before the contextual workflow offers
+    an action. This prevents a saved credential from looking like broad
+    Microsoft control.
+    """
+    requested_area = str(area or "").strip().lower()
+    allowed_areas = {entry["area"] for entry in M365_OPERATION_CATALOGUE}
+    if requested_area not in allowed_areas:
+        raise HTTPException(status_code=404, detail="Microsoft Studio capability area not found")
+
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    connection = await _connection_payload(
+        visible_tenant_ids,
+        current_user=current_user,
+    )
+    # ``_connection_payload`` intentionally omits the secret. Its recorded
+    # mode is therefore the only truthful connection classification available
+    # to a browser-facing response.
+    connection_state = str(connection.get("mode") or "not_configured")
+    return {
+        "area": requested_area,
+        "connection": {
+            "state": connection_state,
+            "configured": bool(connection.get("secret_configured") and connection.get("app_id") and connection.get("partner_tenant_id")),
+            "verified_at": connection.get("verified_at"),
+            "last_tested_at": connection.get("last_tested_at"),
+            "last_sync": connection.get("last_synced"),
+        },
+        "capabilities": [
+            dict(entry) for entry in M365_OPERATION_CATALOGUE
+            if entry["area"] == requested_area
+        ],
+        "boundary": (
+            "This catalogue describes Nexus-governed Microsoft workflows. It is not a list of every "
+            "deployment-specific CIPP endpoint and it never grants provider access, tenant scope or execution authority."
+        ),
     }
 
 
@@ -1350,6 +1465,65 @@ async def tenants_health_summary(current_user: dict = Depends(get_current_user))
         "risky_signins_30d": risky,
         "gdap_expiring_30d": expiring,
     }
+
+
+@router.get("/m365/studio-overview")
+async def microsoft_studio_overview(current_user: dict = Depends(get_current_user)):
+    """Return one scoped, read-only Microsoft Studio command-centre projection.
+
+    This deliberately reuses the verified evidence collections behind the
+    established Microsoft routes. It neither creates a second tenant registry
+    nor calls Graph from the browser-facing request path.
+    """
+    await _retire_legacy_mock_data_for_global_scope(current_user)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    tenants_query = _tenant_record_query_for_tenants(visible_tenant_ids)
+    evidence_query = _evidence_query_for_tenants(visible_tenant_ids)
+
+    async def stream_evidence(stream: dict) -> tuple[str, dict]:
+        collection = getattr(db, stream["collection"])
+        count, latest = await asyncio.gather(
+            collection.count_documents(evidence_query),
+            collection.find(
+                evidence_query,
+                {"_id": 0, "observed_at": 1, "updated_at": 1, "synced_at": 1},
+            ).sort("observed_at", -1).limit(1).to_list(1),
+        )
+        row = latest[0] if latest else {}
+        return stream["id"], {
+            "records": count,
+            "latest_observed_at": row.get("observed_at") or row.get("updated_at") or row.get("synced_at"),
+        }
+
+    stream_pairs, tenants, no_mfa_users, risky_signins, gdap_expiring = await asyncio.gather(
+        asyncio.gather(*(stream_evidence(stream) for stream in M365_COLLECTOR_STREAMS)),
+        db.m365_tenants.find(tenants_query, {"_id": 0}).sort("name", 1).limit(500).to_list(500),
+        db.m365_users.count_documents(
+            _evidence_query_for_tenants(visible_tenant_ids, {"account_enabled": True, "mfa_enforced": False})
+        ),
+        db.m365_users.count_documents(
+            _evidence_query_for_tenants(visible_tenant_ids, {"risky_signin_30d": True})
+        ),
+        db.m365_gdap.count_documents(
+            _evidence_query_for_tenants(visible_tenant_ids, {"expires_in_days": {"$lte": 30}})
+        ),
+    )
+    overview = build_m365_studio_overview(
+        tenants=tenants,
+        stream_evidence=dict(stream_pairs),
+        explicit_no_mfa_users=no_mfa_users,
+        risky_signins=risky_signins,
+        gdap_expiring=gdap_expiring,
+        generated_at=_now_iso(),
+    )
+    connection = await _connection_payload(visible_tenant_ids, current_user=current_user)
+    overview["connection"] = {
+        "mode": connection.get("mode"),
+        "verified_at": connection.get("verified_at"),
+        "last_synced": connection.get("last_synced"),
+        "sync_provider": connection.get("sync_provider"),
+    }
+    return overview
 
 
 @router.get("/m365/tenants/{tid}")

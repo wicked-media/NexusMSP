@@ -208,6 +208,21 @@ def test_admission_gate_matches_declared_status():
             assert "outcome" in admission["problem"].lower(), studio["id"]
 
 
+def test_every_admitted_studio_has_an_operational_workspace_route():
+    """A released Studio brief must lead a technician to the actual work.
+
+    The Marketplace brief may explain scope and evidence, but it cannot be the
+    only destination for an admitted Studio. Discovery and architecture
+    candidates remain intentionally exempt because they have no admitted
+    operating surface yet.
+    """
+    for studio in studio_registry.STUDIOS.values():
+        if studio["admission"] is None:
+            continue
+        route = studio.get("home_route")
+        assert isinstance(route, str) and route.startswith("/"), studio["id"]
+
+
 def test_admitted_studios_permission_ids_exist_in_the_catalogue():
     from app.services.action_permissions import ACTION_PERMISSION_IDS
     for studio in studio_registry.STUDIOS.values():
@@ -232,6 +247,24 @@ def test_wired_tabs_name_the_endpoint_they_read():
             if tab_id == "activity":
                 assert spec.get("subjects"), f"{studio['id']}.activity wired without subjects"
                 assert spec["endpoint"] == studio_registry.ACTIVITY_ENDPOINT
+
+
+def test_remote_studio_adopts_the_existing_governed_evidence_surfaces():
+    """Remote Studio reads the real scoped APIs; it does not recreate a session store."""
+    tabs = studio_registry.STUDIOS["remote"]["tabs"]
+    assert tabs["inventory"]["endpoint"] == "/remote/sessions"
+    assert tabs["diagnostics"]["endpoint"] == "/remote/status"
+    assert tabs["security"]["endpoint"] == "/remote-access/policy"
+    assert tabs["settings"]["endpoint"] == "/remote/studio/preferences"
+    assert all(tabs[name]["state"] == "wired" for name in (
+        "inventory", "diagnostics", "security", "settings",
+    ))
+
+
+def test_backup_studio_adopts_recorded_recovery_verification_evidence():
+    tabs = studio_registry.STUDIOS["backup"]["tabs"]
+    assert tabs["diagnostics"]["state"] == "wired"
+    assert tabs["diagnostics"]["endpoint"] == "/backup-verify/overview"
 
 
 def test_a_wired_endpoint_declares_every_parameter_it_carries():
@@ -856,6 +889,15 @@ def test_detail_endpoint_returns_the_full_contract():
     assert contract["tabs"]["inventory"]["endpoint"] == "/proxmox/nodes"
     # A studio contract never carries live health — tabs read their own endpoint.
     assert "connections" not in json.dumps(contract)
+
+
+def test_client_and_network_overviews_keep_their_own_observed_projections():
+    """A Studio may adopt an existing projection, but never another Studio's."""
+    client = asyncio.run(studio_fleet.get_studio("client", current_user=USER))
+    network = asyncio.run(studio_fleet.get_studio("network", current_user=USER))
+
+    assert client["tabs"]["overview"]["endpoint"] == "/client-health/dashboard"
+    assert network["tabs"]["overview"]["endpoint"] == "/networking/dashboard"
 
 
 def test_detail_endpoint_404s_for_unknown_studios():

@@ -27,6 +27,7 @@ import { ClientContextProvider } from "@/contexts/ClientContext";
 import WeatherStrip from "@/components/ambient/WeatherStrip";
 import { Bot, ChevronRight, Menu, Search } from "lucide-react";
 import { resolveTopbarWorkspace } from "@/lib/topbarWorkspaceContext";
+import { resolveStudioWorkspaceContext } from "@/lib/studioWorkspaceContext";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 // Only the local dev server reaches a directly exposed API on :8000. A
@@ -411,6 +412,7 @@ const MainLayout = ({ children }) => {
   // Global header context: the active workspace label, resolved from the same
   // navigation config the sidebar renders so the two never drift.
   const workspaceContext = resolveTopbarWorkspace(location.pathname);
+  const studioContext = resolveStudioWorkspaceContext(location.pathname, location.search);
 
   return (
     <div className={`${collaborationWorkspace ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex`} style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
@@ -440,15 +442,27 @@ const MainLayout = ({ children }) => {
             <Menu className="h-5 w-5" />
           </button>
           <span className="text-sm font-semibold tracking-tight md:hidden">NexusMSP</span>
-          {workspaceContext && (
+          {(workspaceContext || studioContext) && (
             <div className="nx-topbar-context hidden min-w-0 items-center gap-1.5 md:flex" data-testid="topbar-workspace-context">
-              {workspaceContext.group && (
+              {studioContext ? (
+                <>
+                  <span className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/70">Nexus Studios</span>
+                  <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/35" aria-hidden="true" />
+                  <span className="truncate text-sm font-semibold tracking-tight text-foreground">{studioContext.studio}</span>
+                  {(studioContext.label || workspaceContext?.label) && (
+                    <>
+                      <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/35" aria-hidden="true" />
+                      <span className="truncate text-xs font-medium text-muted-foreground" data-testid="topbar-workspace-label">{studioContext.label || workspaceContext.label}</span>
+                    </>
+                  )}
+                </>
+              ) : workspaceContext.group ? (
                 <>
                   <span className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/70">{workspaceContext.group}</span>
                   <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/35" aria-hidden="true" />
+                  <span className="truncate text-sm font-semibold tracking-tight text-foreground" data-testid="topbar-workspace-label">{workspaceContext.label}</span>
                 </>
-              )}
-              <span className="truncate text-sm font-semibold tracking-tight text-foreground" data-testid="topbar-workspace-label">{workspaceContext.label}</span>
+              ) : <span className="truncate text-sm font-semibold tracking-tight text-foreground" data-testid="topbar-workspace-label">{workspaceContext.label}</span>}
             </div>
           )}
           <button

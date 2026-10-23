@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
 from app.database import db
-from app.services.nexus_pulse import compose_nexus_pulse
+from app.services.nexus_pulse import compose_monitored_resources, compose_nexus_pulse
 from app.services.scope_permissions import scoped_query, tenant_scoped_query
 
 
@@ -37,3 +37,25 @@ async def nexus_pulse_overview(current_user: dict = Depends(get_current_user)):
         automation_runs=runs,
         backup_jobs=backup_jobs,
     )
+
+
+@router.get("/nexus-pulse/resources")
+async def nexus_pulse_resources(current_user: dict = Depends(get_current_user)):
+    """List scoped monitoring coverage for retained endpoint observations only."""
+    device_query = tenant_scoped_query(current_user, scoped_query(current_user, {}))
+    devices = await db.devices.find(
+        device_query,
+        {
+            "_id": 0,
+            "id": 1,
+            "name": 1,
+            "hostname": 1,
+            "client_id": 1,
+            "client_name": 1,
+            "last_heartbeat": 1,
+            "last_seen": 1,
+            "telemetry_at": 1,
+            "observed_at": 1,
+        },
+    ).to_list(3000)
+    return compose_monitored_resources(devices=devices)

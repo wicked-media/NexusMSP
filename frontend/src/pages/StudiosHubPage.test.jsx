@@ -120,6 +120,14 @@ const FLEET = {
   product_note: "Products are the navigation boundary.",
   proposal_note: "Every catalogue idea is recorded once with one disposition.",
   tier_note: "Tiers are the commercial packaging of the same portfolio.",
+  master_register: {
+    total: 210,
+    canonical_matches: 210,
+    evidence_backed_matches: 108,
+    portfolio_parent_decisions: 102,
+    unmapped_requirements: 0,
+    disclosure: "The master register tracks requirements, not claimed delivery.",
+  },
   tiers: [
     { id: "core", label: "Core", blurb: "Everyday MSP operations.", products: ["nexus-endpoint"], studio_count: 0, planned_count: 1 },
     { id: "specialist", label: "Specialist", blurb: "Advanced capability.", products: ["nexus-infrastructure"], studio_count: 2, planned_count: 1 },
@@ -479,6 +487,53 @@ describe("Studio Fleet hub", () => {
     expect(hub.textContent).toContain("Diagnostics");
   });
 
+  test("puts incomplete Studio contracts in a portfolio admission queue without calling them live", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    const queue = host.querySelector('[data-testid="nexus-studios-delivery-queue"]');
+    expect(queue).not.toBeNull();
+    expect(queue.textContent).toContain("portfolio view, not a technician task list");
+
+    const cloud = host.querySelector('[data-testid="studio-delivery-cloud"]');
+    expect(cloud).not.toBeNull();
+    expect(cloud.textContent).toContain("Admission open");
+    expect(cloud.textContent).toContain("Next unadmitted area: overview");
+
+    const proxmox = host.querySelector('[data-testid="studio-delivery-proxmox"]');
+    expect(proxmox).not.toBeNull();
+    expect(proxmox.textContent).toContain("6 areas pending");
+    expect(proxmox.textContent).toContain("Next unadmitted area: administration");
+  });
+
+  test("discloses the master register without claiming parent-mapped work is delivered", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    const register = host.querySelector('[data-testid="nexus-studios-master-register"]');
+    expect(register).not.toBeNull();
+    expect(register.textContent).toContain("210 requirements, one accountable portfolio");
+    expect(register.textContent).toContain("108 requirements resolve to an admitted Studio or proposal");
+    expect(register.textContent).toContain("210 accounted");
+    expect(register.textContent).toContain("102 delivery plans");
+    expect(register.textContent).toContain("not claimed delivery");
+    expect(register.open).toBe(false);
+  });
+
+  test("keeps planning detail out of the technician's default scan path", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    const directory = host.querySelector('[data-testid="nexus-studios-product-directory"]');
+    expect(directory).not.toBeNull();
+    expect(directory.querySelector('a[href="#studio-product-nexus-infrastructure"]')).not.toBeNull();
+
+    const decisions = host.querySelector('[data-testid="product-proposals-nexus-infrastructure"]');
+    expect(decisions).not.toBeNull();
+    expect(decisions.open).toBe(false);
+    expect(decisions.textContent).toContain("Review register");
+  });
+
   test("groups the fleet into products and discloses what it cannot file", async () => {
     seedGet({ [`${BASE}/studios`]: FLEET });
     await render();
@@ -508,7 +563,7 @@ describe("Studio Fleet hub", () => {
 
     // And the count line reports products, not a flattened studio wall.
     expect(host.querySelector('[data-testid="header-description"]').textContent)
-      .toContain("4 studios across 3 products");
+      .toContain("4 Studios across 3 product families");
   });
 
   test("surfaces a load failure instead of an empty fleet", async () => {
@@ -782,6 +837,11 @@ describe("StudioShell spine", () => {
     const overview = host.querySelector('[data-testid="studio-overview"]');
     expect(overview.textContent).toContain("virtualization.vm.control");
     expect(overview.textContent).toContain("docs/INTEGRATIONS/PROXMOX.md");
+    const operatingBrief = host.querySelector('[data-testid="studio-operating-brief"]');
+    expect(operatingBrief.textContent).toContain("Technician operating brief");
+    expect(operatingBrief.textContent).toContain("Open operational workspace");
+    expect(operatingBrief.textContent).toContain("Evidence available");
+    expect(operatingBrief.textContent).toContain("Next delivery constraint");
     // Unconfigured health is disclosed on overview, never as a green state.
     expect(host.querySelector('[data-testid="studio-overview-health"]').textContent).toContain("No connection configured");
   });
@@ -796,8 +856,9 @@ describe("StudioShell spine", () => {
     await clickTab("diagnostics");
     const unwired = host.querySelector('[data-testid="tab-unwired-planned"]');
     expect(unwired).not.toBeNull();
-    expect(unwired.textContent).toContain("not wired for Proxmox Studio");
+    expect(unwired.textContent).toContain("Planned for Proxmox Studio");
     expect(unwired.textContent).toContain("No capability contract is registered for this tab yet.");
+    expect(unwired.textContent).toContain("Admission requirement");
   });
 
   test("the activity tab fetches the scoped stream and filters to this studio's subjects", async () => {
@@ -903,6 +964,6 @@ describe("StudioShell spine", () => {
     const missing = host.querySelector('[data-testid="studio-not-found"]');
     expect(missing).not.toBeNull();
     expect(missing.textContent).toContain("Unknown studio 'nope'");
-    expect(missing.textContent).toContain("Back to the Market Place");
+    expect(missing.textContent).toContain("Back to Nexus Studios");
   });
 });

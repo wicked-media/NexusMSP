@@ -52,6 +52,8 @@ export default function DeviceDetailPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
   const [data, setData] = useState(null);
+  const [liveTelemetry, setLiveTelemetry] = useState(null);
+  const [windowsHealth, setWindowsHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
@@ -95,6 +97,16 @@ export default function DeviceDetailPage() {
     try {
       const res = await axios.get(`${API}/devices/${deviceId}/detail`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
+      if (/windows/i.test(String(res.data?.device?.os || res.data?.device?.os_platform || ""))) {
+        try {
+          const healthRes = await axios.get(`${API}/windows-health/devices/${deviceId}`, { headers: { Authorization: `Bearer ${token}` } });
+          setWindowsHealth(healthRes.data);
+        } catch {
+          setWindowsHealth(null);
+        }
+      } else {
+        setWindowsHealth(null);
+      }
       // Fetch disk health
       try {
         const disksRes = await axios.get(`${API}/devices/${deviceId}/disks`, { headers: { Authorization: `Bearer ${token}` } });
@@ -111,6 +123,23 @@ export default function DeviceDetailPage() {
   }, [deviceId, token]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
+  useEffect(() => {
+    if (!deviceId) return undefined;
+    let active = true;
+    const refresh = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const response = await axios.get(`${API}/devices/${deviceId}/live-telemetry`, { headers: { Authorization: `Bearer ${token}` } });
+        if (active) setLiveTelemetry(response.data);
+      } catch {
+        // The full device record remains available if a device does not have a
+        // Nexus Agent or a transient metrics read fails.
+      }
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 3000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [deviceId, token]);
 
   const openDeviceEditor = async () => {
     if (!data?.device) return;
@@ -305,9 +334,10 @@ export default function DeviceDetailPage() {
   if (!data) return <div className="text-center py-20 text-muted-foreground">Device not found</div>;
 
   const dev = data.device;
+  const agentObservation = data.agent_observation;
   const isArchived = Boolean(dev.archived) || dev.status === "archived";
   const effectiveStatus = isArchived ? "archived" : dev.status;
-  const observedAt = dev.last_heartbeat || dev.last_seen || dev.telemetry_at || dev.observed_at;
+  const observedAt = liveTelemetry?.observed_at || dev.telemetry_observed_at || dev.last_heartbeat || dev.last_seen || dev.telemetry_at || dev.observed_at;
   const observedDate = observedAt ? new Date(observedAt) : null;
   const telemetryState = !observedDate || Number.isNaN(observedDate.getTime())
     ? "not_collected"
@@ -330,9 +360,10 @@ export default function DeviceDetailPage() {
 
   const complianceAssessed = Boolean(dev.security_assessed_at);
   const complianceColor = !complianceAssessed ? "text-muted-foreground" : (dev.compliance_score || 0) >= 90 ? "text-emerald-500" : (dev.compliance_score || 0) >= 70 ? "text-amber-500" : "text-red-500";
-  const cpuUsage = Math.round(dev.cpu_usage || 0);
-  const memoryUsage = Math.round(dev.memory_usage || 0);
-  const diskUsage = Math.round(dev.disk_usage || 0);
+  const telemetryPercent = value => Number.isFinite(Number(value)) ? Math.round(Number(value)) : null;
+  const cpuUsage = telemetryPercent(liveTelemetry?.cpu_usage ?? dev.cpu_usage);
+  const memoryUsage = telemetryPercent(liveTelemetry?.memory_usage ?? dev.memory_usage);
+  const diskUsage = telemetryPercent(liveTelemetry?.disk_usage ?? dev.disk_usage);
   const deviceSignal = isArchived
     ? "calm"
     : effectiveStatus === "offline"
@@ -344,7 +375,7 @@ export default function DeviceDetailPage() {
       : effectiveStatus === "online"
         ? "healthy"
         : "recommendation";
-  const usageGlow = (value) => value >= 90 ? "rose" : value >= 70 ? "amber" : "emerald";
+  const usageGlow = (value) => value === null ? "muted" : value >= 90 ? "rose" : value >= 70 ? "amber" : "emerald";
   const adapters = data.network_adapters || [];
   const activeAdapter = adapters.find(adapter => adapter.status === "up") || adapters.find(adapter => adapter.ip_address) || null;
   const software = data.software || [];
@@ -438,10 +469,22 @@ export default function DeviceDetailPage() {
   const lastObservedLabel = observedDate && !Number.isNaN(observedDate.getTime())
     ? formatDistanceToNow(observedDate, { addSuffix: true })
     : "No endpoint evidence";
+  const observationSecurity = agentObservation?.security || {};
+  const observationDns = agentObservation?.dns || {};
+  const observationHardware = agentObservation?.hardware || {};
+  const observationRemote = agentObservation?.remote || {};
+  const protectionSignals = [
+    ["Defender", observationSecurity.defender_enabled],
+    ["Real-time protection", observationSecurity.real_time_enabled],
+    ["Firewall", observationSecurity.firewall_enabled],
+  ];
+  const knownProtectionSignals = protectionSignals.filter(([, value]) => value !== null && value !== undefined);
+  const protectionAtRisk = knownProtectionSignals.some(([, value]) => value === false);
+  const primaryIp = activeAdapter?.ip_address || dev.ip_address || "Not reported";
   const telemetryItems = [
-    { label: "CPU", value: `${cpuUsage}%`, icon: Cpu, percent: cpuUsage, tone: usageGlow(cpuUsage), chartKey: "cpu", chartColor: "#16d78b" },
-    { label: "Memory", value: `${memoryUsage}%`, icon: MemoryStick, percent: memoryUsage, tone: memoryUsage >= 90 ? "rose" : "yellow", chartKey: "memory", chartColor: "#f4d13d" },
-    { label: "Disk", value: `${diskUsage}%`, icon: HardDrive, percent: diskUsage, tone: usageGlow(diskUsage), chartKey: "disk", chartColor: "#f0a33a" },
+    { label: "CPU", value: cpuUsage === null ? "—" : `${cpuUsage}%`, icon: Cpu, percent: cpuUsage, tone: usageGlow(cpuUsage), chartKey: "cpu", chartColor: "#16d78b" },
+    { label: "Memory", value: memoryUsage === null ? "—" : `${memoryUsage}%`, icon: MemoryStick, percent: memoryUsage, tone: usageGlow(memoryUsage), chartKey: "memory", chartColor: "#f4d13d" },
+    { label: "Disk", value: diskUsage === null ? "—" : `${diskUsage}%`, icon: HardDrive, percent: diskUsage, tone: usageGlow(diskUsage), chartKey: "disk", chartColor: "#f0a33a" },
     { label: "Uptime", value: dev.uptime_hours != null ? `${Math.floor(dev.uptime_hours / 24)}d ${Math.round(dev.uptime_hours % 24)}h` : "—", icon: Clock, tone: "cyan" },
     { label: "Alert", value: dev.alerts_count || data.alerts?.length || 0, icon: AlertTriangle, tone: (dev.alerts_count || data.alerts?.length || 0) > 0 ? "rose" : "emerald", tab: "events" },
     { label: "Patches", value: dev.pending_patches || pendingPatchRecords.length, icon: Download, tone: "cyan", tab: "patches", testId: "patches" },
@@ -501,8 +544,8 @@ export default function DeviceDetailPage() {
 
       <section className="nx-device-telemetry" data-testid="device-hero-tiles">
         <div className="nx-device-telemetry__head">
-          <div className="nx-device-telemetry__title"><Activity /><strong>{telemetryState === "observed" ? "Live device telemetry" : "Last reported telemetry"}</strong><span>Last reported snapshot ({telemetryState === "observed" ? "current" : telemetryState === "stale" ? "stale" : "not collected"})</span></div>
-          <div className="nx-device-telemetry__status"><span className={`is-${telemetryState}`}><AlertTriangle />{telemetryState === "observed" ? "Snapshot is current" : telemetryState === "stale" ? "Snapshot is stale" : "No snapshot collected"}</span><small>Last seen: {lastObservedLabel}</small><Info /><Button variant="outline" size="sm" onClick={fetchDetail} data-testid="refresh-device-detail"><RefreshCw />Refresh</Button></div>
+          <div className="nx-device-telemetry__title"><Activity /><strong>{liveTelemetry?.source === "nexus-agent-live-sample" ? "Live device telemetry" : "Latest agent telemetry"}</strong><span>{liveTelemetry?.source === "nexus-agent-live-sample" ? "five-second endpoint samples" : "last inventory heartbeat"}</span></div>
+          <div className="nx-device-telemetry__status"><span className={`is-${telemetryState}`}><AlertTriangle />{liveTelemetry?.source === "nexus-agent-live-sample" ? "Live sampler connected" : telemetryState === "observed" ? "Snapshot is current" : telemetryState === "stale" ? "Snapshot is stale" : "No snapshot collected"}</span><small>Observed: {lastObservedLabel}</small><Info /><Button variant="outline" size="sm" onClick={fetchDetail} data-testid="refresh-device-detail"><RefreshCw />Refresh</Button></div>
         </div>
         <div className="nx-device-telemetry__grid">
           {telemetryItems.map(item => {
@@ -516,6 +559,31 @@ export default function DeviceDetailPage() {
           })}
         </div>
       </section>
+
+      {agentObservation && <section className="rounded-2xl border border-border/60 bg-card/45 p-4 shadow-sm" data-testid="device-technician-signal-board">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-300">Technician signal board</p><h2 className="mt-1 text-base font-semibold">What needs attention before you touch the endpoint</h2></div>
+          <Badge variant="outline" className={agentObservation.agent?.online ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}>{agentObservation.agent?.online ? "Agent evidence current" : "Agent evidence unavailable"}</Badge>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-xl border border-border/60 bg-background/35 p-3"><div className="flex items-center gap-2 text-xs font-medium"><Activity className="h-4 w-4 text-cyan-300" />Connection</div><p className="mt-2 text-sm font-semibold">{agentObservation.agent?.online ? "Agent online" : "Agent offline"}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">{agentObservation.remote?.status === "ready" ? "Remote Companion verified" : observationRemote.detail || "Remote readiness not reported"}</p></div>
+          <button type="button" onClick={() => setActiveTab("security")} className="rounded-xl border border-border/60 bg-background/35 p-3 text-left transition-colors hover:border-cyan-400/35 hover:bg-cyan-400/[0.04]"><div className="flex items-center gap-2 text-xs font-medium"><ShieldCheck className={`h-4 w-4 ${protectionAtRisk ? "text-amber-300" : "text-emerald-300"}`} />Protection</div><p className="mt-2 text-sm font-semibold">{knownProtectionSignals.length === 0 ? "Not reported" : protectionAtRisk ? "Action required" : "Core controls on"}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">{observationSecurity.encryption_status || "Encryption not reported"}</p></button>
+          <button type="button" onClick={() => setActiveTab("patches")} className="rounded-xl border border-border/60 bg-background/35 p-3 text-left transition-colors hover:border-cyan-400/35 hover:bg-cyan-400/[0.04]"><div className="flex items-center gap-2 text-xs font-medium"><Download className="h-4 w-4 text-amber-300" />Updates</div><p className="mt-2 text-sm font-semibold">{observationSecurity.pending_update_count === null || observationSecurity.pending_update_count === undefined ? "Not reported" : `${observationSecurity.pending_update_count} pending`}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">Open patch evidence and maintenance controls</p></button>
+          <button type="button" onClick={() => setActiveTab("network")} className="rounded-xl border border-border/60 bg-background/35 p-3 text-left transition-colors hover:border-cyan-400/35 hover:bg-cyan-400/[0.04]"><div className="flex items-center gap-2 text-xs font-medium"><Network className="h-4 w-4 text-violet-300" />Network</div><p className="mt-2 truncate text-sm font-semibold" title={primaryIp}>{primaryIp}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">DNS {observationDns.mode || "not reported"} · {observationDns.status || "no DNS evidence"}</p></button>
+          <div className="rounded-xl border border-border/60 bg-background/35 p-3"><div className="flex items-center gap-2 text-xs font-medium"><Server className="h-4 w-4 text-cyan-300" />Hardware</div><p className="mt-2 truncate text-sm font-semibold" title={[observationHardware.manufacturer, observationHardware.model].filter(Boolean).join(" ")}>{[observationHardware.manufacturer, observationHardware.model].filter(Boolean).join(" · ") || "Not reported"}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">BIOS {observationHardware.bios_version || "not reported"}</p></div>
+        </div>
+      </section>}
+
+      {windowsHealth && <section className="rounded-2xl border border-cyan-500/20 bg-card/45 p-4 shadow-sm" data-testid="device-windows-health">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-300">Windows Health Engine</p><h2 className="mt-1 text-base font-semibold">Evidence before remediation</h2><p className="mt-1 text-xs text-muted-foreground">{windowsHealth.boundary}</p></div>
+          <Badge variant="outline" className={windowsHealth.assessment_state === "action_required" ? "border-rose-500/30 bg-rose-500/10 text-rose-300" : windowsHealth.assessment_state === "attention" ? "border-amber-500/30 bg-amber-500/10 text-amber-300" : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"}>{String(windowsHealth.assessment_state || "insufficient_evidence").replace(/_/g, " ")}</Badge>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-xl border border-border/60 bg-background/35 p-3"><p className="text-xs font-medium">Prioritised findings</p>{windowsHealth.findings?.length ? <ul className="mt-2 space-y-2 text-xs">{windowsHealth.findings.slice(0, 3).map((finding) => <li key={finding.code}><span className="font-medium">{finding.title}</span><p className="mt-0.5 text-muted-foreground">{finding.evidence}</p></li>)}</ul> : <p className="mt-2 text-xs text-muted-foreground">No actionable finding is derived from the evidence currently retained.</p>}</div>
+          <div className="rounded-xl border border-border/60 bg-background/35 p-3"><p className="text-xs font-medium">Controlled next steps</p>{windowsHealth.recommendations?.length ? <ul className="mt-2 space-y-2 text-xs">{windowsHealth.recommendations.slice(0, 3).map((item) => <li key={item.title}><span className="font-medium">{item.title}</span><p className="mt-0.5 text-muted-foreground">{item.requires_administrator_approval ? "Administrator-approved change required. " : "Diagnostic only. "}{item.reason}</p></li>)}</ul> : <p className="mt-2 text-xs text-muted-foreground">Collect the missing evidence before suggesting a repair.</p>}</div>
+        </div>
+      </section>}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="nx-device-record-body">
         <div className="nx-device-workspace-layout">

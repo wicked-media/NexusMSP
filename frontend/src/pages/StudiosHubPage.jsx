@@ -7,7 +7,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState, ErrorState, LoadingState } from "@/components/design-system";
-import { LayoutGrid, RefreshCw, Search, SearchX, ShieldAlert } from "lucide-react";
+import {
+  Activity,
+  ArrowUpRight,
+  CheckCircle2,
+  ChevronDown,
+  LayoutGrid,
+  RefreshCw,
+  Search,
+  SearchX,
+  ShieldAlert,
+} from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import {
@@ -35,7 +45,7 @@ import {
 } from "@/lib/studioProducts";
 
 /**
- * `/studios` — the Market Place: one searchable catalogue of the studio fleet.
+ * `/studios` — Nexus Studios: one searchable catalogue of the studio fleet.
  *
  * Nexus proposes 185+ studios across 14 products in three commercial tiers.
  * Listing one navigation entry per studio is how a capability becomes
@@ -186,24 +196,42 @@ function ProposalRow({ proposal }) {
 function ProposalList({ section }) {
   if (section.proposals.length === 0) return null;
   return (
-    <div
-      className="rounded-xl border border-border/60 bg-muted/[0.12] p-4"
+    <details
+      className="group rounded-xl border border-border/60 bg-muted/[0.12]"
       data-testid={`product-proposals-${section.id}`}
     >
-      <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-        {PROPOSALS_HEADING}
-      </p>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{PROPOSALS_DISCLOSURE}</p>
-      <ul className="mt-3 flex flex-col gap-3">
-        {section.proposals.map((proposal) => (
-          <ProposalRow key={proposal.id} proposal={proposal} />
-        ))}
-      </ul>
-    </div>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3.5 marker:hidden">
+        <span className="min-w-0">
+          <span className="block text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            Portfolio decisions
+          </span>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {section.proposals.length} proposal{section.proposals.length === 1 ? "" : "s"} and consolidation decision{section.proposals.length === 1 ? "" : "s"}
+          </span>
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-2 text-[11px] font-medium text-foreground">
+          Review register <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+        </span>
+      </summary>
+      <div className="border-t border-border/60 px-4 pb-4 pt-3.5">
+        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+          {PROPOSALS_HEADING}
+        </p>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{PROPOSALS_DISCLOSURE}</p>
+        <ul className="mt-3 flex flex-col gap-3">
+          {section.proposals.map((proposal) => (
+            <ProposalRow key={proposal.id} proposal={proposal} />
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
 
 function StudioCard({ studio, tier }) {
+  const wiredCount = studio.wired_tabs.length;
+  const tabCount = studio.spine.length;
+  const canLaunch = Boolean(studio.home_route);
   return (
     <Card
       className="nx-card flex flex-col hover:border-primary/40"
@@ -217,44 +245,112 @@ function StudioCard({ studio, tier }) {
               {studio.domain} · {studio.priority} / {studio.release} · {studio.owner}
             </p>
           </div>
-          <Badge
-            variant="outline"
-            className={`shrink-0 whitespace-nowrap text-[9px] ${
-              STATUS_TONE[studio.status] || NEUTRAL_TONE
-            }`}
-          >
-            {studio.status}
-          </Badge>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <Badge
+              variant="outline"
+              className={`whitespace-nowrap text-[9px] ${STATUS_TONE[studio.status] || NEUTRAL_TONE}`}
+            >
+              {studio.status}
+            </Badge>
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {wiredCount}/{tabCount} areas live
+            </span>
+          </div>
         </div>
 
         <p className="text-xs leading-relaxed text-muted-foreground">{studio.tagline}</p>
 
         {tier ? <Chip tone={NEUTRAL_TONE}>{tier}</Chip> : null}
 
-        <div className="flex flex-wrap gap-1">
-          {studio.wired_tabs.length > 0 ? (
-            studio.wired_tabs.map((tab) => (
-              <Chip key={tab} tone={DELIVERED_PROPOSAL_TONE}>
-                {tab}
-              </Chip>
-            ))
-          ) : (
-            <Chip tone={UNBUILT_PROPOSAL_TONE}>admission open</Chip>
-          )}
+        <div className="rounded-lg border border-border/60 bg-muted/[0.16] px-3 py-2">
+          <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            Technician readiness
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            {wiredCount > 0
+              ? `${wiredCount} evidence-backed area${wiredCount === 1 ? "" : "s"} available now${canLaunch ? "; the linked workspace is ready to use." : "."}`
+              : "admission open — no live operating area is admitted yet; review the contract before planning work here."}
+          </p>
+          {wiredCount > 0 ? <p className="mt-1 text-[10px] text-muted-foreground">Live: {studio.wired_tabs.join(" · ")}</p> : null}
         </div>
 
-        <div className="mt-auto flex gap-2 pt-1">
+        <div className="mt-auto flex flex-wrap gap-2 pt-1">
           <Button size="sm" className="h-8 text-xs" asChild>
-            <a href={`/studios/${studio.id}`}>Open studio</a>
+            <a href={`/studios/${studio.id}`}>Studio brief</a>
           </Button>
-          {studio.home_route && (
+          {canLaunch && (
             <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
-              <a href={studio.home_route}>Operating surface</a>
+              <a href={studio.home_route}>Open workspace <ArrowUpRight className="ml-1 h-3 w-3" /></a>
             </Button>
           )}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** A small launch card for the working surfaces technicians can use today. */
+function ReadyStudioCard({ studio }) {
+  const wiredCount = studio.wired_tabs.length;
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card/65 p-3 transition-colors hover:border-primary/40" data-testid={`ready-studio-${studio.id}`}>
+      <div className="min-w-0">
+        <p className="truncate text-xs font-semibold tracking-tight">{studio.name}</p>
+        <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          {wiredCount} live area{wiredCount === 1 ? "" : "s"}
+        </p>
+      </div>
+      <Button size="sm" className="h-7 shrink-0 text-[11px]" asChild>
+          <a href={studio.home_route}>Open workspace <ArrowUpRight className="ml-1 h-3 w-3" /></a>
+      </Button>
+    </li>
+  );
+}
+
+const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
+/**
+ * The delivery rail deliberately reports admission gaps rather than making a
+ * roadmap look like an operational queue. It answers a platform-owner's
+ * question ("where is the next real boundary?") without creating a pretend
+ * technician action for work that has not been admitted.
+ */
+function DeliveryQueueCard({ studio }) {
+  const pendingTabs = (Array.isArray(studio.spine) ? studio.spine : [])
+    .filter((tabId) => !(Array.isArray(studio.wired_tabs) ? studio.wired_tabs : []).includes(tabId));
+  const nextArea = pendingTabs[0] || null;
+  const isOpen = studio.admission_state !== "complete" || studio.wired_tabs.length === 0;
+
+  return (
+    <li
+      className="flex min-w-0 flex-col gap-2 rounded-xl border border-border/60 bg-card/65 p-3"
+      data-testid={`studio-delivery-${studio.id}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold tracking-tight">{studio.name}</p>
+          <p className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            {studio.priority || "Unprioritised"} · {studio.status}
+          </p>
+        </div>
+        <Chip tone={isOpen ? UNBUILT_PROPOSAL_TONE : NEUTRAL_TONE} className="shrink-0 whitespace-nowrap">
+          {isOpen ? "Admission open" : `${pendingTabs.length} area${pendingTabs.length === 1 ? "" : "s"} pending`}
+        </Chip>
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        {nextArea
+          ? `Next unadmitted area: ${nextArea}. Review scope, evidence source and safety gates before implementation.`
+          : "No additional area is declared in the shared spine."}
+      </p>
+      <div className="mt-auto flex items-center justify-between gap-2 pt-0.5">
+        <span className="text-[10px] text-muted-foreground">
+          {studio.wired_tabs.length}/{studio.spine.length} live
+        </span>
+        <Button size="sm" variant="outline" className="h-7 text-[11px]" asChild>
+          <a href={`/studios/${studio.id}`}>Review brief <ArrowUpRight className="ml-1 h-3 w-3" /></a>
+        </Button>
+      </div>
+    </li>
   );
 }
 
@@ -406,7 +502,7 @@ export default function StudiosHubPage() {
       <div className="space-y-4">
         <OperationalPageHeader
           eyebrow="Platform"
-          title="Market Place"
+          title="Nexus Studios"
           description="The studio fleet contract could not be read, so no catalogue is shown and nothing about the fleet has been inferred from the failure."
           icon={ShieldAlert}
           tone="amber"
@@ -415,7 +511,7 @@ export default function StudiosHubPage() {
           <CardContent className="p-0">
             <ErrorState
               icon={<ShieldAlert className="h-7 w-7" />}
-              title="The Market Place could not be loaded"
+              title="Nexus Studios could not be loaded"
               description="No studio, product or catalogue idea is shown. Retry the read before treating the fleet as empty."
               error={error}
               onRetry={load}
@@ -433,7 +529,7 @@ export default function StudiosHubPage() {
       <div className="space-y-4">
         <OperationalPageHeader
           eyebrow="Platform · one operating model"
-          title="Market Place"
+          title="Nexus Studios"
           description="Reading the studio fleet contract. No count is shown until the contract has been read."
           icon={LayoutGrid}
           tone="cyan"
@@ -477,13 +573,32 @@ export default function StudiosHubPage() {
       hint: "Proposed, consolidated or already served",
     },
   ];
+  const readyStudios = (Array.isArray(fleet.studios) ? fleet.studios : [])
+    .filter((studio) => studio.home_route && studio.wired_tabs.length > 0)
+    .sort((left, right) => right.wired_tabs.length - left.wired_tabs.length || left.name.localeCompare(right.name))
+    .slice(0, 4);
+  const deliveryQueue = (Array.isArray(fleet.studios) ? fleet.studios : [])
+    .filter((studio) => {
+      const spine = Array.isArray(studio.spine) ? studio.spine : [];
+      const wired = Array.isArray(studio.wired_tabs) ? studio.wired_tabs : [];
+      return studio.admission_state !== "complete" || wired.length < spine.length;
+    })
+    .sort((left, right) => {
+      const priority = (PRIORITY_ORDER[left.priority] ?? 99) - (PRIORITY_ORDER[right.priority] ?? 99);
+      if (priority !== 0) return priority;
+      const leftGaps = left.spine.length - left.wired_tabs.length;
+      const rightGaps = right.spine.length - right.wired_tabs.length;
+      return rightGaps - leftGaps || left.name.localeCompare(right.name);
+    })
+    .slice(0, 6);
+  const masterRegister = fleet.master_register;
 
   return (
     <div className="space-y-6" data-testid="studios-hub">
       <OperationalPageHeader
         eyebrow="Platform · one operating model"
-        title="Market Place"
-        description={`${fleet.count} studios across ${coverage.productCount} products on one shared spine, plus ${ideaCount} catalogue ideas in one searchable catalogue rather than one sidebar link per studio. A proposal stays labelled as a proposal until its admission gate is clear, and every result names the product and the tier that own it.`}
+        title="Nexus Studios"
+        description={`${fleet.count} Studios across ${coverage.productCount} product families on one shared operating spine, plus ${ideaCount} catalogue ideas. Product families organise the portfolio; a Studio is the specialist operating capability a technician opens when the work calls for it.`}
         icon={LayoutGrid}
         tone="cyan"
         actions={
@@ -494,15 +609,15 @@ export default function StudiosHubPage() {
       />
 
       {/* The portfolio statement: what the fleet is, and how it is packaged. */}
-      <Card className="nx-ambient-surface" data-testid="market-place-masthead">
+      <Card className="nx-ambient-surface" data-testid="nexus-studios-masthead">
         <CardContent className="p-5 md:p-6">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-6 2xl:flex-row 2xl:items-start 2xl:justify-between">
             <div className="max-w-xl space-y-3">
               <p className="text-[10px] font-medium uppercase tracking-[0.28em] text-muted-foreground">
-                The portfolio
+                The Nexus Studios portfolio
               </p>
               <h2 className="text-xl font-semibold tracking-tight">
-                {fleet.count} studios, {coverage.productCount} products, one operating model
+                {fleet.count} Studios, {coverage.productCount} product families, one operating model
               </h2>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {fleet.product_note ||
@@ -528,8 +643,8 @@ export default function StudiosHubPage() {
             </div>
 
             <dl
-              className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border/60 bg-border/40 sm:grid-cols-4 lg:w-[32rem]"
-              data-testid="market-place-stats"
+              className="grid w-full grid-cols-2 gap-px overflow-hidden rounded-xl border border-border/60 bg-border/40 sm:grid-cols-4 2xl:w-[32rem]"
+              data-testid="nexus-studios-stats"
             >
               {stats.map((stat) => (
                 <StatTile
@@ -537,14 +652,14 @@ export default function StudiosHubPage() {
                   label={stat.label}
                   value={stat.value}
                   hint={stat.hint}
-                  testid={`market-place-stat-${stat.id}`}
+                  testid={`nexus-studios-stat-${stat.id}`}
                 />
               ))}
             </dl>
           </div>
 
           {declaredTiers.length > 0 ? (
-            <ul className="mt-5 grid gap-3 sm:grid-cols-3" data-testid="market-place-tiers">
+            <ul className="mt-5 grid gap-3 sm:grid-cols-3" data-testid="nexus-studios-tiers">
               {declaredTiers.map((facet) => (
                 <TierCard
                   key={facet.id}
@@ -558,16 +673,81 @@ export default function StudiosHubPage() {
         </CardContent>
       </Card>
 
+      {masterRegister ? (
+        <details className="group rounded-2xl border border-border/60 bg-card/65" data-testid="nexus-studios-master-register">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-4 px-5 py-4 marker:hidden md:px-6">
+            <span className="min-w-0">
+              <span className="block text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Portfolio accountability</span>
+              <span className="mt-1 block text-sm font-semibold tracking-tight">{masterRegister.total} requirements tracked without turning plans into product claims</span>
+            </span>
+            <span className="inline-flex shrink-0 items-center gap-2 text-[11px] font-medium text-foreground">
+              Review register <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+            </span>
+          </summary>
+          <div className="border-t border-border/60 px-5 pb-5 pt-4 md:px-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-2xl">
+                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Master Studio Register</p>
+                <h2 className="mt-1 text-base font-semibold tracking-tight">{masterRegister.total} requirements, one accountable portfolio</h2>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {masterRegister.evidence_backed_matches ?? masterRegister.canonical_matches} requirements resolve to an admitted Studio or proposal. {masterRegister.portfolio_parent_decisions || 0} are assigned to a reviewed portfolio parent and remain explicitly pending capability delivery.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Chip tone={DELIVERED_PROPOSAL_TONE}><CheckCircle2 className="mr-1 inline h-3 w-3" />{masterRegister.canonical_matches} accounted</Chip>
+                {masterRegister.portfolio_parent_decisions > 0 ? <Chip tone={UNBUILT_PROPOSAL_TONE}>{masterRegister.portfolio_parent_decisions} delivery plans</Chip> : null}
+              </div>
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">{masterRegister.disclosure}</p>
+          </div>
+        </details>
+      ) : null}
+
+      {readyStudios.length > 0 ? (
+        <section className="nx-ambient-surface rounded-2xl border border-border/60 p-5 md:p-6" data-testid="nexus-studios-ready-now">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Technician launchpad</p>
+              <h2 className="mt-1 text-base font-semibold tracking-tight">Quick launch</h2>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                Jump directly into a proven operating surface. Use the Studio brief only when you need scope, dependencies or evidence boundaries.
+              </p>
+            </div>
+            <Chip tone={DELIVERED_PROPOSAL_TONE}><Activity className="mr-1 inline h-3 w-3" />{readyStudios.length} ready now</Chip>
+          </div>
+          <ul className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {readyStudios.map((studio) => <ReadyStudioCard key={studio.id} studio={studio} />)}
+          </ul>
+        </section>
+      ) : null}
+
+      {deliveryQueue.length > 0 ? (
+        <section className="rounded-2xl border border-border/60 bg-card/50 p-5 md:p-6" data-testid="nexus-studios-delivery-queue">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Admission queue</p>
+              <h2 className="mt-1 text-base font-semibold tracking-tight">Finish the right operating boundaries next</h2>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                This is a portfolio view, not a technician task list. It names the highest-priority Studios with undisclosed operating areas so delivery can be sequenced without representing planned capability as live.
+              </p>
+            </div>
+            <Chip tone={UNBUILT_PROPOSAL_TONE}>{deliveryQueue.length} Studio{deliveryQueue.length === 1 ? "" : "s"} needing admission work</Chip>
+          </div>
+          <ul className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {deliveryQueue.map((studio) => <DeliveryQueueCard key={studio.id} studio={studio} />)}
+          </ul>
+        </section>
+      ) : null}
+
       <Card data-testid="catalogue-search-card">
         <CardContent className="space-y-3.5 p-5 md:p-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                Find a capability
+                Find the right tool
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Names, products, tiers, the problem a studio solves, and the gate that blocks a
-                plan.
+                Search the job, the capability, a product, or an admission gate. Every result makes clear whether it is ready to operate or still a plan.
               </p>
             </div>
             {filtered ? (
@@ -670,6 +850,27 @@ export default function StudiosHubPage() {
         )
       ) : (
         <>
+          <nav className="rounded-2xl border border-border/60 bg-card/50 p-4 md:p-5" aria-label="Nexus Studio product families" data-testid="nexus-studios-product-directory">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">Browse product families</p>
+                <p className="mt-1 text-xs text-muted-foreground">Jump to the Studio family that owns the work. Planning decisions stay collapsed until you need them.</p>
+              </div>
+              <span className="text-[11px] text-muted-foreground">{sections.length} families</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {sections.map((section) => (
+                <a
+                  key={section.id}
+                  href={`#studio-product-${section.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/40 px-2.5 py-1.5 text-[11px] font-medium text-foreground transition hover:border-primary/40 hover:bg-primary/[0.06]"
+                >
+                  {section.name}<span className="text-muted-foreground">{section.count}</span>
+                </a>
+              ))}
+            </div>
+          </nav>
+
           <Card>
             <CardContent className="p-5 md:p-6">
               <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
@@ -693,7 +894,7 @@ export default function StudiosHubPage() {
                 ? product.tier_label || tierLabel(product.tier, fleet.tiers)
                 : "";
               return (
-                <section key={section.id} className="space-y-4" data-testid={`product-section-${section.id}`}>
+                <section id={`studio-product-${section.id}`} key={section.id} className="scroll-mt-20 space-y-4" data-testid={`product-section-${section.id}`}>
                   <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border/60 pb-3">
                     <div className="flex items-baseline gap-3">
                       <span className="font-mono text-[11px] text-muted-foreground/70 tabular-nums">

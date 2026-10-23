@@ -15,6 +15,7 @@ from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.module_permissions import require_module_permission
 from app.services.scope_permissions import assert_global_scope
+from app.services.secret_store import decrypt_secret, encrypt_secret
 
 router = APIRouter()
 
@@ -36,9 +37,16 @@ async def _require_global_huntress_access(current_user: dict, operation: str) ->
 
 async def _get_creds() -> Optional[dict]:
     doc = await db.settings.find_one({"type": SETTINGS_KEY}, {"_id": 0})
-    if not doc or not doc.get("api_key") or not doc.get("secret_key"):
+    if not doc:
         return None
-    return doc
+    # New records use encrypted server-side values.  Legacy plaintext values
+    # remain readable only in process memory so an upgrade does not silently
+    # disconnect a configured provider; the next credential save removes them.
+    api_key = decrypt_secret(doc.get("api_key_encrypted")) or str(doc.get("api_key") or "")
+    secret_key = decrypt_secret(doc.get("secret_key_encrypted")) or str(doc.get("secret_key") or "")
+    if not api_key or not secret_key:
+        return None
+    return {"api_key": api_key, "secret_key": secret_key}
 
 
 def _auth(creds: dict) -> tuple:
@@ -74,8 +82,9 @@ async def _get(path: str, params: Optional[dict] = None) -> dict:
 async def huntress_status(current_user: dict = Depends(get_current_user)):
     await _require_global_huntress_access(current_user, "huntress.status.view")
     doc = await db.settings.find_one({"type": SETTINGS_KEY}, {"_id": 0})
+    creds = await _get_creds()
     return {
-        "configured": bool(doc and doc.get("api_key") and doc.get("secret_key")),
+        "configured": bool(creds),
         "last_test_status": (doc or {}).get("last_test_status"),
         "last_tested_at": (doc or {}).get("last_tested_at"),
         "last_synced_at": (doc or {}).get("last_synced_at"),
@@ -97,11 +106,15 @@ async def save_huntress_settings(data: dict, current_user: dict = Depends(get_cu
         {"type": SETTINGS_KEY},
         {"$set": {
             "type": SETTINGS_KEY,
-            "api_key": api_key,
-            "secret_key": secret_key,
+            "api_key_encrypted": encrypt_secret(api_key),
+            "secret_key_encrypted": encrypt_secret(secret_key),
             "updated_at": now,
             "updated_by": current_user.get("name"),
-        }},
+        },
+        # Retire the plaintext schema as part of every successful save. The
+        # browser never receives either the encrypted values or their source.
+        "$unset": {"api_key": "", "secret_key": ""},
+        },
         upsert=True,
     )
     return {"message": "Huntress settings saved", "updated_at": now}

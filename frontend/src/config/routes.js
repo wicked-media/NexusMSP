@@ -23,7 +23,7 @@ export const routeConfig = [
   { path: "/nexus-data-quality", component: page("NexusDataQualityPage"), auth: true, layout: true },
   { path: "/nexus-pulse", component: page("NexusPulsePage"), auth: true, layout: true },
   { path: "/nexus-proving-ground", component: page("NexusProvingGroundPage"), auth: true, layout: true },
-  // The Market Place: one searchable studio catalogue + one parameterised spine
+  // Nexus Studios: one searchable studio catalogue + one parameterised spine
   // route, so a studio is a registry entry rather than a parallel product
   // (docs/NEXUS_STUDIO_FLEET.md, docs/NEXUS_INVENT_BATCH_6.md). `/marketplace`
   // is the alias the navigation label names, so a shared link matches the label.

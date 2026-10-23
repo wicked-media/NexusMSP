@@ -323,7 +323,7 @@ export const navGroups = [
     ]
   },
   {
-    // The Market Place is its own navigation section rather than one more
+    // Nexus Studios is its own navigation section rather than one more
     // Platform entry, and it holds **one** destination: the searchable studio
     // catalogue (docs/NEXUS_INVENT_BATCH_6.md). The fleet is 185+ studios across
     // 14 products, so listing one sidebar link per studio is how a capability
@@ -337,11 +337,11 @@ export const navGroups = [
     // The group id stays `msp_studios` so visibility preferences and enabled
     // modules keep resolving through the rename.
     id: "msp_studios",
-    title: "Market Place",
+    title: "Nexus Studios",
     items: [
       {
         path: "/studios", icon: LayoutGrid, label: "Studio catalogue",
-        workspacePaths: ["/studios/web", "/studios/m365"],
+        workspacePaths: ["/studios/network", "/studios/web", "/studios/m365"],
         children: [
           { path: "/proxmox", label: "Proxmox Studio" },
           { path: "/fleet-baseline?platform=windows", label: "Windows Studio" },
@@ -351,8 +351,9 @@ export const navGroups = [
           { path: "/customer-environment", label: "Customer Environment Studio" },
           { path: "/operations-assurance", label: "Operations Assurance Studio" },
           { path: "/extension-studio", label: "Extension Studio" },
+          { path: "/studios/network", label: "Network Studio" },
           { path: "/studios/web", label: "Web Studio" },
-          { path: "/studios/m365", label: "M365 Studio" },
+          { path: "/studios/m365", label: "Microsoft Studio" },
         ],
       },
     ],
@@ -441,7 +442,7 @@ export const MODULE_GROUPS = [
   { id: "security", label: "Security", description: "SOC, endpoint, compliance, DR" },
   { id: "intelligence", label: "AI & Intelligence", description: "AI copilot, predictions, knowledge base" },
   { id: "reports", label: "Reports & Comms", description: "Reports, email, comms" },
-  { id: "msp_studios", label: "Market Place", description: "One searchable catalogue over every studio, product and tier" },
+  { id: "msp_studios", label: "Nexus Studios", description: "One searchable catalogue across every Nexus product family and Studio" },
   { id: "platform", label: "Platform", description: "Settings, integrations, system health" },
   { id: "help", label: "Help", description: "Knowledge base, technician documentation, guides, and planning" },
 ];

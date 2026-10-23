@@ -183,8 +183,10 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	cmd.SetAppUpdates(appUpdates)
 	backupPreflight := nexusbackup.NewPreflightLoop(tr, cfg, 30*time.Second)
 	canaryWatch := canary.NewLoop(tr, time.Duration(cfg.ShieldCanaryInterval())*time.Second)
+	liveTelemetry := heartbeat.NewLiveTelemetryLoop(tr, Version, 5*time.Second)
 
 	go hb.Run(ctx)
+	go liveTelemetry.Run(ctx)
 	go cmd.Run(ctx)
 	go backupPreflight.Run(ctx)
 	if cfg.ShieldCanaryEnabled() {

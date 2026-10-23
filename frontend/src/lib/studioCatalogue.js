@@ -1,5 +1,5 @@
 /**
- * The Market Place index — one searchable catalogue over the whole studio fleet.
+ * The Nexus Studios index — one searchable catalogue over the whole studio fleet.
  *
  * Nexus now proposes 185+ studios across 14 products. They cannot each be a
  * sidebar link: 185 destinations is a navigation section nobody can read, which

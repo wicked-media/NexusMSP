@@ -28,7 +28,7 @@ import {
 
 // Navigation groups that stay visible even when a saved per-technician module
 // list predates them, so a migration can never remove access to something a
-// technician could already open. Help is documentation; the Market Place holds
+// technician could already open. Help is documentation; Nexus Studios holds
 // the studio catalogue (and, under it, the studio workspaces that used to live
 // inside the always-enabled Platform group) so studios stay reachable without a
 // sidebar link per studio.

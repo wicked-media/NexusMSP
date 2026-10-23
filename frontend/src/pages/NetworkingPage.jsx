@@ -44,6 +44,12 @@ function formatUptime(seconds) {
   return d > 0 ? `${d}d ${h}h` : `${h}h`;
 }
 
+function formatEvidenceTime(value) {
+  if (!value) return "Not reported";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Not reported" : parsed.toLocaleString();
+}
+
 const StatusDot = ({ status }) => {
   const c = { online: "bg-emerald-500", warning: "bg-amber-500", offline: "bg-red-500", pending_adoption: "bg-blue-500", pending_sync: "bg-amber-500", pending_configuration: "bg-slate-500", sync_failed: "bg-red-500", recorded: "bg-sky-500" };
   return <span className={`inline-block w-2.5 h-2.5 rounded-full ${c[status] || "bg-slate-500"}`} />;
@@ -750,11 +756,18 @@ export default function NetworkingPage() {
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-7">
           <HeroTile label="Sites online" value={stats.online_sites ?? 0} icon={Globe} glow="sky" subtitle={`of ${stats.total_sites ?? 0} managed`} />
           <HeroTile label="Devices online" value={stats.online_devices ?? 0} icon={Router} glow="emerald" subtitle={`of ${stats.total_devices ?? 0} discovered`} />
-          <HeroTile label="Network clients" value={stats.total_clients ?? 0} icon={Users} glow="indigo" subtitle="Currently discovered" />
-          <HeroTile label="Access points" value={stats.access_points ?? 0} icon={Wifi} glow="sky" subtitle="Managed wireless" />
-          <HeroTile label="Switches" value={stats.switches ?? 0} icon={Server} glow="violet" subtitle="Managed switching" />
-          <HeroTile label="Gateways" value={stats.gateways ?? 0} icon={Shield} glow="amber" subtitle="Managed edge" />
-          <HeroTile label="Network health" value={stats.online_sites < stats.total_sites ? "Attention" : "Healthy"} icon={stats.online_sites < stats.total_sites ? AlertTriangle : CheckCircle2} glow={stats.online_sites < stats.total_sites ? "amber" : "emerald"} subtitle={stats.online_sites < stats.total_sites ? "One or more sites offline" : "All sites reporting"} animated={false} />
+          <HeroTile label="Network clients" value={stats.total_clients ?? 0} icon={Users} glow="indigo" subtitle="Recorded network clients" />
+          <HeroTile label="Access points" value={stats.access_points ?? 0} icon={Wifi} glow="sky" subtitle="Recorded access points" />
+          <HeroTile label="Switches" value={stats.switches ?? 0} icon={Server} glow="violet" subtitle="Recorded switching" />
+          <HeroTile label="Gateways" value={stats.gateways ?? 0} icon={Shield} glow="amber" subtitle="Recorded edge devices" />
+          <HeroTile
+            label="Network health"
+            value={stats.total_sites === 0 ? "Not monitored" : stats.online_sites < stats.total_sites ? "Attention" : "Reporting"}
+            icon={stats.total_sites === 0 || stats.online_sites < stats.total_sites ? AlertTriangle : CheckCircle2}
+            glow={stats.total_sites === 0 || stats.online_sites < stats.total_sites ? "amber" : "emerald"}
+            subtitle={stats.total_sites === 0 ? "No managed sites are in scope" : stats.online_sites < stats.total_sites ? "One or more sites are not online" : "Every scoped site reports online"}
+            animated={false}
+          />
         </div>
       )}
 
@@ -776,11 +789,22 @@ export default function NetworkingPage() {
         </Card>
       )}
 
-      {/* Site Bandwidth Overview */}
+      {dashboard?.meta && (
+        <Card className="border-border/60 bg-muted/[0.16]" data-testid="network-evidence-freshness">
+          <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3 text-xs text-muted-foreground">
+            <span>Inventory freshness: <span className="font-medium text-foreground">{formatEvidenceTime(dashboard.meta.inventory_observed_at)}</span></span>
+            <span>Workspace generated: <span className="font-medium text-foreground">{formatEvidenceTime(dashboard.meta.generated_at)}</span></span>
+            <span>{dashboard.meta.counter_note}</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Retained transfer counters — explicitly not a live throughput graph. */}
       {dashboard && dashboard.site_bandwidth && dashboard.site_bandwidth.length > 0 && (
         <Card data-testid="site-bandwidth-card">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" />Site Bandwidth Overview</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" />Recorded site transfer counters</CardTitle>
+            <p className="text-xs text-muted-foreground">These are cumulative bytes from current client records, not live throughput or a speed test.</p>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -788,7 +812,7 @@ export default function NetworkingPage() {
                 <TableRow>
                   <TableHead>Site</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead>
                   <TableHead>Devices</TableHead><TableHead>Clients</TableHead><TableHead>ISP</TableHead>
-                  <TableHead>Speed</TableHead><TableHead className="text-right">RX / TX</TableHead>
+                  <TableHead>Advertised link</TableHead><TableHead className="text-right">Recorded RX / TX</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

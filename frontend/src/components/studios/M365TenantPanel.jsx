@@ -12,7 +12,7 @@ import {
 } from "./StudioObservationKit";
 
 /**
- * M365 Studio's Inventory tab: the observed Microsoft tenant records.
+ * Microsoft Studio's Inventory tab: the observed Microsoft tenant records.
  *
  * The studio was admitted on explicit client→tenant mapping, consent state and
  * licence evidence, so its Inventory reads the projection that already carries

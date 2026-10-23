@@ -133,7 +133,7 @@ const INTEGRATION_SETTING_CATEGORIES = [
 
 const connectionState = (ready, readyLabel = "Configured") => ready
   ? { label: readyLabel, className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" }
-  : { label: "Needs setup", className: "border-amber-500/30 bg-amber-500/10 text-amber-200" };
+  : { label: "Not connected", className: "border-amber-500/30 bg-amber-500/10 text-amber-200" };
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
@@ -144,6 +144,7 @@ export default function SettingsPage() {
   const [settingSearch, setSettingSearch] = useState("");
   const [integrationSearch, setIntegrationSearch] = useState("");
   const [integrationCategory, setIntegrationCategory] = useState("all");
+  const [selectedIntegrationId, setSelectedIntegrationId] = useState("");
   const [highlightAnchor, setHighlightAnchor] = useState("");
 
   // Honour deep-links: /settings?tab=integrations&anchor=huntress-settings-card
@@ -398,11 +399,11 @@ export default function SettingsPage() {
     : [];
 
   const integrationConnections = [
-    { id: "artifact-storage", anchor: "supabase-storage-card", label: "Private artifact storage", description: "Private document, evidence and attachment storage.", category: "platform", icon: Cloud, state: connectionState(artifactStorage.ready, "Ready") },
+    { id: "artifact-storage", anchor: "supabase-storage-card", label: "Private artifact storage", description: "Private document, evidence and attachment storage.", category: "platform", icon: Cloud, essential: true, state: connectionState(artifactStorage.ready, "Ready") },
     { id: "synergy", anchor: "synergy-wholesale-settings-card", label: "Synergy Wholesale", description: "Domains, DNS, hosting and certificate lifecycle.", category: "customer", icon: Globe, state: connectionState(synergy.configured) },
     { id: "xero", anchor: "xero-settings-card", label: "Xero", description: "Accounting credentials and invoice sync authorisation.", category: "commercial", icon: FileText, state: connectionState(xero.connected, "Connected") },
     { id: "stripe", anchor: "stripe-settings-card", label: "Stripe", description: "Restricted payment credential for invoice checkout.", category: "commercial", icon: CreditCard, state: connectionState(stripe.configured, "Configured") },
-    { id: "microsoft365-delivery", route: "/settings?tab=mailbox&anchor=microsoft365-outbound-role-routing", label: "Microsoft 365 delivery", description: "Mailbox ownership, sender roles and delivery policies.", category: "customer", icon: Mail, state: connectionState(mailboxConnected, "Connected") },
+    { id: "microsoft365-delivery", route: "/settings?tab=mailbox&anchor=microsoft365-outbound-role-routing", label: "Microsoft 365 delivery", description: "Mailbox ownership, sender roles and delivery policies.", category: "customer", icon: Mail, essential: true, state: connectionState(mailboxConnected, "Connected") },
     { id: "sms", anchor: "sms-settings-card", label: "MobileMessage SMS", description: "Approved senders, inbound replies and delivery policy.", category: "customer", icon: Smartphone, state: connectionState(sms.enabled && sms.password_set) },
     { id: "acronis", anchor: "acronis-settings-card", label: "Acronis", description: "Backup provider credentials and tenant access.", category: "security", icon: DatabaseBackup, state: connectionState(acronis.connected, "Connected") },
     { id: "pax8", anchor: "pax8-settings-card", label: "Pax8", description: "CSP identity, licensing and billing connection.", category: "commercial", icon: Building, state: connectionState(pax8.enabled) },
@@ -410,8 +411,8 @@ export default function SettingsPage() {
     { id: "suped", anchor: "suped-settings-card", label: "SupED", description: "DMARC and deliverability provider credential.", category: "security", icon: Shield, state: connectionState(suped.configured) },
     { id: "cipp", anchor: "cipp-settings-card", label: "Microsoft compatibility adapter", description: "Optional CIPP execution adapter for Nexus Control Plane.", category: "operations", icon: Plug, state: connectionState(cipp.configured, "Adapter configured") },
     { id: "unifi", anchor: "unifi-settings-card", label: "UniFi", description: "Controller access for network topology and actions.", category: "operations", icon: Wifi, state: connectionState(unifi.configured) },
-    { id: "nexus-elevate", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", description: "Privilege policy and approved elevation controls.", category: "platform", icon: ShieldCheck, state: connectionState(nexusElevate.native_enabled, "Included") },
-    { id: "nexus-agent", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", description: "Endpoint agent rollout and management policy.", category: "platform", icon: Server, state: connectionState(true, "Built in") },
+    { id: "nexus-elevate", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", description: "Privilege policy and approved elevation controls.", category: "platform", icon: ShieldCheck, essential: true, state: connectionState(nexusElevate.native_enabled, "Included") },
+    { id: "nexus-agent", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", description: "Endpoint agent rollout and management policy.", category: "platform", icon: Server, essential: true, state: connectionState(true, "Built in") },
     { id: "splynx", anchor: "splynx-settings-card", label: "Splynx", description: "ISP billing and telecom provider credentials.", category: "commercial", icon: CreditCard, state: connectionState(splynx.configured) },
     { id: "hudu", anchor: "hudu-settings-card", label: "Hudu", description: "Documentation import and knowledge connection.", category: "operations", icon: BookOpen, state: connectionState(hudu.configured) },
     { id: "syncro", anchor: "syncro-settings-card", label: "Syncro", description: "Optional PSA/RMM migration and import connection.", category: "operations", icon: RefreshCw, state: connectionState(syncro.enabled) },
@@ -423,6 +424,11 @@ export default function SettingsPage() {
     const matchesSearch = !searchTerm || `${connection.label} ${connection.description} ${connection.category}`.toLowerCase().includes(searchTerm);
     return matchesCategory && matchesSearch;
   });
+
+  const selectedIntegration = integrationConnections.find((connection) => connection.id === selectedIntegrationId);
+  const connectedIntegrationCount = integrationConnections.filter((connection) => connection.state.label !== "Not connected").length;
+  const essentialConnections = integrationConnections.filter((connection) => connection.essential);
+  const connectedEssentialCount = essentialConnections.filter((connection) => connection.state.label !== "Not connected").length;
 
   // Apply/remove highlight CSS class to the targeted card
   useEffect(() => {
@@ -453,20 +459,25 @@ export default function SettingsPage() {
     }, 150);
   };
 
-  const openIntegrationConnection = (connection) => {
+  const selectIntegrationConnection = (connection) => {
     setIntegrationSearch("");
+    setSelectedIntegrationId(connection.id);
+    if (connection.route) {
+      return;
+    }
+  };
+
+  const openIntegrationConfiguration = (connection) => {
+    if (!connection) return;
     if (connection.route) {
       navigate(connection.route);
       return;
     }
-
-    setActiveTab("integrations");
     setHighlightAnchor(connection.anchor);
     const params = new URLSearchParams(location.search);
     params.set("tab", "integrations");
     params.set("anchor", connection.anchor);
     navigate({ pathname: location.pathname, search: `?${params.toString()}` });
-
     setTimeout(() => {
       findSettingAnchor(connection.anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 150);
@@ -939,14 +950,14 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-2xl">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-200">Connection configuration</Badge>
-                <span className="text-xs font-medium text-muted-foreground">Credentials · approval policy · ownership</span>
+                <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-200">Platform setup</Badge>
+                <span className="text-xs font-medium text-muted-foreground">Connections · ownership · safe rollout</span>
               </div>
               <div className="mt-3 flex items-start gap-3">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10"><Plug className="h-5 w-5 text-cyan-200" /></span>
                 <div>
-                  <h2 className="text-xl font-semibold tracking-tight">Integration connections</h2>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">Configure the credential, sender, callback and approval rules that Nexus needs to use a provider. Live health, sync activity, incidents and operational queues stay in the Integration Centre.</p>
+                  <h2 className="text-xl font-semibold tracking-tight">Platform connection setup</h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">Choose a capability, confirm what it unlocks, then open only its configuration. Connection health, sync activity and operational queues remain in the Integration Centre.</p>
                 </div>
               </div>
             </div>
@@ -957,12 +968,15 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 border-b border-cyan-500/10 p-4 md:grid-cols-2 md:p-5">
+        <div className="grid gap-3 border-b border-cyan-500/10 p-4 md:grid-cols-3 md:p-5">
           <div className="rounded-xl border border-cyan-500/15 bg-background/40 p-4">
-            <div className="flex items-start gap-3"><Settings2 className="mt-0.5 h-4 w-4 text-cyan-300" /><div><p className="text-sm font-medium">Configure in Settings</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Provider credentials, webhook URLs, default senders, sync policy, approved scopes and commercial approval requirements.</p></div></div>
+            <div className="flex items-start gap-3"><Settings2 className="mt-0.5 h-4 w-4 text-cyan-300" /><div><p className="text-sm font-medium">1. Establish foundations</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{connectedEssentialCount} of {essentialConnections.length} Nexus foundations are ready: agent, elevation, protected artifacts and service delivery.</p></div></div>
+          </div>
+          <div className="rounded-xl border border-emerald-500/15 bg-background/40 p-4">
+            <div className="flex items-start gap-3"><CheckCircle className="mt-0.5 h-4 w-4 text-emerald-300" /><div><p className="text-sm font-medium">2. Add what you sell</p><p className="mt-1 text-xs leading-5 text-muted-foreground">External providers are optional. Add billing, security, documentation or network connections only when a service needs them.</p></div></div>
           </div>
           <div className="rounded-xl border border-violet-500/15 bg-background/40 p-4">
-            <div className="flex items-start gap-3"><Activity className="mt-0.5 h-4 w-4 text-violet-300" /><div><p className="text-sm font-medium">Operate in Integration Centre</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Connection health, live provider data, sync outcomes, diagnostics, activity and actions that require technician attention.</p></div></div>
+            <div className="flex items-start gap-3"><Activity className="mt-0.5 h-4 w-4 text-violet-300" /><div><p className="text-sm font-medium">3. Verify and operate</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Use the Integration Centre for health, diagnostics, sync outcomes and work requiring technician attention.</p></div></div>
           </div>
         </div>
 
@@ -986,7 +1000,7 @@ export default function SettingsPage() {
               const Icon = connection.icon;
               const category = INTEGRATION_SETTING_CATEGORIES.find((item) => item.id === connection.category);
               return (
-                <button key={connection.id} type="button" onClick={() => openIntegrationConnection(connection)} className="group flex min-h-32 items-start gap-3 rounded-xl border border-border/70 bg-background/35 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-cyan-500/35 hover:bg-cyan-500/[0.045]" data-testid={`integration-settings-jump-${connection.id}`}>
+                <button key={connection.id} type="button" onClick={() => selectIntegrationConnection(connection)} aria-pressed={selectedIntegrationId === connection.id} className={`group flex min-h-32 items-start gap-3 rounded-xl border p-3.5 text-left transition-all hover:-translate-y-0.5 ${selectedIntegrationId === connection.id ? "border-cyan-400/55 bg-cyan-500/[0.09] shadow-[0_12px_28px_-22px_rgba(34,211,238,0.9)]" : "border-border/70 bg-background/35 hover:border-cyan-500/35 hover:bg-cyan-500/[0.045]"}`} data-testid={`integration-settings-jump-${connection.id}`}>
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/[0.08]"><Icon className="h-4 w-4 text-cyan-200" /></span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-start justify-between gap-2"><span className="font-medium text-foreground">{connection.label}</span><ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-cyan-200" /></span>
@@ -998,13 +1012,23 @@ export default function SettingsPage() {
             })}
           </div>
           {visibleIntegrationConnections.length === 0 && <div className="rounded-xl border border-dashed border-border/70 bg-background/25 p-5 text-sm text-muted-foreground" data-testid="integration-settings-search-empty">No connection matches this filter. Clear the search or choose <span className="font-medium text-foreground">All connections</span>.</div>}
-          <p className="text-xs text-muted-foreground">Selecting a connection updates the Settings link so the exact configuration card can be shared or revisited without searching through the page.</p>
+          {selectedIntegration ? (() => {
+            const SelectedIcon = selectedIntegration.icon;
+            const category = INTEGRATION_SETTING_CATEGORIES.find((item) => item.id === selectedIntegration.category);
+            return <section className="rounded-xl border border-cyan-500/30 bg-cyan-500/[0.055] p-4 shadow-[0_16px_36px_-30px_rgba(34,211,238,0.9)]" aria-label={`${selectedIntegration.label} setup workbench`} data-testid="integration-settings-selection">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10"><SelectedIcon className="h-4 w-4 text-cyan-200" /></span><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{selectedIntegration.label}</p><Badge variant="outline" className={selectedIntegration.state.className}>{selectedIntegration.state.label}</Badge><span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{category?.label}</span></div><p className="mt-1 max-w-2xl text-sm text-muted-foreground">{selectedIntegration.description} {selectedIntegration.state.label === "Not connected" ? "This is optional until your service delivery requires it." : "Review the existing configuration before making changes."}</p></div></div>
+                <div className="flex shrink-0 flex-wrap gap-2"><Button type="button" variant="outline" size="sm" onClick={() => setSelectedIntegrationId("")}>Choose another</Button><Button type="button" size="sm" onClick={() => openIntegrationConfiguration(selectedIntegration)} data-testid="open-selected-integration-configuration"><Settings2 className="mr-1.5 h-3.5 w-3.5" />{selectedIntegration.route ? "Open setup" : "Open configuration"}</Button></div>
+              </div>
+            </section>;
+          })() : <div className="rounded-xl border border-dashed border-border/70 bg-background/20 px-4 py-3 text-xs text-muted-foreground">Select a connection to see its readiness and open its configuration deliberately. Optional services remain optional; they do not block platform readiness.</div>}
+          <p className="text-xs text-muted-foreground">{connectedIntegrationCount} of {integrationConnections.length} connections are configured or included. Select a card first; the configuration forms remain below for direct links and existing runbooks.</p>
         </div>
       </section>
 
       <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-muted/[0.18] p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div><p className="text-sm font-medium">Connection details</p><p className="mt-1 text-xs text-muted-foreground">Save and test provider credentials below. Test outcomes are evidence of a connection check, not permission to perform commercial or security-sensitive actions.</p></div>
-        <Badge variant="outline" className="w-fit border-border/70 text-muted-foreground">{integrationConnections.length} connection settings</Badge>
+        <div><p className="text-sm font-medium">Configuration library</p><p className="mt-1 text-xs text-muted-foreground">Direct links and existing runbooks still open these provider forms. Save and test credentials here; a successful test is connection evidence, not permission for commercial or security-sensitive actions.</p></div>
+        <Badge variant="outline" className="w-fit border-border/70 text-muted-foreground">{integrationConnections.length} available connections</Badge>
       </div>
 
       <SetupGuideCallout title="Before you save a provider" source="Each provider has its own credential source and permission model. This page stores configuration; the Integration Centre shows operational status after a connection is in place." steps={["Use a dedicated service account or API key where the provider supports it.", "Grant only the permissions needed for the NexusMSP workflow.", "Record the credential owner and renewal/expiry date, then run the connection test before enabling sync or billing automation."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />

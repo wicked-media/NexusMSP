@@ -11,7 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import get_current_user
-from app.services import studio_registry
+from app.services import studio_master_register, studio_proposals, studio_registry
 
 router = APIRouter()
 
@@ -20,6 +20,24 @@ router = APIRouter()
 async def list_studios(current_user: dict = Depends(get_current_user)) -> dict:
     """Every studio in the fleet with its honest status and per-tab states."""
     return studio_registry.list_studios()
+
+
+@router.get("/studios/master-register")
+async def master_register(current_user: dict = Depends(get_current_user)) -> dict:
+    """The 210-item requirements register reconciled to canonical records.
+
+    This is deliberately read-only. It exposes no tenant data and never treats a
+    title match, a route or a proposal as evidence of production readiness.
+    """
+    rows = studio_master_register.reconcile(
+        studio_registry.STUDIOS.values(), studio_proposals.PROPOSALS.values()
+    )
+    return {
+        "summary": studio_master_register.summary(
+            studio_registry.STUDIOS.values(), studio_proposals.PROPOSALS.values()
+        ),
+        "studios": rows,
+    }
 
 
 @router.get("/studios/{studio_id}")

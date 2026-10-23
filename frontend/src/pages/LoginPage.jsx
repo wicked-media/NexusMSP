@@ -272,7 +272,9 @@ export default function LoginPage() {
   };
 
   const fillDemoCredentials = () => {
-    setLoginData({ email: "aaron@stech.com.au", password: "" });
+    // Keep the local-preview affordance aligned with the seeded development
+    // administrator. It must not point technicians at a retired fixture account.
+    setLoginData({ email: "admin@nexusops.io", password: "" });
   };
 
   const now = new Date();

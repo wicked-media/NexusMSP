@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Activity, ArrowLeft, CheckCircle2, Clock3, Command, Copy, ExternalLink, FileDown, FileUp,
+  Activity, ArrowLeft, CheckCircle2, Clock3, Command, Copy, Cpu, ExternalLink, FileDown, FileUp,
   FolderOpen, History, Laptop, Loader2, Maximize2, Minimize2, Monitor, MonitorUp,
-  Network, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Users,
+  HardDrive, MemoryStick, Network, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Users,
   ZoomIn, ZoomOut, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +28,7 @@ import {
   DEFAULT_PREFERENCES, STUDIO_PRESETS, TOOL_LABELS, applyPreset, deriveSessionChapters,
   maturityLabel, normalisePreferences, orderQuickActions, suggestSessionLabour,
 } from "@/lib/remoteSessionStudio";
+import { buildRemoteTelemetrySnapshot, telemetryTone } from "@/lib/remoteTelemetry";
 
 const BUILD_STAGES = [
   { name: "Trust & grants", detail: "Per-tenant signed attended-session leases, device binding, revocation and durable replay protection.", state: "ready", icon: ShieldCheck },
@@ -104,6 +105,7 @@ export default function NativeRemoteAccessPage() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(null);
   const [readiness, setReadiness] = useState(null);
+  const [selectedPerformance, setSelectedPerformance] = useState([]);
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
   const [mode, setMode] = useState("view");
@@ -343,19 +345,50 @@ export default function NativeRemoteAccessPage() {
   const inspectDevice = useCallback(async device => {
     setSelected(device);
     setReadiness(null);
+    setSelectedPerformance([]);
     setConsent(false);
     setPurpose("");
     setMode(studioPrefs.default_mode);
     setChecking(true);
     try {
-      const response = await axios.get(`${API}/devices/${device.id}/native-remote/readiness`, { headers });
-      setReadiness(response.data);
-    } catch (error) {
-      setReadiness({ ready: false, state: "unavailable", detail: messageFor(error, "Readiness could not be confirmed") });
+      const [readinessResult, performanceResult] = await Promise.allSettled([
+        axios.get(`${API}/devices/${device.id}/native-remote/readiness`, { headers }),
+        axios.get(`${API}/devices/${device.id}/performance`, { headers }),
+      ]);
+      if (readinessResult.status === "fulfilled") {
+        setReadiness(readinessResult.value.data);
+      } else {
+        setReadiness({ ready: false, state: "unavailable", detail: messageFor(readinessResult.reason, "Readiness could not be confirmed") });
+      }
+      setSelectedPerformance(
+        performanceResult.status === "fulfilled" && Array.isArray(performanceResult.value.data)
+          ? performanceResult.value.data
+          : [],
+      );
     } finally {
       setChecking(false);
     }
   }, [headers, studioPrefs.default_mode]);
+
+  const selectedMetrics = useMemo(
+    () => buildRemoteTelemetrySnapshot({ performance: selectedPerformance, device: selected }),
+    [selected, selectedPerformance],
+  );
+
+  useEffect(() => {
+    if (!selected?.id) return undefined;
+    let cancelled = false;
+    const refreshPerformance = async () => {
+      try {
+        const response = await axios.get(`${API}/devices/${selected.id}/performance`, { headers });
+        if (!cancelled) setSelectedPerformance(Array.isArray(response.data) ? response.data : []);
+      } catch {
+        // Keep the last verified sample visible. Availability of metrics must not affect access readiness.
+      }
+    };
+    const interval = window.setInterval(refreshPerformance, 30000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [headers, selected?.id]);
 
   useEffect(() => {
     const requested = searchParams.get("device");
@@ -746,6 +779,17 @@ export default function NativeRemoteAccessPage() {
       <Dialog open={Boolean(selected)} onOpenChange={open => !open && setSelected(null)}>
         <NexusWorkflowDialog eyebrow="Nexus Native" title="Authorise remote support" description="The grant is short-lived, single-session and bound to this technician, tenant and endpoint." icon={MonitorUp} tone="cyan" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setSelected(null)}>Cancel</Button><Button onClick={startSession} disabled={!readiness?.ready || !consent || starting}>{starting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MonitorUp className="mr-2 h-4 w-4" />}Issue native grant</Button></>}>
           <div className="rounded-xl border border-border/60 p-3"><p className="text-sm font-semibold">{selected?.name || selected?.hostname}</p><p className="mt-1 text-xs text-muted-foreground">{selected?.client_name || "Managed client"}</p></div>
+          <section className="rounded-xl border border-border/60 bg-muted/[0.16] p-3" data-testid="remote-device-live-metrics">
+            <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Latest endpoint telemetry</p><p className="mt-1 text-xs text-muted-foreground">{selectedMetrics.ageMinutes === null ? "No agent snapshot is available yet." : selectedMetrics.ageMinutes <= 5 ? `Reported ${selectedMetrics.ageMinutes}m ago` : `Snapshot is ${selectedMetrics.ageMinutes}m old — verify before acting.`}</p></div><Badge variant="outline" className={selectedMetrics.ageMinutes !== null && selectedMetrics.ageMinutes <= 5 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}>{selectedMetrics.ageMinutes !== null && selectedMetrics.ageMinutes <= 5 ? "Current evidence" : "Stale or unavailable"}</Badge></div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[
+                ["CPU", selectedMetrics.cpu, Cpu, telemetryTone("cpu", selectedMetrics.cpu)],
+                ["Memory", selectedMetrics.memory, MemoryStick, telemetryTone("memory", selectedMetrics.memory)],
+                ["Disk", selectedMetrics.disk, HardDrive, telemetryTone("disk", selectedMetrics.disk)],
+              ].map(([label, value, Icon, tone]) => <div key={label} className={`rounded-lg border p-2 ${tone === "rose" ? "border-rose-500/25 bg-rose-500/[0.06]" : tone === "amber" ? "border-amber-400/25 bg-amber-400/[0.05]" : "border-emerald-500/20 bg-emerald-500/[0.04]"}`}><div className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground"><Icon className="h-3 w-3" />{label}</div><p className="mt-1 text-base font-semibold">{value === null ? "—" : `${value}%`}</p><div className="mt-1 h-1 overflow-hidden rounded-full bg-muted"><span className={`block h-full ${tone === "rose" ? "bg-rose-400" : tone === "amber" ? "bg-amber-300" : "bg-emerald-400"}`} style={{ width: `${Math.max(0, Math.min(100, value || 0))}%` }} /></div></div>)}
+            </div>
+            <p className="mt-3 text-[11px] leading-4 text-muted-foreground">High CPU, memory or disk is a troubleshooting signal, not a diagnosis. Open the device record for trends, services, processes and historical evidence.</p>
+          </section>
           <div className={`rounded-xl border p-3 ${readiness?.ready ? "border-emerald-400/25 bg-emerald-400/[0.05]" : "border-amber-400/25 bg-amber-400/[0.05]"}`}><div className="flex items-center gap-2">{checking ? <Loader2 className="h-4 w-4 animate-spin" /> : readiness?.ready ? <CheckCircle2 className="h-4 w-4 text-emerald-300" /> : <XCircle className="h-4 w-4 text-amber-300" />}<p className="text-sm font-semibold">{checking ? "Checking agent readiness" : readiness?.ready ? "Native companion ready" : "Native companion unavailable"}</p></div>{readiness?.detail && <p className="mt-1 text-xs text-muted-foreground">{readiness.detail}</p>}{readiness?.ready && <p className="mt-2 text-[11px] text-muted-foreground">Protected companion capability confirmed · agent heartbeat {displayEvidenceTime(readiness.agent_last_seen)}</p>}</div>
           <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-3"><p className="text-sm font-medium">{mode === "control" ? "Interactive control request" : "View-only access"}</p><p className="mt-1 text-xs text-muted-foreground">{mode === "control" ? "The endpoint user will see a distinct, attended control-consent prompt. Clipboard and file transfer remain disabled." : "Mouse, keyboard, clipboard and file transfer remain disabled for this session."}</p></div>
           <div className="space-y-2"><Label>Purpose</Label><Textarea value={purpose} onChange={event => setPurpose(event.target.value)} placeholder="What will this session be used to diagnose or repair?" maxLength={500} /></div>

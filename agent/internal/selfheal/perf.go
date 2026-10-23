@@ -60,6 +60,10 @@ type PerfEvidence struct {
 	Score     float64  `json:"score"`
 	Samples   int      `json:"samples"`
 	Reasons   []string `json:"reasons,omitempty"`
+	// Details are small, named state observations (for example a pending reboot
+	// marker). They are not command output; the API persists only an allowlist.
+	Details    map[string]string `json:"details,omitempty"`
+	AssessedAt time.Time         `json:"assessed_at"`
 }
 
 // PerfBaseline is the endpoint's learned normal, persisted between runs.

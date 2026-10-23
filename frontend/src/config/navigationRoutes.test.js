@@ -19,16 +19,16 @@ describe("navigation destinations", () => {
   });
 });
 
-describe("Market Place section", () => {
+describe("Nexus Studios section", () => {
   // The id is deliberately unchanged: visibility preferences and enabled modules
-  // are stored against it, so the rename to Market Place must not orphan them.
+  // are stored against it, so the Nexus Studios rename must not orphan them.
   const group = navGroups.find((candidate) => candidate.id === "msp_studios");
 
   test("is its own titled section rather than a Platform entry", () => {
     expect(group).toBeTruthy();
-    expect(group.title).toBe("Market Place");
+    expect(group.title).toBe("Nexus Studios");
     expect(navGroups.find((candidate) => candidate.id === "platform").items.some((item) => item.path === "/studios")).toBe(false);
-    expect(MODULE_GROUPS.find((candidate) => candidate.id === "msp_studios").label).toBe("Market Place");
+    expect(MODULE_GROUPS.find((candidate) => candidate.id === "msp_studios").label).toBe("Nexus Studios");
   });
 
   test("leads with the searchable catalogue instead of one link per studio", () => {
@@ -45,6 +45,7 @@ describe("Market Place section", () => {
       "/customer-environment",
       "/operations-assurance",
       "/extension-studio",
+      "/studios/network",
       "/studios/web",
       "/studios/m365",
     ]);
@@ -58,7 +59,7 @@ describe("Market Place section", () => {
     const resolvable = getAllNavItems().map((item) => item.path);
     expect(resolvable.filter((path) => path === "/proxmox")).toHaveLength(1);
     expect(resolvable.filter((path) => path.startsWith("/studios"))).toEqual([
-      "/studios", "/studios/web", "/studios/m365",
+      "/studios", "/studios/network", "/studios/web", "/studios/m365",
     ]);
     // The label's alias route exists, but the catalogue stays the canonical path.
     expect(resolvable).not.toContain("/marketplace");

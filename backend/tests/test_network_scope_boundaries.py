@@ -21,7 +21,7 @@ os.environ.setdefault("JWT_SECRET", "test-only-secret-that-is-long-and-random-en
 os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "nexusops-tests")
 
-from app.routers import bandwidth_monitor, networking  # noqa: E402
+from app.routers import bandwidth_monitor, networking, topology  # noqa: E402
 from app.services import module_permissions, scope_permissions  # noqa: E402
 from app.services.secret_store import decrypt_secret  # noqa: E402
 
@@ -106,6 +106,9 @@ class _Collection:
         self.rows = [row for row in self.rows if not _matches(row, query)]
         return SimpleNamespace(deleted_count=len(deleted))
 
+    async def count_documents(self, query: dict):
+        return len([row for row in self.rows if _matches(row, query)])
+
 
 class _Database(SimpleNamespace):
     def __init__(self):
@@ -113,6 +116,10 @@ class _Database(SimpleNamespace):
             clients=_Collection([
                 {"id": "client-a", "name": "Client A"},
                 {"id": "client-b", "name": "Client B"},
+            ]),
+            devices=_Collection([
+                {"id": "asset-a", "client_id": "client-a", "site_id": "site-a", "hostname": "A gateway", "device_type": "gateway", "status": "online"},
+                {"id": "asset-b", "client_id": "client-b", "site_id": "site-b", "hostname": "B gateway", "device_type": "gateway", "status": "online"},
             ]),
             network_sites=_Collection([
                 {"id": "site-a", "client_id": "client-a", "client_name": "Client A", "site_id": "default", "name": "A Network", "controller_url": "https://192.168.1.1:8443"},
@@ -170,8 +177,23 @@ def _global_operator() -> dict:
 def _install_database(monkeypatch, database: _Database):
     monkeypatch.setattr(networking, "db", database)
     monkeypatch.setattr(bandwidth_monitor, "db", database)
+    monkeypatch.setattr(topology, "db", database)
     monkeypatch.setattr(module_permissions, "db", database)
     monkeypatch.setattr(scope_permissions, "db", database)
+
+
+def test_topology_reads_respect_network_module_and_client_scope(monkeypatch):
+    database = _Database()
+    _install_database(monkeypatch, database)
+
+    listed = asyncio.run(topology.get_all_topologies(current_user=_restricted_operator()))
+    own = asyncio.run(topology.get_network_topology("client-a", current_user=_restricted_operator()))
+
+    assert [item["client_id"] for item in listed] == ["client-a"]
+    assert [node["id"] for node in own["nodes"]] == ["asset-a"]
+    with pytest.raises(HTTPException) as foreign:
+        asyncio.run(topology.get_network_topology("client-b", current_user=_restricted_operator()))
+    assert foreign.value.status_code == 404
 
 
 def test_network_site_lists_and_children_use_the_nexus_site_scope(monkeypatch):
@@ -362,3 +384,5 @@ def test_network_dashboard_and_stats_do_not_aggregate_foreign_site_children(monk
     assert stats["total_devices"] == 1
     assert dashboard["summary"]["total_clients"] == 1
     assert [row["site_id"] for row in dashboard["site_bandwidth"]] == ["site-a"]
+    assert dashboard["meta"]["counter_kind"] == "retained_total_bytes"
+    assert dashboard["meta"]["inventory_observed_at"] is None

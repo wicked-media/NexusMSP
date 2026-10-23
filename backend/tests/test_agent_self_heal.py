@@ -169,7 +169,7 @@ def test_self_heal_evidence_is_bounded_and_command_output_is_dropped():
             "outage_seconds": 10**12,
             "last_success": noise,
             "outages_recovered": -5,
-            "performance": {"band": noise, "score": "nan-ish", "samples": 12.7, "reasons": [noise] * 40},
+            "performance": {"band": noise, "score": "nan-ish", "samples": 12.7, "reasons": [noise] * 40, "details": {"component_store": noise, "unsafe": noise}, "assessed_at": noise},
             "repairs": [
                 {
                     "started_at": noise,
@@ -201,6 +201,8 @@ def test_self_heal_evidence_is_bounded_and_command_output_is_dropped():
     assert performance["score"] == 0.0
     assert performance["samples"] == 12
     assert len(performance["reasons"]) == 8
+    assert performance["details"] == {"component_store": "x" * 160}
+    assert performance["assessed_at"] == "x" * 64
 
     # At most five repair outcomes, and raw DISM/SFC output never reaches the
     # device record.
@@ -229,7 +231,7 @@ def test_absent_self_heal_evidence_still_produces_a_renderable_block():
     evidence = nexus_agent._self_heal_evidence_update({}, "2026-10-09T00:00:00+00:00")
     assert evidence["state"] == "unknown"
     assert evidence["cause"] == ""
-    assert evidence["performance"] == {"band": "unknown", "score": 0.0, "samples": 0, "reasons": []}
+    assert evidence["performance"] == {"band": "unknown", "score": 0.0, "samples": 0, "reasons": [], "details": {}, "assessed_at": "2026-10-09T00:00:00+00:00"}
     assert evidence["repairs"] == []
 
 

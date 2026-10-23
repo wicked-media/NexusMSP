@@ -7,7 +7,12 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.integrations import acronis_service
 from app.services.backup_assurance import build_backup_confidence, simulate_recovery
-from app.services.scope_permissions import assert_client_scope, effective_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    effective_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 from datetime import datetime, timezone
 import uuid
 
@@ -20,6 +25,52 @@ def _backup_client_match(row: dict, client_id: str) -> bool:
     # Recovery evidence is a customer boundary. A display name is mutable and
     # can be shared, so it must never act as an alternate relationship key.
     return str(row.get("client_id") or "").strip() == client_id.strip()
+
+
+def _latest_observed_at(rows: list[dict]) -> str | None:
+    """Return only a recorded provider/job timestamp; never invent freshness."""
+    values = [
+        str(row.get(field) or "").strip()
+        for row in rows
+        for field in ("completed_at", "last_run", "updated_at", "observed_at")
+        if row.get(field)
+    ]
+    return max(values) if values else None
+
+
+def _group_jobs_by_client(jobs: list[dict]) -> list[dict]:
+    """Summarise by the immutable Nexus client boundary, never its display name."""
+    groups: dict[str, dict] = {}
+    for index, job in enumerate(jobs):
+        client_id = str(job.get("client_id") or "").strip()
+        # Legacy provider rows without a Nexus client mapping must not be
+        # combined merely because their mutable display text happens to match.
+        group_key = client_id or f"unlinked:{index}"
+        group = groups.setdefault(group_key, {
+            "client_id": client_id or None,
+            "client_name": job.get("client_name") or "Unlinked provider customer",
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "total_size_gb": 0.0,
+            "observed_at": None,
+        })
+        group["total"] += 1
+        if job.get("status") == "success":
+            group["success"] += 1
+        elif job.get("status") == "failed":
+            group["failed"] += 1
+        group["total_size_gb"] += float(job.get("size_gb") or 0)
+        observed_at = _latest_observed_at([job])
+        if observed_at and (not group["observed_at"] or observed_at > group["observed_at"]):
+            group["observed_at"] = observed_at
+
+    result = []
+    for group in groups.values():
+        group["success_rate"] = round(group["success"] / group["total"] * 100, 1) if group["total"] else 0
+        group["total_size_gb"] = round(group["total_size_gb"], 1)
+        result.append(group)
+    return sorted(result, key=lambda item: (str(item["client_name"]).lower(), str(item["client_id"] or "")))
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +146,10 @@ async def get_backup_overview(current_user: dict = Depends(get_current_user)):
     # Acronis fallback data is not yet proven to map its tenant IDs to the
     # Nexus client scope. Returning it to a restricted technician would turn a
     # temporary local-data gap into a cross-client disclosure.
+    source = "recorded_backup_jobs"
     if not data and effective_scope(current_user)["mode"] == "all":
         data = await _build_overview_from_acronis()
+        source = "acronis_provider_projection" if data else "no_observation"
     total = len(data)
     success = sum(1 for d in data if d.get("status") == "success")
     failed = sum(1 for d in data if d.get("status") == "failed")
@@ -112,45 +165,21 @@ async def get_backup_overview(current_user: dict = Depends(get_current_user)):
             "total_size_gb": round(total_size_gb, 1),
         },
         "jobs": data,
+        "meta": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "latest_observed_at": _latest_observed_at(data),
+            "source": source,
+            "freshness_note": "Latest observed time is derived from recorded provider/job timestamps. Missing timestamps are not treated as current.",
+        },
     }
 
 
 @router.get("/backup-dashboard/clients")
 async def get_backup_by_client(current_user: dict = Depends(get_current_user)):
-    pipeline = [{"$match": scoped_query(current_user, {}, site_field=None)}, {"$group": {
-        "_id": "$client_name",
-        "total": {"$sum": 1},
-        "success": {"$sum": {"$cond": [{"$eq": ["$status", "success"]}, 1, 0]}},
-        "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
-        "total_size_gb": {"$sum": "$size_gb"},
-    }}]
-    results = await db.backup_jobs.aggregate(pipeline).to_list(50)
-    if results:
-        return [{
-            "client_name": r["_id"],
-            "total": r["total"],
-            "success": r["success"],
-            "failed": r["failed"],
-            "total_size_gb": round(r["total_size_gb"] or 0, 1),
-            "success_rate": round(r["success"] / r["total"] * 100, 1) if r["total"] else 0,
-        } for r in results]
-
-    jobs = await _build_overview_from_acronis() if effective_scope(current_user)["mode"] == "all" else []
-    by_tenant = {}
-    for j in jobs:
-        tn = j.get("client_name") or "Unknown"
-        b = by_tenant.setdefault(tn, {"client_name": tn, "total": 0, "success": 0, "failed": 0, "total_size_gb": 0})
-        b["total"] += 1
-        if j["status"] == "success":
-            b["success"] += 1
-        elif j["status"] == "failed":
-            b["failed"] += 1
-    out = []
-    for b in by_tenant.values():
-        b["success_rate"] = round(b["success"] / b["total"] * 100, 1) if b["total"] else 0
-        b["total_size_gb"] = round(b["total_size_gb"], 1)
-        out.append(b)
-    return out
+    jobs = await db.backup_jobs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(500)
+    if not jobs and effective_scope(current_user)["mode"] == "all":
+        jobs = await _build_overview_from_acronis()
+    return _group_jobs_by_client(jobs)
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +292,7 @@ async def run_verification(data: dict, current_user: dict = Depends(get_current_
     if not client_id:
         raise HTTPException(status_code=400, detail="Choose the customer whose recovery evidence is being tested")
     await assert_client_scope(current_user, client_id, operation="backup.verification.request", mask_not_found=True)
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+    client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": client_id}), {"_id": 0, "id": 1, "name": 1, "company_name": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Selected client was not found")
     now = datetime.now(timezone.utc).isoformat()
@@ -341,7 +370,7 @@ async def backup_assurance_overview(client_id: str = "", current_user: dict = De
     client = None
     if client_id:
         await assert_client_scope(current_user, client_id, operation="backup.assurance.read")
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+        client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": client_id}), {"_id": 0, "id": 1, "name": 1, "company_name": 1})
         if not client:
             raise HTTPException(status_code=404, detail="Selected customer was not found")
     client_name = (client or {}).get("company_name") or (client or {}).get("name") or ""
@@ -389,7 +418,7 @@ async def create_recovery_simulation(data: dict, current_user: dict = Depends(ge
     if not client_id:
         raise HTTPException(status_code=400, detail="Choose the customer whose recovery is being simulated")
     await assert_client_scope(current_user, client_id, operation="backup.recovery.simulate")
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+    client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": client_id}), {"_id": 0, "id": 1, "name": 1, "company_name": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Selected customer was not found")
     workload = str(data.get("workload") or "").strip()

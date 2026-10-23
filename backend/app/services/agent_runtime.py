@@ -335,6 +335,26 @@ def patch_evidence_update(snapshot: dict[str, Any], observed_at: str) -> dict[st
     }
 
 
+def windows_operations_evidence_update(snapshot: dict[str, Any], observed_at: str) -> dict[str, Any] | None:
+    """Accept only bounded Windows operational summaries, never raw event text."""
+    raw = snapshot.get("windows_operations")
+    if not isinstance(raw, dict):
+        return None
+    def count(key: str) -> int:
+        try:
+            return min(max(int(raw.get(key) or 0), 0), 5000)
+        except (TypeError, ValueError):
+            return 0
+    services = [str(item)[:160] for item in raw.get("failed_automatic_services", []) if isinstance(item, str) and item.strip()][:40]
+    return {
+        "observed_at": str(raw.get("observed_at") or observed_at)[:64], "reported_at": observed_at,
+        "system_error_count_24h": count("system_error_count_24h"), "application_error_count_24h": count("application_error_count_24h"),
+        "critical_event_count_24h": count("critical_event_count_24h"), "unexpected_shutdown_count_7d": count("unexpected_shutdown_count_7d"),
+        "windows_update_failure_count_7d": count("windows_update_failure_count_7d"), "failed_automatic_services": services,
+        "windows_update_service_state": str(raw.get("windows_update_service_state") or "unknown")[:40],
+    }
+
+
 def build_installer_zip(
     client_id: str,
     client_name: str,

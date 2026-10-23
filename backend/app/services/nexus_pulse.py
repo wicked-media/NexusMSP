@@ -47,6 +47,50 @@ def agent_observation_state(record: dict[str, Any], *, now: datetime) -> tuple[s
     return ("online" if age <= ONLINE_AGENT_SECONDS else "offline"), observed
 
 
+def compose_monitored_resources(
+    *,
+    devices: list[dict[str, Any]],
+    generated_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Project existing endpoint records as monitoring resources without a new store.
+
+    This deliberately describes monitoring coverage rather than availability.
+    A device without a retained observation is a managed asset that is not
+    currently monitored by an evidence source, not an offline endpoint.
+    """
+    now = generated_at or datetime.now(timezone.utc)
+    resources: list[dict[str, Any]] = []
+    counts = {"observed": 0, "stale": 0, "not_monitored": 0}
+    for device in devices:
+        observation_state, observed_at = device_observation_state(device, now=now)
+        state = "not_monitored" if observation_state == "not_proven" else observation_state
+        counts[state] += 1
+        device_id = str(device.get("id") or "").strip()
+        resources.append({
+            "id": device_id,
+            "kind": "endpoint",
+            "label": _safe_name(device, "Unnamed device"),
+            "client_id": str(device.get("client_id") or "").strip() or None,
+            "client_name": _safe_name({"name": device.get("client_name")}, "") or None,
+            "state": state,
+            "observed_at": observed_at.isoformat() if observed_at else None,
+            "source": "Devices and Nexus Agent observations",
+            "route": f"/devices/{device_id}" if device_id else "/devices",
+        })
+
+    state_order = {"stale": 0, "not_monitored": 1, "observed": 2}
+    resources.sort(key=lambda item: (state_order.get(item["state"], 3), item["label"].lower()))
+    return {
+        "generated_at": now.isoformat(),
+        "boundary": (
+            "This resource register is a scoped projection of existing endpoint records. "
+            "It identifies observation coverage only; it does not prove availability, service health or root cause."
+        ),
+        "summary": {"resources": len(resources), **counts},
+        "resources": resources,
+    }
+
+
 def _safe_name(record: dict[str, Any], fallback: str) -> str:
     value = str(record.get("name") or record.get("title") or record.get("hostname") or "").strip()
     return value or fallback

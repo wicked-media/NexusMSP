@@ -7,6 +7,7 @@ from app.auth import get_current_user
 from app.services.activity import log_activity
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_tenant_record_scope, platform_tenant_id, scoped_query, tenant_scoped_query
+from app.services.device_observation import build_device_agent_observation
 from app.models import *
 
 router = APIRouter()
@@ -666,6 +667,23 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
     network_adapters = await db.device_network.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).to_list(20)
     remote_sessions = await db.remote_sessions.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("started_at", -1).to_list(50)
     activity_logs = await db.activity_logs.find(tenant_scoped_query(current_user, {"entity_type": "device", "entity_id": device_id}), {"_id": 0}).sort("created_at", -1).to_list(100)
+    agent_observation = None
+    if device.get("nexus_agent_id"):
+        agent = await db.nexus_agents.find_one(
+            tenant_scoped_query(current_user, {"id": device["nexus_agent_id"]}),
+            {
+                "_id": 0,
+                "online": 1,
+                "last_seen": 1,
+                "agent_version": 1,
+                "agent_runtime_capabilities": 1,
+                "hardware": 1,
+                "security": 1,
+                "nexus_dns": 1,
+                "native_remote_evidence": 1,
+            },
+        )
+        agent_observation = build_device_agent_observation(agent)
     # Keep the hero metric and the detailed alert list on one source of truth.
     # Stored counts can drift after an alert is resolved, so derive the count
     # from the access-scoped active records returned with this response.
@@ -681,6 +699,7 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
         "network_adapters": network_adapters,
         "remote_sessions": remote_sessions,
         "activity_logs": activity_logs,
+        "agent_observation": agent_observation,
     }
 
 @router.get("/devices/{device_id}/software")
@@ -718,6 +737,35 @@ async def get_device_performance(device_id: str, current_user: dict = Depends(ge
     )
     performance = await db.device_performance.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("timestamp", -1).to_list(288)
     return performance
+
+
+@router.get("/devices/{device_id}/live-telemetry")
+async def get_live_device_telemetry(device_id: str, current_user: dict = Depends(get_current_user)):
+    """Return the current, endpoint-sampled resource values for the cockpit.
+
+    This narrow read model intentionally avoids loading full device history on
+    each UI refresh. Values carry the server receipt timestamp so the UI never
+    presents a cached value as live evidence.
+    """
+    device = await db.devices.find_one(
+        tenant_scoped_query(current_user, {"id": device_id}),
+        {"_id": 0, "id": 1, "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1,
+         "uptime_hours": 1, "uptime_display": 1, "telemetry_observed_at": 1, "last_seen": 1,
+         "nexus_agent_id": 1},
+    )
+    if not device:
+        raise HTTPException(404, "Device not found")
+    observed_at = device.get("telemetry_observed_at") or device.get("last_seen")
+    return {
+        "device_id": device_id,
+        "source": "nexus-agent-live-sample" if device.get("telemetry_observed_at") else "agent-heartbeat",
+        "observed_at": observed_at,
+        "cpu_usage": device.get("cpu_usage"),
+        "memory_usage": device.get("memory_usage"),
+        "disk_usage": device.get("disk_usage"),
+        "uptime_hours": device.get("uptime_hours"),
+        "uptime_display": device.get("uptime_display"),
+    }
 
 @router.get("/devices/stats/summary")
 async def get_devices_stats(current_user: dict = Depends(get_current_user)):

@@ -64,10 +64,16 @@ jest.mock("@/components/studios/AgentFleetPanel", () => panelStub("agent-fleet-p
 jest.mock("@/components/studios/BackupRecoveryPanel", () => panelStub("backup-recovery-panel"), { virtual: true });
 jest.mock("@/components/studios/ClientEstatePanel", () => panelStub("client-estate-panel"), { virtual: true });
 jest.mock("@/components/studios/DeviceEstatePanel", () => panelStub("device-estate-panel"), { virtual: true });
+jest.mock("@/components/studios/MicrosoftStudioPanel", () => panelStub("microsoft-studio-panel"), { virtual: true });
+jest.mock("@/components/studios/MicrosoftEvidencePanel", () => panelStub("microsoft-evidence-panel"), { virtual: true });
+jest.mock("@/components/studios/MicrosoftOperationsPanel", () => panelStub("microsoft-operations-panel"), { virtual: true });
 jest.mock("@/components/studios/M365TenantPanel", () => panelStub("m365-tenants-panel"), { virtual: true });
+jest.mock("@/components/studios/MonitoringPulsePanel", () => panelStub("monitoring-pulse-panel"), { virtual: true });
+jest.mock("@/components/studios/MonitoringResourcesPanel", () => panelStub("monitoring-resources-panel"), { virtual: true });
 jest.mock("@/components/studios/VoiceEstatePanel", () => panelStub("voice-estate-panel"), { virtual: true });
 jest.mock("@/components/studios/WebEstatePanel", () => panelStub("web-estate-panel"), { virtual: true });
 jest.mock("@/components/studios/NetworkSitesPanel", () => panelStub("network-sites-panel"), { virtual: true });
+jest.mock("@/components/studios/NetworkEvidencePanel", () => panelStub("network-evidence-panel"), { virtual: true });
 jest.mock("@/components/studios/PatchPosturePanel", () => panelStub("patch-posture-panel"), { virtual: true });
 jest.mock("@/components/studios/SecurityPosturePanel", () => panelStub("security-posture-panel"), { virtual: true });
 jest.mock("@/components/studios/LeadPipelinePanel", () => panelStub("lead-pipeline-panel"), { virtual: true });
@@ -127,11 +133,68 @@ const VOICE = contract("voice", "Voice Studio", {
   activity: { state: "wired", summary: "Voice events.", endpoint: "/events/platform/recent", subjects: ["voice."] },
 });
 
+const MICROSOFT = contract("m365", "Microsoft Studio", {
+  overview: {
+    state: "wired",
+    summary: "Verified Microsoft evidence in one command-centre projection.",
+    endpoint: "/m365/studio-overview",
+    evidence: "app.routers.m365.microsoft_studio_overview",
+  },
+  administration: {
+    state: "wired",
+    summary: "Governed Microsoft operations.",
+    endpoint: "/m365/capabilities/administration",
+    evidence: "app.routers.m365.microsoft_capabilities",
+  },
+});
+
+const NETWORK = contract("network", "Network Studio", {
+  diagnostics: {
+    state: "wired",
+    summary: "Retained network controller observations.",
+    endpoint: "/bandwidth-monitor/overview",
+    evidence: "app.routers.bandwidth_monitor",
+  },
+});
+
+const MONITORING = contract("monitoring", "Monitoring Studio", {
+  overview: {
+    state: "wired",
+    summary: "Scoped operational evidence composed by Nexus Pulse.",
+    endpoint: "/nexus-pulse/overview",
+    evidence: "app.routers.nexus_pulse",
+  },
+  inventory: {
+    state: "wired",
+    summary: "Scoped endpoint observation coverage.",
+    endpoint: "/nexus-pulse/resources",
+    evidence: "app.routers.nexus_pulse",
+  },
+});
+
 // A capability that is still genuinely unbuilt: the disclosure is the feature.
 const TELECOM = contract("telecom", "Telecom Studio", {
   inventory: {
     state: "planned",
     summary: "Carrier and SIP trunk inventory stays unbuilt until a carrier contract, an evidence plan and an owner are admitted.",
+  },
+});
+
+const REMOTE = contract("remote", "Remote Studio", {
+  inventory: {
+    state: "wired",
+    summary: "Governed remote session records.",
+    endpoint: "/remote/sessions",
+    evidence: "app.routers.remote",
+  },
+});
+
+const BACKUP = contract("backup", "Backup Studio", {
+  diagnostics: {
+    state: "wired",
+    summary: "Recorded restore verification outcomes.",
+    endpoint: "/backup-verify/overview",
+    evidence: "app.routers.backup_center",
   },
 });
 
@@ -180,7 +243,7 @@ describe("the studio spine's tab dispatch", () => {
     // The activity tab beside it is the generic subject-filtered view, which is
     // the one read the shell itself performs.
     expect(urls).toContain(`${BASE}/events/platform/recent`);
-    expect(host.querySelector('[data-testid="header"]').textContent).toContain("3/9 tabs wired");
+    expect(host.querySelector('[data-testid="header"]').textContent).toContain("3/9 areas ready");
   });
 
   test("a planned capability renders the disclosure and is never requested", async () => {
@@ -198,6 +261,21 @@ describe("the studio spine's tab dispatch", () => {
     expect(urls.filter((url) => url !== `${BASE}/studios/telecom`)).toEqual([]);
   });
 
+  test("the shared workbench only offers evidence-backed areas and changes tabs intentionally", async () => {
+    mockApi({ studio: DEVICES });
+    await render("devices");
+
+    expect(host.querySelector('[data-testid="studio-workbench"]').textContent).toContain("3 live areas");
+    expect(host.querySelector('[data-testid="studio-workbench-open-administration"]')).toBeNull();
+
+    await act(async () => {
+      host.querySelector('[data-testid="studio-workbench-open-activity"]').click();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[data-testid="studio-workbench"]').textContent).toContain("Work from evidence");
+  });
+
   test("an adopted projection is handed to its own panel, and the shell does not read it itself", async () => {
     mockApi({ studio: VOICE });
     await render("voice");
@@ -208,6 +286,37 @@ describe("the studio spine's tab dispatch", () => {
     // The panel owns that read (proved in its own suite); the shell must not
     // have fetched the same endpoint a second time behind it.
     expect(urls).not.toContain(`${BASE}/yeastar/pbxs`);
+  });
+
+  test("Microsoft Studio dispatches the command-centre overview to its evidence panel", async () => {
+    mockApi({ studio: MICROSOFT });
+    await render("m365");
+
+    expect(host.querySelector('[data-testid="microsoft-studio-panel"]').textContent).toBe("/m365/studio-overview");
+    expect(host.querySelector('[data-testid="microsoft-operations-panel"]').textContent).toBe("/m365/capabilities/administration");
+    expect(axios.get.mock.calls.map(([url]) => url)).not.toContain(`${BASE}/m365/studio-overview`);
+    expect(axios.get.mock.calls.map(([url]) => url)).not.toContain(`${BASE}/m365/capabilities/administration`);
+  });
+
+  test("Network Studio dispatches retained controller data to its evidence panel", async () => {
+    mockApi({ studio: NETWORK });
+    await render("network");
+
+    expect(host.querySelector('[data-testid="network-evidence-panel"]').textContent)
+      .toBe("/bandwidth-monitor/overview");
+    expect(axios.get.mock.calls.map(([url]) => url)).not.toContain(`${BASE}/bandwidth-monitor/overview`);
+  });
+
+  test("Monitoring Studio dispatches its overview to the shared Pulse panel", async () => {
+    mockApi({ studio: MONITORING });
+    await render("monitoring");
+
+    expect(host.querySelector('[data-testid="monitoring-pulse-panel"]').textContent)
+      .toBe("/nexus-pulse/overview");
+    expect(axios.get.mock.calls.map(([url]) => url)).not.toContain(`${BASE}/nexus-pulse/overview`);
+    expect(host.querySelector('[data-testid="monitoring-resources-panel"]').textContent)
+      .toBe("/nexus-pulse/resources");
+    expect(axios.get.mock.calls.map(([url]) => url)).not.toContain(`${BASE}/nexus-pulse/resources`);
   });
 
   test("a later-batch studio dispatches through the same map rather than falling back to raw data", async () => {
@@ -226,6 +335,34 @@ describe("the studio spine's tab dispatch", () => {
     expect(host.querySelector('[data-testid="communications-csat-panel"]').textContent).toBe("/csat/dashboard");
     const urls = axios.get.mock.calls.map(([url]) => url);
     expect(urls).not.toContain(`${BASE}/csat/dashboard`);
+  });
+
+  test("Remote Studio gives governed session inventory its own technician-facing panel", async () => {
+    axios.get.mockImplementation((url) => {
+      if (url.includes("/studios/remote")) return Promise.resolve({ data: REMOTE });
+      if (url.endsWith("/remote/sessions")) return Promise.resolve({
+        data: [{ id: "session-1", device_name: "AARON-HOME-PC", technician_name: "Alex", status: "active", mode: "control" }],
+      });
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    });
+    await render("remote");
+
+    expect(host.querySelector('[data-testid="remote-sessions-panel"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="remote-sessions-list"]').textContent).toContain("AARON-HOME-PC");
+    expect(axios.get.mock.calls.map(([url]) => url)).toContain(`${BASE}/remote/sessions`);
+  });
+
+  test("Backup Studio gives measured recovery verification its own evidence panel", async () => {
+    axios.get.mockImplementation((url) => {
+      if (url.includes("/studios/backup")) return Promise.resolve({ data: BACKUP });
+      if (url.endsWith("/backup-verify/overview")) return Promise.resolve({ data: { summary: { passed: 1, failed: 0, pending: 1, pass_rate_pct: 100 }, tests: [] } });
+      return Promise.reject(new Error(`unexpected url ${url}`));
+    });
+    await render("backup");
+
+    expect(host.querySelector('[data-testid="backup-verification-panel"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="backup-verification-empty"]')).not.toBeNull();
+    expect(axios.get.mock.calls.map(([url]) => url)).toContain(`${BASE}/backup-verify/overview`);
   });
 
   test("a wired endpoint that is not an adopted projection still reads its own contract", async () => {

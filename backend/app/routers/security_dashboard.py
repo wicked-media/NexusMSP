@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
 from app.database import db
-from app.services.scope_permissions import scoped_query
+from app.services.scope_permissions import scoped_query, tenant_scoped_query
 
 router = APIRouter()
 
@@ -20,10 +20,22 @@ def _is_open(record: dict) -> bool:
     return str(record.get("status") or "").lower() not in {"resolved", "closed", "remediated", "dismissed"}
 
 
+def _latest_recorded_at(*collections: list[dict]) -> str | None:
+    """Return actual observation timestamps without turning an empty feed into live telemetry."""
+    values = [
+        str(row.get(field) or "").strip()
+        for rows in collections
+        for row in rows
+        for field in ("security_assessed_at", "observed_at", "updated_at", "detected_at", "created_at", "triggered_at")
+        if row.get(field)
+    ]
+    return max(values) if values else None
+
+
 @router.get("/security-dashboard/overview")
 async def get_security_overview(current_user: dict = Depends(get_current_user)):
     """Return an evidence-backed security summary for legacy API consumers."""
-    scope = scoped_query(current_user)
+    scope = tenant_scoped_query(current_user, scoped_query(current_user))
     devices = await db.devices.find(scope, {"_id": 0}).to_list(5000)
     assessed = [device for device in devices if device.get("security_assessed_at")]
     managed = [device for device in devices if device.get("nexus_agent_id")]
@@ -37,9 +49,9 @@ async def get_security_overview(current_user: dict = Depends(get_current_user)):
     threat_events = await db.threat_events.find(scope, {"_id": 0}).to_list(5000)
     active_alerts = [alert for alert in soc_alerts if _is_open(alert)]
     active_events = [event for event in threat_events if _is_open(event) and not event.get("resolved")]
-    canary_triggers = await db.canary_triggers.count_documents(
-        scoped_query(current_user, {"resolved": False})
-    )
+    canary_triggers = await db.canary_triggers.count_documents(tenant_scoped_query(
+        current_user, scoped_query(current_user, {"resolved": False})
+    ))
     incidents = sorted(
         [*active_alerts, *active_events],
         key=lambda item: item.get("created_at") or item.get("detected_at") or item.get("triggered_at") or "",
@@ -62,6 +74,7 @@ async def get_security_overview(current_user: dict = Depends(get_current_user)):
             "endpoints_online": sum(1 for device in managed if device.get("status") == "online"),
             "evidence_state": "assessed" if assessed else "not_assessed",
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "latest_observed_at": _latest_recorded_at(devices, soc_alerts, threat_events),
         },
         "recent_incidents": incidents,
         "devices_at_risk": [
@@ -80,7 +93,7 @@ async def get_security_overview(current_user: dict = Depends(get_current_user)):
 async def get_score_trend(current_user: dict = Depends(get_current_user)):
     """Return recorded snapshots only. An empty list explicitly means no history exists."""
     snapshots = await db.security_dashboard_snapshots.find(
-        scoped_query(current_user), {"_id": 0}
+        tenant_scoped_query(current_user, scoped_query(current_user)), {"_id": 0}
     ).sort("recorded_at", -1).to_list(180)
     snapshots.reverse()
     return [
