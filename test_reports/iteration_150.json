@@ -25,7 +25,7 @@
     "backend": "100% (11/11 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Help articles seeded via /api/help/seed (59 total articles)",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -36,26 +36,26 @@
       "component": "LateRiskBadge.jsx",
       "location": "Invoice detail right-sidebar Details card",
       "data_testid": "late-risk-{invoiceId}",
-      "notes": "Shows 'Late risk: 30/100 · low' with emerald color for low risk. Only renders when pStatus !== 'paid'"
+      "notes": "Shows 'Late risk: 30/100 Â· low' with emerald color for low risk. Only renders when pStatus !== 'paid'"
     },
     "help_articles": {
       "total_count": 59,
       "new_articles": [
         {
           "slug": "devices-page-audit",
-          "title": "Devices Page — Every Button & Filter Explained",
+          "title": "Devices Page â€” Every Button & Filter Explained",
           "category": "Infrastructure",
           "status": "PASS"
         },
         {
           "slug": "invoice-detail-audit",
-          "title": "Invoice Detail — Every Button Explained",
+          "title": "Invoice Detail â€” Every Button Explained",
           "category": "Business",
           "status": "PASS"
         },
         {
           "slug": "backup-page-audit",
-          "title": "Backup Center — Every Tab Explained",
+          "title": "Backup Center â€” Every Tab Explained",
           "category": "Infrastructure",
           "status": "PASS"
         }

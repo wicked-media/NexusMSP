@@ -37,7 +37,7 @@
     "/app/backend/tests/test_iteration121_integrations_regression.py"
   ],
   "success_rate": {"backend": "100% (37/37 tests passed)", "frontend": "100%"},
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Created and cleaned up TEST_Controller_121 for UniFi Controllers CRUD tests. Created and cleaned up TEST_org_121 for client subscriptions tests.",
   "retest_needed": false,
   "should_main_agent_self_test": false,

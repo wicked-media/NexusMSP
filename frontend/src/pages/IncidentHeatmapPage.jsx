@@ -12,6 +12,7 @@ import {
   Flame, BarChart3, Clock, RefreshCw, Loader2, AlertTriangle, Users, Target, Activity
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid } from "recharts";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const PRIORITY_COLORS = { critical: "text-red-400 bg-red-500/10 border-red-500/30", high: "text-orange-400 bg-orange-500/10 border-orange-500/30", medium: "text-amber-400 bg-amber-500/10 border-amber-500/30", low: "text-blue-400 bg-blue-500/10 border-blue-500/30" };
@@ -55,16 +56,7 @@ export default function IncidentHeatmapPage() {
 
   return (
     <div className="space-y-5" data-testid="incident-heatmap-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-red-500 to-amber-600 flex items-center justify-center"><Flame className="w-5 h-5 text-white" /></div>
-            Incident Heatmap
-          </h1>
-          <p className="text-muted-foreground mt-1">Visual pattern analysis — when and where incidents occur most</p>
-        </div>
-        <Button variant="outline" onClick={fetchData} data-testid="refresh-heatmap"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-      </div>
+      <OperationalPageHeader eyebrow="Incident intelligence · pattern evidence" title="Incident Heatmap" description="Reveal when, where and for whom incidents cluster so service leaders can remove recurring causes." icon={Flame} tone="rose" signal={data?.summary?.critical > 0 ? "critical" : "ready"} actions={<Button variant="outline" onClick={fetchData} data-testid="refresh-heatmap"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>} />
 
       {/* Stats */}
       <MetricStrip columns={5}>

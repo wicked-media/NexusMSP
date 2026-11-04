@@ -23,11 +23,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -60,16 +62,6 @@ function ConfidenceBadge({ confidence }) {
     <Badge variant="outline" className={tone}>
       {confidence?.label || "Emerging"} · {score}% · {confidence?.evidence_count || 0} records
     </Badge>
-  );
-}
-
-function EmptyState({ icon: Icon = Sparkles, title, body }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10 text-center">
-      <Icon className="mx-auto h-7 w-7 text-muted-foreground" />
-      <p className="mt-3 text-sm font-semibold">{title}</p>
-      <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-muted-foreground">{body}</p>
-    </div>
   );
 }
 
@@ -116,6 +108,7 @@ function MemorySearch({ api }) {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="h-11 border-violet-500/20 bg-background/70 pl-10"
+                aria-label="Search Nexus memory"
                 placeholder='Try "the broken printer from last week" or "when did we stop using Veeam?"'
                 data-testid="second-brain-search-input"
               />
@@ -171,7 +164,7 @@ function MemorySearch({ api }) {
                 })}
               </div>
             ) : (
-              <EmptyState icon={FileSearch} title="No direct evidence matched" body="Try a client name, ticket subject, device, category, technician or phrase from the original record. Nexus will not fabricate a result." />
+              <EmptyState icon={<FileSearch className="h-7 w-7" />} title="No direct evidence matched" description="Try a client name, ticket subject, device, category, technician or phrase from the original record. Nexus will not fabricate a result." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
             )}
           </div>
         )}
@@ -180,7 +173,7 @@ function MemorySearch({ api }) {
   );
 }
 
-function RecommendationCard({ item, onDecision }) {
+function RecommendationCard({ item, onDecision, saving }) {
   const decision = item.decision;
   return (
     <div className={`rounded-2xl border p-4 ${PRIORITY[item.priority] || PRIORITY.low}`} data-testid={`second-brain-recommendation-${item.id}`}>
@@ -209,14 +202,14 @@ function RecommendationCard({ item, onDecision }) {
         </Button>
         {!decision ? (
           <>
-            <Button size="sm" variant="outline" onClick={() => onDecision(item, "accepted")}><Check className="mr-1.5 h-3.5 w-3.5" />Useful</Button>
-            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "snoozed")}><History className="mr-1.5 h-3.5 w-3.5" />Snooze</Button>
-            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "dismissed")}><X className="mr-1.5 h-3.5 w-3.5" />Dismiss</Button>
+            <Button size="sm" variant="outline" onClick={() => onDecision(item, "accepted")} disabled={saving}><Check className="mr-1.5 h-3.5 w-3.5" />Useful</Button>
+            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "snoozed")} disabled={saving}><History className="mr-1.5 h-3.5 w-3.5" />Snooze</Button>
+            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "dismissed")} disabled={saving}><X className="mr-1.5 h-3.5 w-3.5" />Dismiss</Button>
           </>
         ) : (
           <>
             <Badge className="capitalize" variant="secondary">{decision.status} by {decision.user_name || "technician"}</Badge>
-            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "reset")}>Reset review</Button>
+            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "reset")} disabled={saving}>Reset review</Button>
           </>
         )}
         <span className="ml-auto text-[10px] text-muted-foreground">{item.evidence_ids?.length || 0} linked evidence records · no automatic action</span>
@@ -268,7 +261,7 @@ function PatternsPanel({ signals }) {
             </div>
           </details>
         )) : (
-          <EmptyState title="No repeated pattern meets the evidence threshold" body="Nexus needs at least two matching ticket records before it surfaces a pattern. Keep categorisation and resolutions current." />
+          <EmptyState icon={<Sparkles className="h-7 w-7" />} title="No repeated pattern meets the evidence threshold" description="Nexus needs at least two matching ticket records before it surfaces a pattern. Keep categorisation and resolutions current." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
         )}
       </CardContent>
     </Card>
@@ -311,7 +304,7 @@ function ExpertisePanel({ profiles }) {
             ))}
           </div>
         ) : (
-          <EmptyState icon={UserRoundCheck} title="Expertise evidence is still forming" body="Resolved or closed tickets with a recorded technician owner will build explainable team expertise profiles." />
+          <EmptyState icon={<UserRoundCheck className="h-7 w-7" />} title="Expertise evidence is still forming" description="Resolved or closed tickets with a recorded technician owner will build explainable team expertise profiles." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
         )}
       </CardContent>
     </Card>
@@ -470,9 +463,9 @@ export default function SecondBrainView({ api }) {
           </CardHeader>
           <CardContent className="space-y-3">
             {recommendations.length ? recommendations.slice(0, 8).map((item) => (
-              <RecommendationCard key={item.id} item={item} onDecision={chooseDecision} />
+              <RecommendationCard key={item.id} item={item} onDecision={chooseDecision} saving={saving} />
             )) : (
-              <EmptyState icon={Check} title="No open recommendations" body="Either the current evidence does not support a recommendation or this technician has reviewed the available items." />
+              <EmptyState icon={<Check className="h-7 w-7" />} title="No open recommendations" description="Either the current evidence does not support a recommendation or this technician has reviewed the available items." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
             )}
           </CardContent>
         </Card>
@@ -490,16 +483,15 @@ export default function SecondBrainView({ api }) {
       </div>
 
       <Dialog open={Boolean(decision)} onOpenChange={(open) => !open && setDecision(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {decision?.status === "snoozed" ? <History className="h-5 w-5 text-amber-300" /> : <X className="h-5 w-5 text-rose-300" />}
-              {decision?.status === "snoozed" ? "Snooze recommendation" : "Dismiss recommendation"}
-            </DialogTitle>
-            <DialogDescription>
-              Record why this evidence-backed suggestion is not useful right now. The decision is preserved in Audit Trail and Black Box.
-            </DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-lg"
+          eyebrow="Nexus Intelligence review"
+          title={decision?.status === "snoozed" ? "Snooze recommendation" : "Dismiss recommendation"}
+          description="Record why this evidence-backed suggestion is not useful right now. The decision is preserved in Audit Trail and Black Box."
+          icon={decision?.status === "snoozed" ? History : X}
+          tone={decision?.status === "snoozed" ? "amber" : "rose"}
+          footer={<><Button variant="outline" onClick={() => setDecision(null)}>Cancel</Button><Button onClick={saveDecision} disabled={saving || reason.trim().length < 5}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save review</Button></>}
+        >
           <div className="space-y-2">
             <Label htmlFor="second-brain-decision-reason">Review reason</Label>
             <Textarea
@@ -512,13 +504,7 @@ export default function SecondBrainView({ api }) {
             />
             <p className="text-[11px] text-muted-foreground">No operational state changes when this review is saved.</p>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDecision(null)}>Cancel</Button>
-            <Button onClick={saveDecision} disabled={saving || reason.trim().length < 5}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save review
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );

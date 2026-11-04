@@ -15,10 +15,23 @@ services:
       timeout: 5s
       retries: 10
 
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - nexus-clamav-db:/var/lib/clamav
+    networks: [backend]
+
   api:
+    # Deployments pin a released image through NEXUS_API_IMAGE (immutable
+    # version tag or digest); the default builds from source for local use.
+    # See docs/RELEASE_RUNBOOK.md for deploy and rollback-to-tag.
+    image: ${NEXUS_API_IMAGE:-nexusmsp-api:local}
     build:
       context: .
       dockerfile: backend/Dockerfile.production
+      args:
+        NEXUS_AGENT_VERSION: ${NEXUS_AGENT_VERSION:-0.1.11-endpoint-readiness}
     restart: unless-stopped
     environment: &backend-env
       APP_ENV: production
@@ -31,43 +44,161 @@ services:
       NEXUS_MAIL_SHIELD_CLIENT_SECRET: ${NEXUS_MAIL_SHIELD_CLIENT_SECRET:-}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set the public NexusMSP origin}
       NEXUS_RUN_BACKGROUND_WORKERS: "false"
-      NEXUS_TRUST_PROXY_HEADERS: ${NEXUS_TRUST_PROXY_HEADERS:-false}
+      NEXUS_AGENT_VERSION: ${NEXUS_AGENT_VERSION:-0.1.11-endpoint-readiness}
+      # The edge (TLS) and web (nginx) tiers always front the API in this
+      # reference package, so forwarded headers describe the real client.
+      NEXUS_TRUST_PROXY_HEADERS: ${NEXUS_TRUST_PROXY_HEADERS:-true}
       NEXUS_LOGIN_WINDOW_SECONDS: ${NEXUS_LOGIN_WINDOW_SECONDS:-300}
       NEXUS_LOGIN_IDENTITY_ATTEMPTS: ${NEXUS_LOGIN_IDENTITY_ATTEMPTS:-8}
       NEXUS_LOGIN_IP_ATTEMPTS: ${NEXUS_LOGIN_IP_ATTEMPTS:-30}
+      NEXUS_MALWARE_SCANNER: clamav
+      NEXUS_CLAMAV_HOST: clamav
+      NEXUS_CLAMAV_PORT: "3310"
+      NEXUS_MALWARE_SCAN_TIMEOUT_SECONDS: ${NEXUS_MALWARE_SCAN_TIMEOUT_SECONDS:-30}
+      NEXUS_LOG_FORMAT: json
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      NEXUS_ALERT_WEBHOOK_URL: ${NEXUS_ALERT_WEBHOOK_URL:?Set an HTTPS on-call webhook destination}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       mongo:
         condition: service_healthy
+      clamav:
+        condition: service_started
     volumes:
       - nexus-uploads:/app/uploads
+      - nexus-private-uploads:/app/private_uploads
       - nexus-installers:/app/data/agent-installers
+    secrets: [nexus-observability-ingest-token]
     networks: [backend]
 
   worker:
+    # The worker always matches the API image; pin both via NEXUS_API_IMAGE.
+    image: ${NEXUS_API_IMAGE:-nexusmsp-api:local}
     build:
       context: .
       dockerfile: backend/Dockerfile.production
+      args:
+        NEXUS_AGENT_VERSION: ${NEXUS_AGENT_VERSION:-0.1.11-endpoint-readiness}
     restart: unless-stopped
     command: ["python", "worker.py"]
     environment:
       <<: *backend-env
       NEXUS_RUN_BACKGROUND_WORKERS: "true"
+      OTEL_SERVICE_NAME: nexus-worker
+      NEXUS_METRICS_PORT: "9101"
     depends_on:
       mongo:
         condition: service_healthy
+      clamav:
+        condition: service_started
     volumes:
       - nexus-uploads:/app/uploads
+      - nexus-private-uploads:/app/private_uploads
       - nexus-installers:/app/data/agent-installers
     networks: [backend]
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on: [tempo, loki]
+    networks: [backend]
+
+  tempo:
+    image: grafana/tempo:2.10.8
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo.yml:ro
+      - nexus-tempo:/var/tempo
+    networks: [backend]
+
+  loki:
+    image: grafana/loki:3.7.7
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/local-config.yml"]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/local-config.yml:ro
+      - nexus-loki:/loki
+    networks: [backend]
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - nexus-alertmanager:/alertmanager
+    secrets: [nexus-observability-ingest-token]
+    networks: [backend]
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - nexus-prometheus:/prometheus
+    depends_on: [api, worker, alertmanager]
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${NEXUS_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${NEXUS_GRAFANA_ADMIN_PASSWORD:?Set NEXUS_GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "${NEXUS_GRAFANA_BIND_HOST:-127.0.0.1}:${NEXUS_GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - nexus-grafana:/var/lib/grafana
+    depends_on: [prometheus, tempo, loki]
+    networks: [backend]
+
   web:
+    # Deployments pin a released image through NEXUS_WEB_IMAGE; the default
+    # builds from source for local use.
+    image: ${NEXUS_WEB_IMAGE:-nexusmsp-web:local}
     build: ./frontend
     restart: unless-stopped
     ports:
-      - "${NEXUS_HTTP_PORT:-8080}:8080"
+      # Do not expose the unencrypted HTTP frontend publicly by default.
+      # Local smoke tests use this loopback port; customer traffic terminates
+      # TLS at the edge service below.
+      - "${NEXUS_HTTP_BIND_HOST:-127.0.0.1}:${NEXUS_HTTP_PORT:-8080}:8080"
     depends_on:
       api:
+        condition: service_healthy
+    networks: [backend]
+
+  edge:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      NEXUS_TLS_DOMAIN: ${NEXUS_TLS_DOMAIN:-localhost}
+      NEXUS_TLS_ACME_EMAIL: ${NEXUS_TLS_ACME_EMAIL:-ops@replace.invalid}
+    ports:
+      # Customer-facing TLS entrypoint. Port 80 must also be reachable from the
+      # Internet for automatic certificate issuance and the HTTPS redirect.
+      - "${NEXUS_HTTPS_BIND_HOST:-0.0.0.0}:${NEXUS_HTTPS_PORT:-443}:443"
+      - "${NEXUS_HTTPS_BIND_HOST:-0.0.0.0}:${NEXUS_HTTP_REDIRECT_PORT:-80}:80"
+    volumes:
+      - ./ingress/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./ingress/certs:/etc/caddy/certs:ro
+      - nexus-caddy-data:/data
+      - nexus-caddy-config:/config
+    depends_on:
+      web:
         condition: service_healthy
     networks: [backend]
 
@@ -76,6 +207,19 @@ networks:
     internal: false
 
 volumes:
+  nexus-caddy-data:
+  nexus-caddy-config:
   nexus-mongo:
+  nexus-clamav-db:
   nexus-uploads:
+  nexus-private-uploads:
   nexus-installers:
+  nexus-prometheus:
+  nexus-alertmanager:
+  nexus-tempo:
+  nexus-loki:
+  nexus-grafana:
+
+secrets:
+  nexus-observability-ingest-token:
+    environment: NEXUS_OBSERVABILITY_INGEST_TOKEN

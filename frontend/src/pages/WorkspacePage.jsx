@@ -12,13 +12,15 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Bookmark, Eye, Activity, Save, Loader2, Pin, X, Wifi, WifiOff,
   Ticket as TicketIcon, Monitor, Flame, Clock, History, RefreshCw,
-  AlertTriangle, Search,
+  Search,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { priorityConfig } from "@/config/ticketConfig";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import { taskShortcuts } from "@/config/navigation";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const taskAccentClasses = {
   emerald: "border-emerald-500/20 bg-emerald-500/[0.045] text-emerald-300 hover:border-emerald-400/40 hover:bg-emerald-500/[0.075]",
@@ -30,7 +32,7 @@ const taskAccentClasses = {
 };
 
 export default function WorkspacePage() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -91,9 +93,7 @@ export default function WorkspacePage() {
   if (loading) {
     return (
       <PageShell>
-        <div className="flex items-center justify-center h-64 text-zinc-500">
-          <Loader2 className="w-8 h-8 animate-spin" />
-        </div>
+        <WorkspaceLoadingState label="Loading your personal operations workspace" className="mx-auto mt-5 max-w-[1680px]" />
       </PageShell>
     );
   }
@@ -101,18 +101,25 @@ export default function WorkspacePage() {
   if (loadError || !data) {
     return (
       <PageShell data-testid="workspace-load-error">
-        <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]">
-          <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-            <AlertTriangle className="h-10 w-10 text-rose-300" />
-            <div><h1 className="text-lg font-semibold">My Workspace is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError || "The personal workspace did not return the data needed to render."}</p></div>
-            <Button onClick={handleRefresh} data-testid="retry-workspace-load"><RefreshCw className="mr-2 h-4 w-4" />Retry workspace</Button>
-          </CardContent>
-        </Card>
+        <WorkspaceErrorState className="mx-auto mt-5 max-w-[1680px]" title="My Workspace is unavailable" description={loadError || "The personal workspace did not return the data needed to render."} onRetry={handleRefresh} retryLabel="Retry workspace" />
       </PageShell>
     );
   }
 
   const stats = data.stats || {};
+  const criticalAssigned = Number(stats.critical_assigned || 0);
+  const openAssigned = Number(stats.open_assigned || 0);
+  const workspaceSignal = criticalAssigned > 0 ? "critical" : openAssigned > 0 ? "working" : "healthy";
+  const workspaceSignalLabel = criticalAssigned > 0
+    ? `${criticalAssigned} critical ${criticalAssigned === 1 ? "ticket" : "tickets"}`
+    : openAssigned > 0
+      ? "Personal queue active"
+      : "Personal queue clear";
+  const workspaceSignalDescription = criticalAssigned > 0
+    ? "Review your assigned critical work before lower-priority tasks."
+    : openAssigned > 0
+      ? `${openAssigned} assigned ${openAssigned === 1 ? "ticket is" : "tickets are"} ready to continue.`
+      : "No assigned ticket currently needs your attention.";
   const matchingTasks = taskShortcuts.filter(task => {
     const query = taskQuery.trim().toLowerCase();
     return !query || [task.label, task.description, ...task.keywords].join(" ").toLowerCase().includes(query);
@@ -122,26 +129,27 @@ export default function WorkspacePage() {
 
   return (
     <PageShell data-testid="workspace-page">
-      <div className="p-6 space-y-6">
-        {/* Hero */}
-        <section className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 md:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300">Personal operations</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight flex items-center gap-3">
-              <Bookmark className="w-7 h-7 text-violet-400" />
-              My Workspace
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Your personal cockpit — find the right action, then keep important work close.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} data-testid="workspace-refresh">
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-        </div>
-        </section>
+      <div className="mx-auto max-w-[1680px] space-y-5 p-4 sm:p-6">
+        <OperationalPageHeader
+          eyebrow="Personal operations"
+          title="My Workspace"
+          description="Find the right action, then keep assigned, watched and pinned work close."
+          icon={Bookmark}
+          tone="violet"
+          signal={workspaceSignal}
+          signalLabel={workspaceSignalLabel}
+          signalDescription={workspaceSignalDescription}
+          meta={[`${stats.pinned_count || 0} pinned`, `${stats.watched_count || 0} watched`]}
+          showBack={false}
+          actionsLabel="Personal controls"
+          actionsDescription="Refresh your saved work and assignment state."
+          actions={
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} data-testid="workspace-refresh">
+              <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          }
+        />
 
         {/* Metric strip */}
         <MetricStrip columns={4}>

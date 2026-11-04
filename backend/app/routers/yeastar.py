@@ -4,17 +4,21 @@ import logging
 import re
 import time
 import httpx
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, Request
 from pymongo.errors import DuplicateKeyError
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
-from urllib.parse import urlsplit, urlunsplit
+from typing import Optional, Any
+from datetime import datetime, timezone
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.action_permissions import assert_action_permission
+from app.services.activity import log_activity
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
-from app.models import *
+from app.services.yeastar import client as yeastar_client
+from app.services.yeastar import registry as yeastar_registry
+from app.services.yeastar import ycm
+from app.services.yeastar.client import resolve_pbx, resolve_pbx_optional
+from app.services.yeastar.errors import YeastarError, http_status_for
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -56,7 +60,7 @@ async def save_yeastar_settings(settings: dict, current_user: dict = Depends(get
         }},
         upsert=True
     )
-    _yeastar_token_cache.clear()
+    yeastar_client.invalidate_token()
     return {"message": "Yeastar settings saved"}
 
 @router.get("/yeastar/settings")
@@ -127,115 +131,34 @@ async def test_yeastar_connection(pbx_id: Optional[str] = None, current_user: di
         )
         return {"success": False, "message": str(exc), "error_kind": exc.kind}
 
-_yeastar_token_lock = asyncio.Lock()
-_yeastar_token_cache: dict[str, dict[str, Any]] = {}
-_ycm_token_lock = asyncio.Lock()
-_ycm_token_cache: dict[str, dict[str, Any]] = {}
+# The shared client owns the failure taxonomy now, including the provider's
+# eight-token limit message. The name is kept as an alias so existing call
+# sites and tests keep importing one symbol.
+YeastarConnectionError = YeastarError
 
 
-class YeastarConnectionError(RuntimeError):
-    def __init__(self, message: str, kind: str = "connection"):
-        super().__init__(message)
-        self.kind = kind
-
-
+# The YCM fleet transport lives in app.services.yeastar.ycm so the fleet
+# connection shares one token discipline and one failure taxonomy with the PBX
+# client. These five names stay as thin delegations because the routes below
+# and the existing test suite call them by name.
 def _normalise_ycm_url(value: str) -> str:
-    raw = str(value or "https://ycm.yeastar.com").strip()
-    if "://" not in raw:
-        raw = f"https://{raw}"
-    parsed = urlsplit(raw)
-    if parsed.scheme.lower() != "https" or not parsed.netloc:
-        raise ValueError("Enter a valid HTTPS YCM address, for example https://ycm.yeastar.com")
-    return urlunsplit(("https", parsed.netloc, parsed.path.rstrip("/"), "", ""))
+    return ycm.normalise_ycm_url(value)
 
 
 def _ycm_items(payload: Any) -> list[dict]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-    if not isinstance(payload, dict):
-        return []
-    data = payload.get("data", payload.get("items", payload.get("instances", [])))
-    if isinstance(data, dict):
-        data = data.get("items", data.get("list", data.get("instances", [])))
-    return [item for item in (data or []) if isinstance(item, dict)] if isinstance(data, list) else []
+    return ycm.ycm_items(payload)
 
 
 async def _ycm_get_token(settings: dict, *, strict: bool = False) -> str | None:
-    client_id = str(settings.get("client_id") or "").strip()
-    client_secret = str(settings.get("client_secret") or "")
-    if not client_id or not client_secret:
-        if strict:
-            raise YeastarConnectionError("YCM Client ID and Client Secret are required.", "configuration")
-        return None
-    base_url = _normalise_ycm_url(settings.get("base_url") or "")
-    cache_key = f"{base_url}|{client_id}"
-    now = time.time()
-    async with _ycm_token_lock:
-        cached = _ycm_token_cache.get(cache_key) or {}
-        if cached.get("token") and cached.get("expires_at", 0) > now + 30:
-            return cached["token"]
-        headers = {"User-Agent": settings.get("user_agent") or "NexusMSP/1.0"}
-        try:
-            async with httpx.AsyncClient(timeout=12.0) as client:
-                response = await client.post(
-                    f"{base_url}/dm/open_api/oauth/token",
-                    data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
-                    headers=headers,
-                )
-            payload = response.json() if response.content else {}
-            if response.status_code >= 400:
-                raise YeastarConnectionError("YCM rejected the Client ID or Client Secret. Check the YCM API application and permitted IP settings.", "authentication")
-            token = payload.get("access_token") or (payload.get("data") or {}).get("access_token")
-            if not token:
-                raise YeastarConnectionError("YCM returned no access token. Confirm the API application has been enabled.", "authentication")
-            expires_in = int(payload.get("expires_in") or (payload.get("data") or {}).get("expires_in") or 600)
-            _ycm_token_cache[cache_key] = {"token": token, "expires_at": now + max(60, expires_in)}
-            return token
-        except YeastarConnectionError:
-            raise
-        except httpx.TimeoutException as exc:
-            error = YeastarConnectionError("YCM did not respond in time. Check internet access and the configured YCM address.", "timeout")
-            if strict:
-                raise error from exc
-            return None
-        except httpx.HTTPError as exc:
-            error = YeastarConnectionError("Nexus could not reach YCM. Check the configured address and outbound firewall policy.", "connection")
-            if strict:
-                raise error from exc
-            return None
+    return await ycm.get_ycm_token(settings, strict=strict)
 
 
 async def _ycm_api_get(path: str, settings: dict) -> dict:
-    token = await _ycm_get_token(settings, strict=True)
-    base_url = _normalise_ycm_url(settings.get("base_url") or "")
-    headers = {"Authorization": f"Bearer {token}", "User-Agent": settings.get("user_agent") or "NexusMSP/1.0"}
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(f"{base_url}/dm/open_api/{path.lstrip('/')}", headers=headers)
-        payload = response.json() if response.content else {}
-        if response.status_code >= 400:
-            raise YeastarConnectionError(f"YCM fleet request failed with HTTP {response.status_code}.", "http")
-        return payload if isinstance(payload, dict) else {"data": payload}
-    except YeastarConnectionError:
-        raise
-    except httpx.TimeoutException as exc:
-        raise YeastarConnectionError("YCM fleet discovery timed out.", "timeout") from exc
-    except httpx.HTTPError as exc:
-        raise YeastarConnectionError("YCM fleet discovery could not reach the management service.", "connection") from exc
+    return await ycm.ycm_api_get(path, settings)
 
 
 def _safe_ycm_settings(record: dict | None) -> dict:
-    record = record or {}
-    return {
-        "configured": bool(record.get("client_id") and record.get("client_secret")),
-        "base_url": record.get("base_url") or "https://ycm.yeastar.com",
-        "client_id": record.get("client_id") or "",
-        "user_agent": record.get("user_agent") or "NexusMSP/1.0",
-        "last_test_at": record.get("last_test_at") or "",
-        "last_test_status": record.get("last_test_status") or "not_tested",
-        "last_test_error": record.get("last_test_error") or "",
-        "last_discovery_at": record.get("last_discovery_at") or "",
-    }
+    return ycm.safe_ycm_settings(record)
 
 
 @router.get("/yeastar/ycm/overview")
@@ -266,7 +189,7 @@ async def save_ycm_settings(data: dict, current_user: dict = Depends(get_current
         {"$set": {"type": "yeastar_ycm", "base_url": base_url, "client_id": client_id, "client_secret": client_secret, "user_agent": str(data.get("user_agent") or existing.get("user_agent") or "NexusMSP/1.0").strip(), "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("email", "system")}},
         upsert=True,
     )
-    _ycm_token_cache.clear()
+    ycm.invalidate_ycm_token()
     return {"message": "YCM fleet connection saved", "connection": _safe_ycm_settings(await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}))}
 
 
@@ -335,122 +258,45 @@ async def claim_ycm_discovery(discovery_id: str, data: dict, current_user: dict 
     return {key: value for key, value in record.items() if key != "client_secret"}
 
 
+# These four names are delegated to the shared client so the URL rules and the
+# credential test exist once. They are kept because the routes below and the
+# existing test suite call them by name.
 def _normalise_pbx_url(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        raise ValueError("Enter the PBX URL or Yeastar FQDN")
-    if "://" not in raw:
-        raw = f"https://{raw}"
-    parsed = urlsplit(raw)
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("Enter a valid PBX URL, for example https://customer.example.yeastarcloud.com")
-    path = parsed.path.rstrip("/")
-    marker = path.lower().find("/openapi/")
-    if marker >= 0:
-        path = path[:marker]
-    elif path.lower().endswith("/openapi"):
-        path = path[:-8]
-    return urlunsplit((parsed.scheme.lower(), parsed.netloc, path.rstrip("/"), "", ""))
+    return yeastar_client.normalise_pbx_url(value)
 
 
 def _pbx_url(settings: dict) -> str:
-    value = settings.get("pbx_url") or settings.get("url") or ""
-    try:
-        return _normalise_pbx_url(str(value))
-    except ValueError:
-        return str(value).strip().rstrip("/")
+    return yeastar_client.pbx_base_url(settings)
 
 
 def _pbx_client_id(settings: dict) -> str:
-    return str(settings.get("client_api_id") or settings.get("client_id") or "")
+    return yeastar_client.pbx_client_id(settings)
 
 
 def _has_pbx_credentials(settings: dict) -> bool:
-    return bool(_pbx_url(settings) and _pbx_client_id(settings) and settings.get("client_secret"))
-
-def _yeastar_error_message(data: dict) -> YeastarConnectionError:
-    code = data.get("errcode")
-    message = str(data.get("errmsg") or "Authentication failed")
-    if code == 60002:
-        return YeastarConnectionError(
-            "Yeastar has reached its eight-token limit. Wait for an existing token to expire (up to 30 minutes), then test again.",
-            "authentication",
-        )
-    return YeastarConnectionError(
-        f"Yeastar rejected the Client ID or Client Secret ({message}, error {code}). Check Integrations > API on this PBX.",
-        "authentication",
-    )
+    return yeastar_client.has_credentials(settings)
 
 
 async def _yeastar_get_token(settings: dict, *, strict: bool = False) -> str | None:
-    """Get a P-Series API token with caching and actionable diagnostics."""
-    pbx_url = _pbx_url(settings)
-    client_id = _pbx_client_id(settings)
-    client_secret = settings.get("client_secret", "")
-    if not pbx_url or not client_id or not client_secret:
-        if strict:
-            raise YeastarConnectionError("PBX URL, Client ID, and Client Secret are required.", "configuration")
-        return None
+    """Return a token from the shared Yeastar client.
 
-    cache_key = f"{pbx_url}|{client_id}"
-    async with _yeastar_token_lock:
-        now = datetime.now(timezone.utc).timestamp()
-        cached = _yeastar_token_cache.get(cache_key) or {}
-        if cached.get("token") and now < float(cached.get("expires") or 0):
-            return cached["token"]
-        
-        url = f"{pbx_url}/openapi/v1.0/get_token"
-        try:
-            verify_tls = settings.get("tls_validation", os.environ.get('ALLOW_SELF_SIGNED_CERTS', 'false').lower() != 'true')
-            async with httpx.AsyncClient(verify=verify_tls, timeout=15) as http:
-                resp = await http.post(url, json={"username": client_id, "password": client_secret}, headers={"User-Agent": "OpenAPI", "Content-Type": "application/json"})
-                if resp.status_code >= 400:
-                    raise YeastarConnectionError(f"The PBX returned HTTP {resp.status_code} from its token endpoint.", "http")
-                try:
-                    data = resp.json()
-                except ValueError as exc:
-                    raise YeastarConnectionError(
-                        "The address responded, but it was not a Yeastar P-Series OpenAPI endpoint. Enter the PBX base URL without /openapi.",
-                        "endpoint",
-                    ) from exc
-                if data.get("errcode") == 0:
-                    token = data.get("access_token")
-                    if not token:
-                        raise YeastarConnectionError("Yeastar returned success without an access token.", "authentication")
-                    _yeastar_token_cache[cache_key] = {
-                        "token": token,
-                        "expires": now + data.get("access_token_expire_time", 1800) - 60,
-                        "refresh_token": data.get("refresh_token"),
-                    }
-                    return token
-                raise _yeastar_error_message(data)
-        except YeastarConnectionError as exc:
-            logger.warning("Yeastar authentication failed for %s: %s", pbx_url, exc)
-            if strict:
-                raise
-            return None
-        except httpx.ConnectTimeout as exc:
-            error = YeastarConnectionError("Timed out connecting to the PBX. Check the FQDN, web port, firewall, and remote API access.", "timeout")
-            if strict:
-                raise error from exc
-            return None
-        except httpx.ConnectError as exc:
-            detail = str(exc).lower()
-            if "certificate" in detail or "ssl" in detail or "tls" in detail:
-                error = YeastarConnectionError("TLS validation failed. Install a valid certificate on the PBX, or disable TLS validation only for a trusted private endpoint.", "tls")
-            else:
-                error = YeastarConnectionError("Could not reach the PBX. Check the base URL, DNS, firewall, web port, and Yeastar remote API access.", "connection")
-            if strict:
-                raise error from exc
-            return None
-        except httpx.HTTPError as exc:
-            error = YeastarConnectionError(f"Yeastar API request failed: {exc.__class__.__name__}.", "http")
-            if strict:
-                raise error from exc
-            return None
+    Token lifetime, the provider's eight-token limit and credential revocation
+    live in app.services.yeastar.client, so every caller shares one cache
+    instead of minting a second token for the same PBX.
+    """
+    return await yeastar_client.get_token(settings, strict=strict)
+
 
 async def _yeastar_api_get(path: str, params: dict = None, settings: dict | None = None, *, strict: bool = False, token: str | None = None) -> dict | list | None:
-    """Make authenticated GET request to Yeastar PBX"""
+    """Make an authenticated PBX call through the shared client.
+
+    ``settings`` is required. There is deliberately no fallback to the legacy
+    single-tenant settings document: that document carries no client binding,
+    so using it for any authenticated caller let a restricted technician read
+    another customer's PBX. Callers that still serve the legacy path resolve
+    it explicitly with ``resolve_pbx(..., include_legacy=True)``, which demands
+    all-client scope.
+    """
     settings = settings or await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
     if not settings:
         if strict:
@@ -516,7 +362,10 @@ async def _test_pbx_live(settings: dict) -> dict:
 
 @router.get("/yeastar/system-info")
 async def get_yeastar_system_info(current_user: dict = Depends(get_current_user)):
-    data = await _yeastar_api_get("system/information")
+    # Resolve a PBX inside the caller's own scope. The legacy singleton is
+    # offered only to an all-client actor, never assumed.
+    settings = await resolve_pbx_optional(current_user, include_legacy=True)
+    data = await _yeastar_api_get("system/information", settings=settings)
     if data and data.get("errcode") == 0:
         info = data.get("data", {})
         uptime_sec = info.get("up_time", 0)
@@ -540,6 +389,7 @@ async def get_yeastar_system_info(current_user: dict = Depends(get_current_user)
 
 @router.get("/yeastar/extensions")
 async def get_yeastar_extensions(current_user: dict = Depends(get_current_user), settings: dict | None = None, token: str | None = None):
+    settings = settings or await resolve_pbx_optional(current_user, include_legacy=True)
     data = await _yeastar_api_get("extension/list", settings=settings, token=token)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
@@ -636,6 +486,7 @@ def _extension_presence_snapshot(extensions: list[dict], active_calls: list[dict
 
 @router.get("/yeastar/active-calls")
 async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user), settings: dict | None = None, token: str | None = None):
+    settings = settings or await resolve_pbx_optional(current_user, include_legacy=True)
     data = await _yeastar_api_get("call/query", settings=settings, token=token)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
@@ -680,6 +531,7 @@ async def get_yeastar_call_logs(
     settings: dict | None = None,
     token: str | None = None,
 ):
+    settings = settings or await resolve_pbx_optional(current_user, include_legacy=True)
     data = await _yeastar_api_get("cdr/list", {"page": page, "page_size": page_size}, settings=settings, token=token)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
@@ -874,12 +726,19 @@ async def get_yeastar_voice_wallboard(current_user: dict = Depends(get_current_u
 
 async def _voice_extensions_with_overrides(current_user: dict, pbx: dict | None = None):
     """Return live extensions enriched with billing and manual-override metadata."""
-    settings = pbx or await db.settings.find_one({"type": "yeastar"}, {"_id": 0}) or {}
+    # The legacy singleton is only reachable for an all-client actor, which
+    # resolve_pbx(include_legacy=True) enforces rather than assumes.
+    settings = pbx or await resolve_pbx_optional(current_user, include_legacy=True) or {}
     extensions = await get_yeastar_extensions(current_user, settings=settings)
     policy = settings.get("billing_policy", "all_enabled")
     pbx_id = str(settings.get("id") or "primary")
     pbx_name = settings.get("name") or settings.get("pbx_name") or "Primary Yeastar PBX"
-    overrides = await db.yeastar_extension_overrides.find({}, {"_id": 0}).to_list(1000)
+    # Only the overrides owned by the PBX being enriched. Reading every
+    # tenant's overrides and matching on a bare extension number let a shared
+    # number such as 101 inherit another customer's billing exclusion.
+    overrides = await db.yeastar_extension_overrides.find(
+        {"pbx_id": pbx_id}, {"_id": 0}
+    ).to_list(1000)
     override_map = {str(item.get("extension_key") or item.get("extension_number")): item for item in overrides}
     now = datetime.now(timezone.utc).isoformat()
     enriched = []
@@ -931,10 +790,16 @@ async def _cache_voice_extensions(pbx: dict, extensions: list[dict], captured_at
 @router.get("/yeastar/voice-workspace")
 async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)):
     client_scope = scope_query(current_user)
-    sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
-    billing_history = await db.yeastar_billing_snapshots.find({}, {"_id": 0}).sort("created_at", -1).to_list(24)
+    # Client-linked Voice history is not a global operations feed. Scope every
+    # collection query here; older unscoped aggregate documents deliberately
+    # remain visible only to explicitly global users.
+    sync_history = await db.yeastar_sync_history.find(client_scope, {"_id": 0}).sort("started_at", -1).to_list(30)
+    billing_history = await db.yeastar_billing_snapshots.find(client_scope, {"_id": 0}).sort("created_at", -1).to_list(24)
     activity = await db.activity_logs.find(
-        {"entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing", "voice_provider"]}},
+        {
+            "entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing", "voice_provider"]},
+            **scope_query(current_user, field="metadata.client_id"),
+        },
         {"_id": 0},
     ).sort("created_at", -1).to_list(50)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
@@ -1141,7 +1006,7 @@ async def update_yeastar_pbx(pbx_id: str, data: dict, current_user: dict = Depen
         changes["client_secret"] = {"before": "stored", "after": "rotated"}
     update.update({"updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("email", "system")})
     await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": update})
-    _yeastar_token_cache.clear()
+    yeastar_client.invalidate_token()
     record = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
     await log_activity(
         current_user,
@@ -1216,7 +1081,12 @@ async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: di
 
 @router.post("/yeastar/billing/recalculate")
 async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_user)):
-    pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).to_list(500)
+    # Billing snapshots are customer-scoped operational data. A restricted
+    # technician may recalculate only the PBXs they can access; a global user
+    # retains the approved whole-fleet operation. Do not rely on the UI client
+    # selector for this boundary.
+    client_scope = scope_query(current_user)
+    pbx_records = await db.yeastar_pbxs.find(client_scope, {"_id": 0}).to_list(500)
     captured_at = datetime.now(timezone.utc).isoformat()
     per_pbx = []
     all_extensions = []
@@ -1228,7 +1098,7 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
         all_extensions.extend(extensions)
         quantity = len([extension for extension in extensions if extension.get("included_in_billing")])
         previous = await db.yeastar_billing_snapshots.find_one(
-            {"pbx_id": pbx_id}, {"_id": 0, "billable_quantity": 1}, sort=[("created_at", -1)]
+            {"pbx_id": pbx_id, **client_scope}, {"_id": 0, "billable_quantity": 1}, sort=[("created_at", -1)]
         )
         snapshot = {
             "id": str(uuid.uuid4()), "created_at": captured_at, "billable_quantity": quantity,
@@ -1246,7 +1116,20 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
 
     quantity = len([extension for extension in all_extensions if extension.get("included_in_billing")])
     summary = {"id": str(uuid.uuid4()), "created_at": captured_at, "billable_quantity": quantity, "pbx_count": len(per_pbx), "source": "manual_recalculate_summary", "created_by": current_user.get("email", "system")}
-    await db.yeastar_billing_snapshots.insert_one(dict(summary))
+    # Aggregate summary documents intentionally have no single client owner.
+    # Only explicitly global users can create them. Restricted callers still
+    # receive their scoped result and per-PBX snapshots, without creating a
+    # document that could later be mistaken for a whole-fleet billing total.
+    if not client_scope:
+        await db.yeastar_billing_snapshots.insert_one(dict(summary))
+    activity_metadata = {"billable_quantity": quantity, "pbx_count": len(per_pbx)}
+    recalculated_client_ids = {str(snapshot.get("client_id") or "") for snapshot in per_pbx}
+    recalculated_client_ids.discard("")
+    # One client can be safely attributed in the shared activity ledger. A
+    # multi-client/global aggregate deliberately remains global rather than
+    # being exposed to a technician who can see only one constituent client.
+    if len(recalculated_client_ids) == 1:
+        activity_metadata["client_id"] = recalculated_client_ids.pop()
     await log_activity(
         current_user,
         "voice_billing_snapshot_captured",
@@ -1254,7 +1137,7 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
         summary["id"],
         "Voice billing snapshot",
         f"Captured {quantity} billable extensions across {len(per_pbx)} PBX connections.",
-        metadata={"billable_quantity": quantity, "pbx_count": len(per_pbx)},
+        metadata=activity_metadata,
     )
     return {**summary, "by_pbx": per_pbx}
 
@@ -1383,10 +1266,34 @@ async def link_yeastar_billing_to_recurring(client_id: str, data: dict | None = 
 
 @router.put("/yeastar/extensions/{extension_number}/override")
 async def update_yeastar_extension_override(extension_number: str, data: dict, current_user: dict = Depends(get_current_user)):
-    extension_key = str(data.get("extension_key") or extension_number)
+    extension_number = str(extension_number or "").strip()
+    extension_key = str(data.get("extension_key") or "").strip()
+    pbx_id, separator, keyed_extension_number = extension_key.partition(":")
+    if (
+        not pbx_id
+        or not separator
+        or not keyed_extension_number
+        or ":" in keyed_extension_number
+        or keyed_extension_number != extension_number
+    ):
+        raise HTTPException(status_code=400, detail="Extension key must match the selected PBX and extension number")
+
+    # The extension key is caller-controlled. Resolve its parent PBX and prove
+    # the PBX client is in scope before reading an existing override or making
+    # any mutation. A bare extension number cannot safely establish ownership.
+    pbx = await db.yeastar_pbxs.find_one(
+        {"id": pbx_id}, {"_id": 0, "id": 1, "name": 1, "client_id": 1}
+    )
+    if not pbx:
+        raise HTTPException(status_code=404, detail="PBX not found")
+    await assert_client_scope(
+        current_user,
+        pbx.get("client_id"),
+        operation="voice.extension.override.update",
+        mask_not_found=True,
+    )
+
     existing = await db.yeastar_extension_overrides.find_one({"extension_key": extension_key}, {"_id": 0}) or {}
-    if not existing and ":" not in extension_key:
-        existing = await db.yeastar_extension_overrides.find_one({"extension_number": extension_number}, {"_id": 0}) or {}
     next_enabled = bool(data.get("enabled", existing.get("enabled", True)))
     next_excluded = bool(data.get("exclude_from_billing", existing.get("exclude_from_billing", False)))
     previous_enabled = bool(existing.get("enabled", True))
@@ -1398,6 +1305,9 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
     record = {
         "extension_key": extension_key,
         "extension_number": extension_number,
+        "pbx_id": pbx_id,
+        "pbx_name": pbx.get("name") or "Yeastar PBX",
+        "client_id": pbx.get("client_id") or "",
         "enabled": next_enabled,
         "exclude_from_billing": next_excluded,
         "exclusion_reason": data.get("exclusion_reason", existing.get("exclusion_reason", "")),
@@ -1408,8 +1318,6 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
     }
     await db.yeastar_extension_overrides.update_one({"extension_key": extension_key}, {"$set": record}, upsert=True)
     if changed:
-        pbx_id = extension_key.split(":", 1)[0] if ":" in extension_key else ""
-        pbx = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0, "name": 1, "client_id": 1}) if pbx_id else None
         await log_activity(
             current_user,
             "voice_extension_override_updated",
@@ -1424,7 +1332,188 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
                     "after": next_enabled and not next_excluded,
                 },
             },
-            metadata={"client_id": (pbx or {}).get("client_id", ""), "pbx_id": pbx_id, "pbx_name": (pbx or {}).get("name", "")},
+            metadata={
+                "client_id": pbx.get("client_id", ""),
+                "pbx_id": pbx_id,
+                "pbx_name": pbx.get("name", ""),
+            },
         )
     return record
+
+
+# ============== PBX LIFECYCLE ==============
+
+
+def _nexus_client_id(settings: dict) -> str:
+    """Return the Nexus client binding, never the provider's API client ID.
+
+    A client PBX stores ``client_id`` as its Nexus client. The legacy
+    singleton stores ``client_id`` as the Yeastar API identifier, which is half
+    of a provider credential and must not be recorded as customer ownership or
+    written into an audit trail.
+    """
+    if settings.get("type") == "yeastar":
+        return ""
+    return str(settings.get("client_id") or "")
+
+
+@router.delete("/yeastar/pbxs/{pbx_id}")
+async def delete_yeastar_pbx(pbx_id: str, current_user: dict = Depends(get_current_user)):
+    """Unlink a client PBX and release its token slot on the appliance.
+
+    Yeastar allows eight live API tokens per PBX, so an unlinked PBX that keeps
+    a token alive is what produces the provider's token-limit failure later.
+    Extension billing overrides are deliberately retained: they record why a
+    quantity was governed and stay audit evidence after the link is gone.
+    """
+    existing = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="PBX not found")
+    await assert_client_scope(current_user, existing.get("client_id"), operation="voice.pbx.delete", mask_not_found=True)
+    await assert_action_permission(current_user, "voice.pbx.modify")
+    released = await yeastar_client.revoke_token(existing)
+    yeastar_client.invalidate_token(existing)
+    await db.yeastar_pbxs.delete_one({"id": pbx_id})
+    removed = await db.yeastar_extension_cache.delete_many({"pbx_id": str(pbx_id)})
+    await log_activity(
+        current_user,
+        "voice_pbx_unlinked",
+        "voice_pbx",
+        pbx_id,
+        existing.get("name") or "Yeastar PBX",
+        "PBX unlinked from its client after its provider token was released.",
+        metadata={
+            "client_id": existing.get("client_id", ""),
+            "token_released": bool(released),
+            "cached_extensions_removed": int(getattr(removed, "deleted_count", 0) or 0),
+        },
+    )
+    return {"deleted": True, "token_released": bool(released)}
+
+
+# ============== CAPABILITY CATALOGUE ==============
+
+
+@router.get("/yeastar/catalogue")
+async def get_yeastar_catalogue(current_user: dict = Depends(get_current_user)):
+    """Describe the Yeastar capability this integration can reach.
+
+    Safe for any authenticated technician: it names interfaces and the action
+    permission each write requires, and carries no provider payload, credential
+    or download URL.
+    """
+    operations = yeastar_registry.OPERATIONS
+    return {
+        "operation_count": len(operations),
+        "write_count": sum(1 for operation in operations if operation.is_write),
+        "destructive_count": sum(1 for operation in operations if operation.destructive),
+        "categories": yeastar_registry.catalogue(),
+    }
+
+
+def _operation_for_dispatch(operation_id: str, *, expect_write: bool):
+    """Resolve a catalogue operation and reject unsafe dispatch targets.
+
+    Nexus decides the caller's verb from whether the operation changes PBX
+    state, never from the provider's own verb: Yeastar performs its deletes with
+    a GET, so ``operation.method`` cannot be what selects the route. The
+    provider method stays an internal detail of dispatch, and a caller that
+    used the wrong route is told which one this operation needs.
+    """
+    operation = yeastar_registry.get_operation(operation_id)
+    if not operation:
+        raise HTTPException(status_code=404, detail="Unknown Yeastar operation")
+    if operation.proxied:
+        raise HTTPException(
+            status_code=400,
+            detail="That Yeastar operation returns a provider download URL, so it is served by the Nexus artifact routes instead of the dispatcher.",
+        )
+    if operation.is_write != expect_write:
+        if operation.is_write:
+            detail = "That Yeastar operation changes PBX state and must be called as a POST command on /api/yeastar/operations/{operation_id}."
+        else:
+            detail = "That Yeastar operation only reads from the PBX and must be called with GET."
+        raise HTTPException(status_code=405, detail=detail)
+    return operation
+
+
+async def _dispatch_yeastar_operation(operation, current_user: dict, pbx_id: str | None, params: dict, body: dict) -> dict:
+    """Resolve scope, enforce the action gate, then run one catalogue interface."""
+    try:
+        settings = await resolve_pbx(current_user, pbx_id, operation=f"voice.operation.{operation.id}", include_legacy=True)
+    except YeastarError as exc:
+        raise HTTPException(status_code=http_status_for(exc), detail=str(exc)) from exc
+    if not _has_pbx_credentials(settings):
+        raise HTTPException(status_code=400, detail="This PBX needs its API URL, Client ID, and Client Secret before Nexus can run that operation")
+    if operation.action:
+        await assert_action_permission(current_user, operation.action)
+    try:
+        payload = await yeastar_client.dispatch_operation(settings, operation, params=params, body=body, strict=True)
+    except YeastarError as exc:
+        raise HTTPException(status_code=http_status_for(exc), detail=str(exc)) from exc
+    if isinstance(payload, dict) and payload.get("errcode", 0) != 0:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Yeastar rejected {operation.id} ({payload.get('errmsg') or 'unknown error'}, error {payload.get('errcode')}).",
+        )
+    resolved_pbx_id = str(settings.get("id") or "primary")
+    if operation.is_write:
+        await log_activity(
+            current_user,
+            "voice_operation_executed",
+            "voice_pbx",
+            resolved_pbx_id,
+            settings.get("name") or "Yeastar PBX",
+            f"Ran the Yeastar {operation.id} interface from the capability catalogue.",
+            metadata={
+                "operation": operation.id,
+                "category": operation.category,
+                "client_id": _nexus_client_id(settings),
+                "destructive": operation.destructive,
+            },
+        )
+    return {
+        "operation": operation.id,
+        "category": operation.category,
+        "pbx_id": resolved_pbx_id,
+        "client_id": _nexus_client_id(settings),
+        "destructive": operation.destructive,
+        "data": payload.get("data") if isinstance(payload, dict) else payload,
+    }
+
+
+@router.get("/yeastar/operations/{operation_id}")
+async def run_yeastar_read_operation(
+    operation_id: str,
+    request: Request,
+    pbx_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run one read interface from the catalogue.
+
+    Only the parameters the catalogue declares are forwarded, so a caller
+    cannot append arbitrary arguments to the provider request.
+    """
+    operation = _operation_for_dispatch(operation_id, expect_write=False)
+    return await _dispatch_yeastar_operation(operation, current_user, pbx_id, dict(request.query_params), {})
+
+
+@router.post("/yeastar/operations/{operation_id}")
+async def run_yeastar_write_operation(
+    operation_id: str,
+    request: Request,
+    data: dict = Body(default={}),
+    pbx_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run one write interface from the catalogue.
+
+    Every write names the Nexus action permission it requires and leaves an
+    audit record, including whether the provider call is destructive.
+    """
+    operation = _operation_for_dispatch(operation_id, expect_write=True)
+    body = dict(data or {})
+    body.pop("pbx_id", None)
+    resolved_pbx_id = pbx_id or request.query_params.get("pbx_id")
+    return await _dispatch_yeastar_operation(operation, current_user, resolved_pbx_id, dict(request.query_params), body)
 

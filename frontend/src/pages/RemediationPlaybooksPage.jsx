@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -1061,14 +1062,14 @@ export default function RemediationPlaybooksPage() {
           }
         }}
       >
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="playbook-launch-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5 text-rose-300" />
               Launch guided response
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.05] p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-semibold text-rose-100">
@@ -1223,7 +1224,7 @@ export default function RemediationPlaybooksPage() {
               </>
             )}
           </div>
-          <div className="flex justify-end gap-2 border-t pt-4">
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button
               variant="outline"
               onClick={() => {
@@ -1246,7 +1247,7 @@ export default function RemediationPlaybooksPage() {
               {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
               Launch audited response
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1257,8 +1258,8 @@ export default function RemediationPlaybooksPage() {
           if (!open) setCancelReason("");
         }}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(620px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="playbook-cancel-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2">
               <Ban className="h-5 w-5 text-rose-300" />
               Cancel guided response
@@ -1284,7 +1285,7 @@ export default function RemediationPlaybooksPage() {
               />
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-t pt-4">
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button
               variant="outline"
               onClick={() => {
@@ -1303,7 +1304,7 @@ export default function RemediationPlaybooksPage() {
               {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
               Cancel and retain audit
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1314,14 +1315,14 @@ export default function RemediationPlaybooksPage() {
           if (!open) setRunbookForm(emptyRunbook());
         }}
       >
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="playbook-runbook-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2">
               <ClipboardCheck className="h-5 w-5 text-sky-300" />
               Create team response runbook
             </DialogTitle>
           </DialogHeader>
-          <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             <p className="text-sm text-muted-foreground">
               Build technician-led guidance for an agreed response. Every
               recorded action is attributed to the acting technician and
@@ -1466,7 +1467,7 @@ export default function RemediationPlaybooksPage() {
               ))}
             </div>
           </div>
-          <div className="flex justify-end gap-2 border-t pt-4">
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button
               variant="outline"
               onClick={() => setCreateOpen(false)}
@@ -1478,7 +1479,7 @@ export default function RemediationPlaybooksPage() {
               {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
               Create audited runbook
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1488,15 +1489,15 @@ export default function RemediationPlaybooksPage() {
           if (!open) setSelectedHistorySession(null);
         }}
       >
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="playbook-evidence-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2">
               <ClipboardCheck className="h-5 w-5 text-emerald-500" />
               Response evidence record
             </DialogTitle>
           </DialogHeader>
           {selectedHistorySession && (
-            <div className="space-y-5">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
               <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold">
@@ -1592,7 +1593,7 @@ export default function RemediationPlaybooksPage() {
                     selectedHistorySession.close_note}
                 </div>
               )}
-              <div className="flex flex-wrap justify-between gap-2 border-t pt-4">
+              <div className="sticky bottom-0 -mx-5 flex flex-wrap justify-between gap-2 border-t border-border/70 bg-background/95 px-5 py-4 backdrop-blur">
                 <div className="flex flex-wrap gap-2">
                   {selectedHistorySession.device_id && (
                     <Button
@@ -1652,7 +1653,7 @@ export default function RemediationPlaybooksPage() {
             </>
           }
         >
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">Document the blocker, the agreed next step, the owner, and the expected timing. This gives the next technician a complete handover.</div>
             <Textarea
               value={blockedNote}

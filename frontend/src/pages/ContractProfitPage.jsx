@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { DollarSign, TrendingUp, AlertTriangle, Loader2, RefreshCw, Clock, Users } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function ContractProfitPage() {
   const { token } = useAuth();
@@ -33,10 +34,7 @@ export default function ContractProfitPage() {
 
   return (
     <div className="space-y-5" data-testid="contract-profit-page">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div><h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><TrendingUp className="w-6 h-6 text-emerald-400" />Contract Profitability</h1><p className="text-muted-foreground mt-1">Monthly margin analysis per contract</p></div>
-        <div className="flex gap-2"><Button variant="outline" onClick={() => navigate("/contracts")}>Contracts</Button><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button></div>
-      </div>
+      <OperationalPageHeader eyebrow="Agreement economics · delivery margin" title="Contract Profitability" description="Compare monthly agreement revenue with recorded delivery cost and prioritise contracts needing review." icon={TrendingUp} tone="emerald" signal={summary.unprofitable > 0 ? "attention" : "ready"} actions={<><Button variant="outline" onClick={() => navigate("/contracts")}>Contracts</Button><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button></>} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {[

@@ -20,6 +20,7 @@ export default function BandwidthMonitorPage() {
   const [topTalkers, setTopTalkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [siteLoading, setSiteLoading] = useState(false);
+  const [siteError, setSiteError] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [resolvingAlertId, setResolvingAlertId] = useState("");
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -33,7 +34,7 @@ export default function BandwidthMonitorPage() {
         axios.get(`${API}/bandwidth-monitor/alerts`, { headers }),
       ]);
       setData(oRes.data);
-      setAlerts(aRes.data);
+      setAlerts(aRes.data?.alerts || []);
       setSelectedSite(current => current || oRes.data.sites?.[0]?.id || "");
     } catch (e) {
       setData(null);
@@ -45,6 +46,7 @@ export default function BandwidthMonitorPage() {
   }, [headers]);
 
   const fetchSite = useCallback(async (siteId) => {
+    setSiteError(false);
     if (!siteId) { setSiteData([]); setTopTalkers([]); return; }
     setSiteLoading(true);
     setSiteData([]);
@@ -54,9 +56,9 @@ export default function BandwidthMonitorPage() {
         axios.get(`${API}/bandwidth-monitor/site/${siteId}`, { headers }),
         axios.get(`${API}/bandwidth-monitor/top-talkers/${siteId}`, { headers }),
       ]);
-      setSiteData((bandwidthRes.data || []).reverse().map(item => ({ ...item, time: new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })));
+      setSiteData((bandwidthRes.data?.samples || []).reverse().map(item => ({ ...item, time: new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })));
       setTopTalkers(talkersRes.data || []);
-    } catch (e) { toast.error("Failed to load selected site telemetry"); }
+    } catch (e) { setSiteError(true); toast.error("Failed to load selected site telemetry"); }
     finally { setSiteLoading(false); }
   }, [headers]);
 
@@ -83,7 +85,7 @@ export default function BandwidthMonitorPage() {
     </div>
   );
 
-  const { sites } = data;
+  const { sites = [], meta } = data;
   const currentSite = sites.find(s => s.id === selectedSite);
   const currentSample = siteData[siteData.length - 1];
   const visibleAlerts = alerts.filter(alert => !selectedSite || alert.site_id === selectedSite);
@@ -94,7 +96,7 @@ export default function BandwidthMonitorPage() {
       <OperationalPageHeader
         eyebrow="Network workspace - traffic"
         title="Bandwidth monitor"
-        description="Live utilisation, connection quality and high-traffic endpoints across managed client sites."
+        description="Controller-sourced utilisation, connection quality and high-traffic endpoints across managed client sites."
         icon={Gauge}
         tone="sky"
         actions={(
@@ -108,14 +110,30 @@ export default function BandwidthMonitorPage() {
         )}
       />
 
+      {meta?.data_status === "empty" && (
+        <Card className="border-sky-500/20 bg-sky-500/[0.04]" data-testid="bandwidth-telemetry-empty">
+          <CardContent className="flex items-start gap-3 py-5 text-sm text-sky-100">
+            <Wifi className="mt-0.5 h-5 w-5 shrink-0 text-sky-300" />
+            <div><p className="font-medium">No controller telemetry has been received.</p><p className="mt-1 text-xs text-sky-200/70">Nexus will show throughput, latency and controller-created alerts only after the selected site has a connected telemetry source. No values have been estimated.</p></div>
+          </CardContent>
+        </Card>
+      )}
+
       {currentSite && (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <HeroTile label="Download now" value={currentSample?.download_mbps ?? 0} suffix=" Mbps" icon={ArrowDown} glow="sky" subtitle={`of ${currentSite.download_speed_mbps || 0} Mbps capacity`} />
-          <HeroTile label="Upload now" value={currentSample?.upload_mbps ?? 0} suffix=" Mbps" icon={ArrowUp} glow="emerald" subtitle={`of ${currentSite.upload_speed_mbps || 0} Mbps capacity`} />
-          <HeroTile label="Latency" value={currentSample?.latency_ms ?? 0} suffix=" ms" icon={Activity} glow="indigo" subtitle={currentSite.isp || "ISP not recorded"} />
-          <HeroTile label="Packet loss" value={currentSample?.packet_loss_pct ?? 0} suffix="%" icon={Radio} glow={(currentSample?.packet_loss_pct ?? 0) > 1 ? "rose" : "zinc"} subtitle={currentSite.wan_ip || "WAN IP not recorded"} />
+          <HeroTile label="Download now" value={currentSample?.download_mbps ?? "—"} suffix={currentSample?.download_mbps == null ? "" : " Mbps"} icon={ArrowDown} glow="sky" subtitle={currentSite.download_speed_mbps != null ? `of ${currentSite.download_speed_mbps} Mbps capacity` : "Capacity not recorded"} />
+          <HeroTile label="Upload now" value={currentSample?.upload_mbps ?? "—"} suffix={currentSample?.upload_mbps == null ? "" : " Mbps"} icon={ArrowUp} glow="emerald" subtitle={currentSite.upload_speed_mbps != null ? `of ${currentSite.upload_speed_mbps} Mbps capacity` : "Capacity not recorded"} />
+          <HeroTile label="Latency" value={currentSample?.latency_ms ?? "—"} suffix={currentSample?.latency_ms == null ? "" : " ms"} icon={Activity} glow="indigo" subtitle={currentSite.isp || "ISP not recorded"} />
+          <HeroTile label="Packet loss" value={currentSample?.packet_loss_pct ?? "—"} suffix={currentSample?.packet_loss_pct == null ? "" : "%"} icon={Radio} glow={(currentSample?.packet_loss_pct ?? 0) > 1 ? "rose" : "zinc"} subtitle={currentSite.wan_ip || "WAN IP not recorded"} />
           <HeroTile label="Open alerts" value={unresolvedAlerts.length} icon={AlertTriangle} glow={unresolvedAlerts.length ? "amber" : "zinc"} subtitle={currentSite.status === "online" ? "Selected site online" : currentSite.status || "Status unknown"} />
         </div>
+      )}
+
+      {currentSite && (siteLoading || siteError || siteData.length === 0) && (
+        <Card data-testid="bandwidth-site-telemetry-state"><CardContent className="flex flex-wrap items-center justify-between gap-3 py-5 text-sm text-muted-foreground" role={siteError ? "alert" : "status"}>
+          <span>{siteLoading ? "Loading site telemetry…" : siteError ? "Site telemetry could not be loaded. Measurements are unavailable, not zero." : "No telemetry samples are available for this site yet."}</span>
+          {siteError && <Button size="sm" variant="outline" onClick={() => fetchSite(selectedSite)}>Retry telemetry</Button>}
+        </CardContent></Card>
       )}
 
       {/* Bandwidth Chart */}
@@ -184,7 +202,7 @@ export default function BandwidthMonitorPage() {
               <td className="py-2">{s.upload_speed_mbps} Mbps</td>
               <td className="py-2"><Badge className={s.status === "online" ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"}>{s.status}</Badge></td>
             </tr>
-          ))}</tbody>
+          ))}{sites.length === 0 && <tr><td colSpan="6" className="py-8 text-center text-muted-foreground">No authorised network sites are available.</td></tr>}</tbody>
         </table></div></CardContent>
       </Card>
     </div>

@@ -32,9 +32,10 @@ const STATUS_STYLES = {
 
 function presetDate(hoursFromNow) {
   const d = new Date(Date.now() + hoursFromNow * 3600000);
-  // round to next 5-min mark
+  // datetime-local expects wall-clock time, not an ISO UTC timestamp.
   d.setSeconds(0, 0);
-  return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM for <input type="datetime-local">
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
 }
 
 export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [], deviceNames = {}, onScheduled }) {
@@ -63,6 +64,7 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
   const schedule = async () => {
     if (selectedIds.length === 0) { toast.error("Select at least 1 device"); return; }
     if (actions.length === 0) { toast.error("Pick at least 1 action"); return; }
+    if (actions.includes("reboot") && actions.some(action => action === "install-patches" || action === "install-winget")) { toast.error("Schedule reboot separately from patch installation until ordered execution is supported"); return; }
     if (!scheduledAt) { toast.error("Pick a schedule time"); return; }
     setBusy(true);
     try {
@@ -95,7 +97,7 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
       >
         <DialogHeader className="sr-only" aria-hidden="true">
           <DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-amber-400" />Schedule Maintenance Window</DialogTitle>
-          <DialogDescription>Autonomous overnight maintenance — bundle N devices + N actions + a time. AI summary auto-posts to the parent ticket on completion.</DialogDescription>
+          <DialogDescription>Plan approved actions for selected devices at a recorded time. Nexus keeps the endpoint-returned outcome and can post a factual completion record to the linked ticket.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
@@ -123,6 +125,7 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
 
           <div>
             <Label className="text-xs">Actions to run on each device</Label>
+            <p className="mt-1 text-xs text-muted-foreground">Schedule reboots separately from update installation; actions in a window are not sequenced.</p>
             <div className="grid grid-cols-4 gap-2 mt-1">
               {ACTION_OPTIONS.map(({ key, label, icon: Icon }) => (
                 <Button key={key} variant={actions.includes(key) ? "default" : "outline"}
@@ -167,15 +170,17 @@ export function MaintenanceWindowHistory({ open, onClose }) {
   const headers = { Authorization: `Bearer ${token}` };
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [detail, setDetail] = useState(null);
   const [actionTarget, setActionTarget] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const r = await axios.get(`${API}/maintenance-windows`, { headers: { Authorization: `Bearer ${token}` } });
       setItems(r.data || []);
-    } catch (e) { toast.error("Load failed"); }
+    } catch (e) { setLoadError(true); toast.error("Could not load maintenance history"); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -201,12 +206,12 @@ export function MaintenanceWindowHistory({ open, onClose }) {
   return (
     <>
       <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-        <DialogContent className="max-w-4xl" data-testid="maintenance-history-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><History className="w-5 h-5 text-amber-400" />Maintenance Windows</DialogTitle>
-            <DialogDescription>Scheduled, running and completed windows. AI summary appears once each window completes.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog eyebrow="Device operations" title="Maintenance windows" icon={History} tone="amber"
+          description="Scheduled, running and completed windows. Completion is based on endpoint-returned command results, not dispatch alone."
+          data-testid="maintenance-history-dialog"
+          footer={<><Button variant="outline" onClick={load} disabled={loading}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button><Button onClick={onClose}>Close</Button></>}>
           {loading ? <div className="p-8 text-center"><Loader2 className="w-6 h-6 animate-spin" /></div> :
+            loadError ? <div role="alert" className="rounded-lg border border-rose-500/30 p-4 text-sm text-muted-foreground">Maintenance history could not be loaded. <Button variant="link" onClick={load}>Try again</Button></div> :
             <ScrollArea className="max-h-[60vh]">
               <div className="space-y-2">
                 {items.length === 0 ? <p className="text-xs text-muted-foreground text-center py-6">No maintenance windows yet.</p> :
@@ -247,11 +252,7 @@ export function MaintenanceWindowHistory({ open, onClose }) {
               </div>
             </ScrollArea>
           }
-          <DialogFooter>
-            <Button variant="outline" onClick={load}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
-            <Button onClick={onClose}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Detail dialog */}
@@ -276,7 +277,7 @@ export function MaintenanceWindowHistory({ open, onClose }) {
                 <ScrollArea className="max-h-[40vh] border border-zinc-800 rounded">
                   {(detail.runs || []).length === 0 ? <p className="text-xs text-muted-foreground p-3 text-center">No runs yet</p> : (detail.runs || []).map((r) => (
                     <div key={r.id} className="flex items-center justify-between text-[11px] px-2 py-1 border-b border-zinc-900/60">
-                      <span className="truncate flex-1">{r.device_name} · <code className="text-[10px] text-muted-foreground">{r.action}</code></span>
+                      <span className="min-w-0 flex-1"><span className="block truncate">{r.device_name} · <code className="text-[10px] text-muted-foreground">{r.action}</code></span>{r.message && <span className="block text-muted-foreground">{r.message}</span>}{r.patch_result && <span className="block text-muted-foreground">{r.patch_result.phase === "no_updates" ? "No applicable updates reported" : `Update ${r.patch_result.phase} · result ${r.patch_result.result_code ?? "not reported"}${r.patch_result.attempted != null ? ` · ${r.patch_result.attempted} attempted` : ""}`}{r.patch_result.reboot_required === true ? " · reboot required" : ""} · post-install compliance not verified</span>}</span>
                       <Badge variant="outline" className={`text-[9px] ${r.status === "ok" ? "text-emerald-400 border-emerald-500/30" : r.status === "failed" ? "text-rose-400 border-rose-500/30" : "text-zinc-500"}`}>{r.status}</Badge>
                     </div>
                   ))}

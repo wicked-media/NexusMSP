@@ -2,7 +2,7 @@
 
 ## Admin (full access)
 - Email: `aaron@stech.com.au`
-- Password: `Lucky@2871$!`
+- Password: `[redacted-test-password]`
 
 ## Notes
 - This account has admin role. Login response returns `{ token, user }` (not `access_token`).

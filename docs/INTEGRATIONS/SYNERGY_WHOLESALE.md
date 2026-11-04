@@ -14,19 +14,25 @@ The Synergy Wholesale API v3.17 is SOAP/WSDL at `https://api.synergywholesale.co
 ## Supported safe workflow states
 
 Until the server-side connector is configured, Nexus can create web-delivery records and provider-action requests, but does not call Synergy. Such actions remain `pending_connector`. Once configured they must be reviewed under the shared Nexus Action Model before invoking any provider mutation.
-# Synergy Wholesale
 
 Nexus supports the documented Synergy Wholesale v3.17 SOAP/WSDL surface for
 domains, DNS, hosting/cPanel, SSL certificates and Microsoft 365 subscriptions.
 
 ## Security and workflow
 
-- Synergy reseller ID and API key are server-side environment variables only.
-- Configure `SYNERGY_WHOLESALE_WSDL` in the deployment along with
-  `SYNERGY_WHOLESALE_RESELLER_ID` and `SYNERGY_WHOLESALE_API_KEY`.
-- Configure a distinct Fernet key in `SYNERGY_ACTION_ENCRYPTION_KEY`; pending
-  provider-change inputs are encrypted at rest and only decrypted immediately
-  before approved execution.
+- Synergy reseller ID and API key remain server-side. They may be supplied as
+  deployment environment values or saved through **Settings → Integrations →
+  Synergy Wholesale** into the Nexus encrypted settings vault; they are never
+  returned to the browser after saving.
+- Configure `NEXUS_SECRET_ENCRYPTION_KEY` in production. It protects saved
+  Synergy credentials and new pending provider-action inputs. The local
+  development runtime retains its documented JWT-derived compatibility path.
+- `SYNERGY_ACTION_ENCRYPTION_KEY` is legacy-read support only for previously
+  encrypted action records. Do not create new deployment keys for it; re-save
+  any legacy credential through Settings to move it to the shared vault.
+- Configure `SYNERGY_WHOLESALE_WSDL` in the deployment when using environment
+  credentials; a WSDL entered through Settings is kept as non-secret
+  configuration beside the encrypted credential.
 - Allowlist the Nexus connector's source IP in Synergy before enabling live use.
 - The connector validates a fixed Nexus operation catalogue against the live
   WSDL; the browser cannot request arbitrary SOAP commands.
@@ -65,3 +71,27 @@ Plugin, theme and core updates are approval-backed Nexus work items. They are
 not silently executed through the browser; production execution is reserved for
 the Nexus WordPress Control worker (for example a controlled WP-CLI/cPanel
 worker) so backups, verification and rollback evidence can be required first.
+
+## Controlled production-test sequence
+
+1. Configure Synergy in **Settings → Integrations → Synergy Wholesale** using
+   server-side credentials, the production WSDL and a source IP already
+   allowlisted by Synergy. Run the connection test before enabling a live
+   provider action.
+2. In **Web Studio**, create a client-owned website record, select only an
+   agreement belonging to that same client, and make the billing status
+   explicit. This creates Nexus business evidence; it does not purchase or
+   renew anything.
+3. Run a public health check and confirm the saved evidence, client ownership
+   and audit entry. Private, reserved and non-HTTPS WordPress endpoints are
+   rejected.
+4. Link a dedicated WordPress service account using an Application Password,
+   then refresh the plugin inventory. Nexus stores the password encrypted and
+   never returns it to the browser.
+5. Submit a precisely targeted plugin/theme update or an approved whole-site
+   request. Confirm that it remains pending approval and a WordPress Control
+   worker until backup, execution and verification evidence are recorded.
+
+The control worker is the remaining execution dependency for real WordPress
+changes. Until it is deployed, Web Studio must be treated as governed planning,
+inventory and evidence—not as a silent update engine.

@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_global_scope
+from app.services.secret_store import decrypt_secret, encrypt_secret
+from app.services.rustdesk_provider_security import is_masked_secret, normalise_rustdesk_server_url
 
 router = APIRouter()
 
@@ -117,11 +121,14 @@ async def _rustdesk_provider_config() -> dict:
     typed = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0}) or {}
     legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
     legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
-    return {
+    config = {
         **generic,
         **legacy_value,
         **{key: value for key, value in typed.items() if key != "_id" and value not in (None, "")},
     }
+    if config.get("api_key_encrypted"):
+        config["api_key"] = decrypt_secret(config.get("api_key_encrypted"))
+    return config
 
 
 @router.get("/remote-providers")
@@ -207,8 +214,16 @@ async def get_active_remote_providers(current_user: dict = Depends(get_current_u
 
     return out
 
-@router.get("/remote-providers/{provider_id}/settings")
-async def get_provider_settings(provider_id: str, current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/remote-providers/{provider_id}/settings",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def get_provider_settings(
+    provider_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    await assert_global_scope(current_user, operation="device.remote.configure", request=request)
     config = (
         await _rustdesk_provider_config()
         if provider_id == "rustdesk"
@@ -216,36 +231,63 @@ async def get_provider_settings(provider_id: str, current_user: dict = Depends(g
     )
     if not config:
         return {"type": f"remote_{provider_id}", "active": False}
-    # Mask passwords
     provider = next((p for p in SUPPORTED_PROVIDERS if p["id"] == provider_id), None)
+    if provider_id == "rustdesk":
+        value = dict(config)
+        return {
+            "type": "remote_rustdesk",
+            "server_url": normalise_rustdesk_server_url(value.get("server_url")),
+            "relay_server": str(value.get("relay_server") or ""),
+            "active": bool(value.get("enabled", value.get("active", True))),
+            "enabled": bool(value.get("enabled", value.get("active", True))),
+            "auto_sync": bool(value.get("auto_sync", True)),
+            "api_key": "********" if value.get("api_key") else "",
+            "api_key_configured": bool(value.get("api_key")),
+        }
+
+    # Mask generic provider passwords before returning configuration.
     if provider:
         for field in provider["config_fields"]:
             if field["type"] == "password" and config.get(field["key"]):
                 val = config[field["key"]]
                 config[field["key"]] = f"{'*' * max(0, len(val) - 4)}{val[-4:]}" if len(val) > 4 else "****"
-    if provider_id == "rustdesk":
-        config["active"] = bool(config.get("enabled", config.get("active", True)))
     return config
 
-@router.put("/remote-providers/{provider_id}/settings")
-async def save_provider_settings(provider_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.put(
+    "/remote-providers/{provider_id}/settings",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def save_provider_settings(
+    provider_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    await assert_global_scope(current_user, operation="device.remote.configure", request=request)
     updates = {"type": f"remote_{provider_id}", "updated_at": datetime.now(timezone.utc).isoformat()}
     provider = next((p for p in SUPPORTED_PROVIDERS if p["id"] == provider_id), None)
     if not provider:
         return {"message": "Unknown provider"}
     if provider_id == "rustdesk":
         current = await _rustdesk_provider_config()
+        current_secret = str(current.get("api_key") or "")
+        incoming_url = data.get("server_url")
+        server_url = normalise_rustdesk_server_url(
+            incoming_url if incoming_url is not None else current.get("server_url")
+        )
         value = {
-            "server_url": current.get("server_url", ""),
-            "api_key": current.get("api_key", ""),
+            "server_url": server_url,
             "relay_server": current.get("relay_server", ""),
             "enabled": bool(current.get("enabled", current.get("active", True))),
             "auto_sync": current.get("auto_sync", True),
         }
-        for field in provider["config_fields"]:
-            incoming = data.get(field["key"])
-            if incoming is not None and not str(incoming).startswith("****"):
-                value[field["key"]] = incoming
+        incoming_key = data.get("api_key")
+        if incoming_key is not None and not is_masked_secret(incoming_key):
+            current_secret = str(incoming_key).strip()
+        if current_secret:
+            value["api_key_encrypted"] = encrypt_secret(current_secret)
+        if "relay_server" in data:
+            value["relay_server"] = str(data.get("relay_server") or "").strip()
         if "active" in data:
             value["enabled"] = bool(data["active"])
         await db.settings.update_one(
@@ -267,8 +309,16 @@ async def save_provider_settings(provider_id: str, data: dict, current_user: dic
     await db.settings.update_one({"type": f"remote_{provider_id}"}, {"$set": updates}, upsert=True)
     return {"message": f"{provider['name']} settings saved"}
 
-@router.post("/remote-providers/{provider_id}/test")
-async def test_provider_connection(provider_id: str, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/remote-providers/{provider_id}/test",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def test_provider_connection(
+    provider_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    await assert_global_scope(current_user, operation="device.remote.configure", request=request)
     config = (
         await _rustdesk_provider_config()
         if provider_id == "rustdesk"
@@ -279,19 +329,35 @@ async def test_provider_connection(provider_id: str, current_user: dict = Depend
     provider = next((p for p in SUPPORTED_PROVIDERS if p["id"] == provider_id), None)
     if not provider:
         return {"success": False, "message": "Unknown provider"}
+    if provider_id == "rustdesk":
+        normalise_rustdesk_server_url(config.get("server_url"))
     has_creds = any(config.get(f["key"]) for f in provider["config_fields"] if f["type"] in ("password", "url"))
     if not has_creds:
         return {"success": False, "message": f"Please configure {provider['name']} credentials first"}
     # For now, return success if credentials exist (real connection testing per provider can be added)
     return {"success": True, "message": f"Connection to {provider['name']} verified (credentials present)"}
 
-@router.put("/remote-providers/{provider_id}/toggle")
-async def toggle_provider(provider_id: str, current_user: dict = Depends(get_current_user)):
+@router.put(
+    "/remote-providers/{provider_id}/toggle",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def toggle_provider(
+    provider_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    await assert_global_scope(current_user, operation="device.remote.configure", request=request)
     if provider_id == "rustdesk":
         current = await _rustdesk_provider_config()
         current_active = bool(current.get("enabled", current.get("active", True))) if current else False
         legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
         value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
+        value = dict(value)
+        value["server_url"] = normalise_rustdesk_server_url(value.get("server_url"))
+        current_secret = decrypt_secret(value.get("api_key_encrypted")) or str(value.get("api_key") or "")
+        value.pop("api_key", None)
+        if current_secret:
+            value["api_key_encrypted"] = encrypt_secret(current_secret)
         await db.settings.update_one(
             {"key": "rustdesk_config"},
             {"$set": {

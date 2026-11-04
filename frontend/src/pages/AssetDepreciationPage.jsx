@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { DollarSign, AlertTriangle, RefreshCw, CheckCircle } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const statusColors = { active: "default", refresh_soon: "secondary", end_of_life: "destructive" };
 
@@ -13,24 +15,25 @@ export default function AssetDepreciationPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    axios.get(`${API}/asset-depreciation`, { headers: { Authorization: `Bearer ${token}` } })
+  const [error, setError] = useState(false);
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(false);
+    return axios.get(`${API}/asset-depreciation`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setData(r.data))
-      .catch(() => {})
+      .catch(() => { setData(null); setError(true); })
       .finally(() => setLoading(false));
   }, [token]);
+  useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
-  if (!data) return null;
+  if (loading) return <WorkspaceLoadingState />;
+  if (error || !data) return <WorkspaceErrorState onRetry={load} />;
 
   const { stats, assets } = data;
 
   return (
     <div className="space-y-6" data-testid="asset-depreciation-page">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Asset Depreciation & Refresh Planner</h1>
-        <p className="text-muted-foreground text-sm mt-1">Track asset value and plan hardware refreshes</p>
-      </div>
+      <OperationalPageHeader eyebrow="Asset lifecycle · financial planning" title="Asset Depreciation & Refresh Planner" description="Track asset value, lifecycle exposure and evidence-backed hardware refresh priorities." icon={DollarSign} tone="amber" signal={stats.end_of_life > 0 ? "attention" : "ready"} />
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <Card><CardContent className="pt-4 pb-3 text-center">
@@ -96,7 +99,7 @@ export default function AssetDepreciationPage() {
                   <TableCell><Badge variant={statusColors[a.status]} className="text-xs capitalize">{a.status?.replace("_"," ")}</Badge></TableCell>
                 </TableRow>
               ))}
-              {assets.length === 0 && <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">No asset data available</TableCell></TableRow>}
+              {assets.length === 0 && <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">No assets are available in your current scope. Add an asset and its purchase details to start planning refreshes.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

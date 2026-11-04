@@ -6,8 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Loader2, AlertTriangle, ArrowUpRight, FileText, DollarSign, Timer, ShieldCheck } from "lucide-react";
 
 const SLA_TABS = ["timers", "predictions", "penalties", "reports"];
@@ -51,7 +51,7 @@ export default function SlaManagerPage() {
     }).finally(() => setLoading(false));
   }, [headers]);
 
-  if (loading) return <div className="space-y-5"><TicketModuleHeader title="SLA manager" subtitle="Loading timers, predictions, penalties, and reports…" /><div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin" /></div></div>;
+  if (loading) return <div className="space-y-6"><OperationalPageHeader eyebrow="Service commitment control" title="SLA Manager" description="Loading timers, predictions, commercial exposure and customer-ready evidence." icon={ShieldCheck} tone="sky" signal="sla-commitments" /><div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin" /></div></div>;
 
   const timerList = Array.isArray(timers) ? timers : timers?.active || [];
   const predList = Array.isArray(predictions) ? predictions : predictions?.predictions || [];
@@ -61,12 +61,14 @@ export default function SlaManagerPage() {
 
   return (
     <div className="space-y-6" data-testid="sla-manager">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center"><ShieldCheck className="w-4 h-4 text-cyan-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">SLA Manager</h1><p className="text-sm text-muted-foreground">Live commitments, breach risk, commercial exposure, and reporting.</p></div>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Service commitment control"
+        title="SLA Manager"
+        description="Live commitments, predicted breach risk, commercial exposure and customer-ready SLA evidence in one operational view."
+        icon={ShieldCheck}
+        tone="sky"
+        signal="sla-commitments"
+      />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <HeroTile label="Live timers" value={timerList.length} icon={Timer} glow="cyan" active={tab === "timers"} onClick={() => selectTab("timers")} testId="sla-metric-active" />
         <HeroTile label="High breach risk" value={predList.filter(p => p.breach_risk === "high" || p.risk === "high").length} icon={AlertTriangle} glow="rose" active={tab === "predictions"} onClick={() => selectTab("predictions")} testId="sla-metric-risk" />

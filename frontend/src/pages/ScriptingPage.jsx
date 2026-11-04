@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,6 +24,7 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatDistanceToNow } from "date-fns";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 function CodeBlock({ content, language }) {
   const [copied, setCopied] = useState(false);
@@ -480,19 +481,16 @@ export default function ScriptingPage() {
 
   return (
     <div className="space-y-6" data-testid="scripting-page">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Scripting & Automation</h1>
-          <p className="text-muted-foreground">Script library, agent execution, and scheduled automation</p>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader eyebrow="Automation engineering · controlled execution" title="Scripting & Automation" description="Create, review and run agent scripts with schedules, execution evidence and explicit technician control." icon={Terminal} tone="violet" signal={executions.some(execution => execution.status === "running") ? "working" : executions.some(execution => execution.status === "failed") ? "attention" : "ready"} actions={<>
           <Button variant="outline" onClick={() => navigate("/git-scripts")} data-testid="open-git-scripts-btn"><BookOpen className="w-4 h-4 mr-2" />Git scripts</Button>
           <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
+          <Button onClick={() => setIsDialogOpen(true)} data-testid="create-script-btn"><Plus className="w-4 h-4 mr-2" />New Script</Button>
+        </>} />
           <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
-            <DialogTrigger asChild><Button data-testid="create-script-btn"><Plus className="w-4 h-4 mr-2" />New Script</Button></DialogTrigger>
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>{selectedScript ? "Edit Script" : "Create Script"}</DialogTitle></DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
+            <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+              <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-violet-400/15 via-violet-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>{selectedScript ? "Edit Script" : "Create Script"}</DialogTitle></DialogHeader>
+              <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2"><Label>Name *</Label><Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="Clear Temp Files" required /></div>
                   <div className="space-y-2"><Label>Category</Label>
@@ -526,12 +524,11 @@ export default function ScriptingPage() {
                     placeholder={formData.script_type === 'powershell' ? '# PowerShell script\nGet-Process | Where-Object { $_.CPU -gt 100 }' : '#!/bin/bash\necho "Hello World"'}
                     className="font-mono text-sm min-h-[200px]" required />
                 </div>
-                <DialogFooter><Button type="submit">{selectedScript ? "Update" : "Create Script"}</Button></DialogFooter>
+                </div>
+                <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button type="submit">{selectedScript ? "Update" : "Create Script"}</Button></DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -834,9 +831,9 @@ export default function ScriptingPage() {
       </Tabs>
 
       <Dialog open={Boolean(executionDetail)} onOpenChange={(open) => { if (!open) setExecutionDetail(null); }}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Execution audit</DialogTitle></DialogHeader>
-          {executionDetail && <div className="space-y-4">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>Execution audit</DialogTitle></DialogHeader>
+          {executionDetail && <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/20 p-3 text-xs sm:grid-cols-4">
               <div><p className="text-muted-foreground">Script</p><p className="mt-0.5 font-medium">{executionDetail.script_name || "Unknown script"}</p></div>
               <div><p className="text-muted-foreground">Target</p><p className="mt-0.5 font-medium">{executionDetail.device_name || executionDetail.device_id || "Not assigned"}</p></div>
@@ -882,9 +879,9 @@ export default function ScriptingPage() {
 
       {/* Schedule Dialog */}
       <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Create Scheduled Task</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-violet-400/15 via-violet-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>Create Scheduled Task</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div className="space-y-2"><Label>Task Name *</Label><Input value={scheduleForm.name} onChange={e => setScheduleForm({ ...scheduleForm, name: e.target.value })} placeholder="Daily disk cleanup" data-testid="schedule-name-input" /></div>
             <div className="space-y-2"><Label>Script *</Label>
               <Select value={scheduleForm.script_id} onValueChange={v => setScheduleForm({ ...scheduleForm, script_id: v })}>
@@ -919,11 +916,11 @@ export default function ScriptingPage() {
               </ScrollArea>
               <p className="text-xs text-muted-foreground">{scheduleForm.target_ids.length} online device{scheduleForm.target_ids.length === 1 ? "" : "s"} selected</p>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreateSchedule} disabled={!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0 || (scheduleForm.schedule_type === "weekly" && scheduleForm.schedule_days.length === 0)} data-testid="submit-schedule-btn">Create Schedule</Button>
-            </DialogFooter>
           </div>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
+            <Button variant="outline" onClick={() => setIsScheduleDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleCreateSchedule} disabled={!scheduleForm.name || !scheduleForm.script_id || scheduleForm.target_ids.length === 0 || (scheduleForm.schedule_type === "weekly" && scheduleForm.schedule_days.length === 0)} data-testid="submit-schedule-btn">Create Schedule</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

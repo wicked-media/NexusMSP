@@ -1,5 +1,5 @@
 {
-  "summary": "Huntress Labs API Integration - Complete Testing. All 14 backend tests PASSED. All frontend tests PASSED. Backend endpoints (/api/huntress/*) work correctly: status, settings (POST/DELETE), test-connection, summary, organizations, agents, incident-reports, signals. Frontend Huntress card in Settings → Integrations works correctly with save/test/remove functionality. HuntressSummaryCard on Security Dashboard displays correctly in both configured and not-configured states.",
+  "summary": "Huntress Labs API Integration - Complete Testing. All 14 backend tests PASSED. All frontend tests PASSED. Backend endpoints (/api/huntress/*) work correctly: status, settings (POST/DELETE), test-connection, summary, organizations, agents, incident-reports, signals. Frontend Huntress card in Settings â†’ Integrations works correctly with save/test/remove functionality. HuntressSummaryCard on Security Dashboard displays correctly in both configured and not-configured states.",
   "backend_issues": {
     "critical": [],
     "minor": []
@@ -24,7 +24,7 @@
     "/app/backend/tests/test_iteration111_huntress_integration.py"
   ],
   "success_rate": {"backend": "100% (14/14 tests passed)", "frontend": "100% - all UI tests passed"},
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required",
   "retest_needed": false,
   "should_main_agent_self_test": false,

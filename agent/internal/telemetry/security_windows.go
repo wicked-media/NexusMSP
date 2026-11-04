@@ -5,7 +5,42 @@ package telemetry
 import (
 	"encoding/json"
 	"os/exec"
+	"sync"
+	"time"
 )
+
+var windowsOperationsCache struct {
+	sync.Mutex
+	value *WindowsOperations
+	at    time.Time
+}
+
+// collectWindowsOperations runs at most once every fifteen minutes. Event logs
+// and service state are operational evidence, not live counters, so collecting
+// them on every heartbeat would add endpoint cost without adding fidelity.
+func collectWindowsOperations() *WindowsOperations {
+	windowsOperationsCache.Lock()
+	defer windowsOperationsCache.Unlock()
+	if windowsOperationsCache.value != nil && time.Since(windowsOperationsCache.at) < 15*time.Minute {
+		copy := *windowsOperationsCache.value
+		copy.FailedAutomaticServices = append([]string(nil), copy.FailedAutomaticServices...)
+		return &copy
+	}
+	const script = `$ErrorActionPreference='SilentlyContinue'; $since=(Get-Date).AddHours(-24); $week=(Get-Date).AddDays(-7); function CountLog($log,$filter){ @(Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue | Select-Object -First 5000).Count }; $system=CountLog 'System' @{LogName='System';StartTime=$since;Level=2}; $app=CountLog 'Application' @{LogName='Application';StartTime=$since;Level=2}; $critical=CountLog 'System' @{LogName='System';StartTime=$since;Level=1}; $shutdown=@(Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$week;Id=41,6008,1001} -ErrorAction SilentlyContinue | Select-Object -First 5000).Count; $update=@(Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-WindowsUpdateClient/Operational';StartTime=$week;Level=2} -ErrorAction SilentlyContinue | Select-Object -First 5000).Count; $failed=@(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | Where-Object {$_.StartMode -eq 'Auto' -and $_.State -ne 'Running'} | Select-Object -First 40 -ExpandProperty Name); $wu=(Get-Service -Name wuauserv -ErrorAction SilentlyContinue).Status; [pscustomobject]@{observed_at=(Get-Date).ToUniversalTime().ToString('o');system_error_count_24h=$system;application_error_count_24h=$app;critical_event_count_24h=$critical;unexpected_shutdown_count_7d=$shutdown;windows_update_failure_count_7d=$update;failed_automatic_services=$failed;windows_update_service_state=[string]$wu} | ConvertTo-Json -Compress -Depth 3`
+	output, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).Output()
+	if err != nil || len(output) == 0 {
+		return nil
+	}
+	var result WindowsOperations
+	if json.Unmarshal(output, &result) != nil {
+		return nil
+	}
+	if len(result.FailedAutomaticServices) > 40 {
+		result.FailedAutomaticServices = result.FailedAutomaticServices[:40]
+	}
+	windowsOperationsCache.value, windowsOperationsCache.at = &result, time.Now()
+	return &result
+}
 
 // collectSecurity uses built-in Windows APIs via PowerShell. It is intentionally
 // read-only: installing updates is a separate, approved maintenance action.

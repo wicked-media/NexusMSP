@@ -17,7 +17,7 @@ import CreateTicketFromLeadDialog from "./CreateTicketFromLeadDialog";
 import { STATUS_CONFIG, money, timeAgo } from "./leadHelpers";
 import { toast } from "sonner";
 
-export default function LeadDrawer({ leadId, onClose, onUpdated }) {
+export default function LeadDrawer({ leadId, canManage = false, onClose, onUpdated }) {
   const { token } = useAuth();
   const [lead, setLead] = useState(null);
   const [tab, setTab] = useState("overview");
@@ -159,7 +159,7 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
               </div>
             )}
 
-            <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-zinc-800">
+            {canManage ? <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-zinc-800">
               <Button size="sm" className="h-7 text-[11px] bg-violet-600 hover:bg-violet-500" onClick={() => setCreateTicketOpen(true)} data-testid="drawer-create-ticket-btn">
                 <Ticket className="w-3 h-3 mr-1" />Create ticket
               </Button>
@@ -176,7 +176,7 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
               <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => draft("winback")} disabled={draftingIntent != null}>
                 <Wand2 className="w-3 h-3 mr-1" />Winback
               </Button>
-            </div>
+            </div> : <div className="border-b border-zinc-800 px-4 py-2 text-[11px] text-zinc-500">Read-only lead access. A Nexus administrator can grant lead management from Team Hub permissions.</div>}
 
             <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col min-h-0">
               <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto px-2">
@@ -225,11 +225,11 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
                 </TabsContent>
 
                 <TabsContent value="tasks" className="m-0 space-y-2">
-                  <TaskForm onAdd={addTask} />
+                  {canManage && <TaskForm onAdd={addTask} />}
                   {tasks.length === 0 && <p className="text-xs text-zinc-500">No tasks yet.</p>}
                   {tasks.map(t => (
                     <div key={t.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-zinc-900/40" data-testid={`task-${t.id}`}>
-                      <button onClick={() => toggleTask(t)} className={`w-4 h-4 rounded border flex items-center justify-center ${t.completed ? "bg-emerald-500/20 border-emerald-500/50" : "border-zinc-700"}`}>
+                      <button onClick={() => canManage && toggleTask(t)} disabled={!canManage} className={`w-4 h-4 rounded border flex items-center justify-center ${t.completed ? "bg-emerald-500/20 border-emerald-500/50" : "border-zinc-700"}`}>
                         {t.completed && <CheckCircle2 className="w-3 h-3 text-emerald-300" />}
                       </button>
                       <span className={`text-xs flex-1 ${t.completed ? "line-through text-zinc-500" : "text-zinc-200"}`}>{t.title}</span>
@@ -246,10 +246,10 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
                       <p className="text-xs font-semibold text-zinc-100 mb-2">Subject: {draftEmail.subject}</p>
                       <pre className="text-xs whitespace-pre-wrap font-sans text-zinc-200 leading-relaxed">{draftEmail.body}</pre>
                       <div className="flex items-center gap-2 mt-3">
-                        <Button size="sm" className="h-7 text-[11px] bg-violet-600 hover:bg-violet-500" onClick={sendDraft} disabled={sendingEmail || !lead.email} data-testid="drawer-send-email">
+                        {canManage && <Button size="sm" className="h-7 text-[11px] bg-violet-600 hover:bg-violet-500" onClick={sendDraft} disabled={sendingEmail || !lead.email} data-testid="drawer-send-email">
                           {sendingEmail ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Mail className="w-3 h-3 mr-1" />}
                           {lead.email ? `Send to ${lead.email}` : "No email address"}
-                        </Button>
+                        </Button>}
                         <Button size="sm" className="h-7 text-[11px] bg-emerald-600 hover:bg-emerald-500" onClick={() => { navigator.clipboard.writeText(`Subject: ${draftEmail.subject}\n\n${draftEmail.body}`); toast.success("Copied to clipboard"); }} data-testid="drawer-copy-email">
                           Copy to clipboard
                         </Button>
@@ -282,18 +282,18 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
           </>
         )}
       </aside>
-      <MergeLeadIntoTicketDialog
+      {canManage && <MergeLeadIntoTicketDialog
         open={mergeOpen}
         onClose={() => setMergeOpen(false)}
         lead={lead}
         onMerged={() => { loadAll(); onUpdated && onUpdated(); }}
-      />
-      <CreateTicketFromLeadDialog
+      />}
+      {canManage && <CreateTicketFromLeadDialog
         open={createTicketOpen}
         onClose={() => setCreateTicketOpen(false)}
         lead={lead}
         onCreated={() => { loadAll(); onUpdated && onUpdated(); }}
-      />
+      />}
     </>
   );
 }

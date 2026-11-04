@@ -1,6 +1,6 @@
 """Morning Check Email Report - sends a formatted NOC briefing via email"""
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
 from app.routers.email_utils import send_email, is_microsoft365_configured

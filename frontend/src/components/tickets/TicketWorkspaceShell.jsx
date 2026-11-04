@@ -2,18 +2,30 @@ import { Link, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
+import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuGroup,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
 import {
   Activity, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, FileText, Gauge,
-  LayoutList, MapPinned, MessageSquare, MoreHorizontal, Paperclip,
-  ShieldCheck, ShoppingCart, Sparkles, Wrench,
+  LayoutList, MapPinned, MessageSquare, MoreHorizontal, Paperclip, RotateCcw,
+  ShieldCheck, ShoppingCart, Sparkles, Target, Wrench,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  LEARNING_VIEW,
+  learningHint,
+  promotedItems,
+  rankByUse,
+} from "@/lib/workspaceLearning";
 import { TICKET_MODULES, TICKET_WORKSPACE_TOOLS, ticketModuleForPath, ticketWorkspaceToolForPath } from "@/lib/ticketWorkspaceHelpers";
+
+// No memory yet: every ranking helper treats an empty index as no evidence.
+const NO_EVIDENCE = new Map();
 
 const MODULE_ICONS = {
   queue: LayoutList,
@@ -22,21 +34,76 @@ const MODULE_ICONS = {
   dispatch: MapPinned,
 };
 
-export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", actions, children }) {
+// The desk-tools menu is grouped by technician workflow, so learning reorders
+// the tools inside each group rather than dissolving the grouping. A hand-
+// authored group still says what kind of work the tools belong to.
+const TOOL_GROUPS = ["Repeatable work", "Assignment & escalation", "Historical records"];
+
+/**
+ * Ticket module header, shared by the queue, triage, SLA and dispatch modules.
+ *
+ * The desk-tools menu holds the ticket-delivery tools. Nexus remembers which of
+ * them a technician actually opens and orders each group around that evidence,
+ * so the tool they live in stops being the third thing they scan for. No tool is
+ * ever removed, and with no evidence the menu is exactly the order this file
+ * declares.
+ */
+export function TicketModuleHeader({
+  title,
+  subtitle,
+  eyebrow = "Service desk",
+  actions,
+  children,
+  signal,
+  signalLabel,
+  signalDescription,
+  personal = NO_EVIDENCE,
+  team = NO_EVIDENCE,
+  onRecordAction,
+  onForgetLearning,
+}) {
   const location = useLocation();
   const active = ticketModuleForPath(location.pathname);
   const activeTool = ticketWorkspaceToolForPath(location.pathname);
+  const ActiveIcon = MODULE_ICONS[active] || LayoutList;
+  const rankOptions = { surface: LEARNING_VIEW, personal, team, idOf: (tool) => tool.id };
+  const groups = TOOL_GROUPS.map((group) => ({
+    group,
+    declared: TICKET_WORKSPACE_TOOLS.filter((tool) => tool.group === group),
+  })).map((entry) => ({ ...entry, tools: rankByUse(entry.declared, rankOptions) }));
+  // Nexus only claims to have adapted the menu when the ranking really changed
+  // it; evidence that leaves every group exactly as declared is not a change.
+  const adapted = groups.some((entry) => entry.tools.some((tool, index) => tool !== entry.declared[index]));
+  const hint = learningHint({ surface: LEARNING_VIEW, personal, team });
+
+  const forgetLearning = async () => {
+    try {
+      const removed = await onForgetLearning?.();
+      toast.success(`${removed || 0} learned tool signal${removed === 1 ? "" : "s"} forgotten`, {
+        description: "The desk-tools menu is back to the Nexus default order and will learn again from your next visit.",
+      });
+    } catch {
+      toast.error("Nexus could not forget the learned ordering. Nothing has been changed.");
+    }
+  };
+
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-testid="ticket-module-header">
-      <div className="flex flex-col gap-4 border-b border-white/[0.06] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400">{eyebrow}</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100">{title}</h1>
-          {subtitle && <p className="mt-1 max-w-3xl text-sm text-zinc-500">{subtitle}</p>}
-        </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-      </div>
-      <nav className="flex items-center gap-1 overflow-x-auto px-3 py-2" aria-label="Ticketing modules">
+    <section className="nx-ticket-module-shell" data-testid="ticket-module-header">
+      <NexusWorkspaceHeader
+        eyebrow={eyebrow}
+        title={title}
+        description={subtitle}
+        icon={ActiveIcon}
+        tone="violet"
+        actions={actions}
+        signal={signal}
+        signalLabel={signalLabel}
+        signalDescription={signalDescription}
+        showBack={false}
+        variant="module"
+        testId="ticket-workspace-header"
+      />
+      <nav className="nx-ticket-module-nav" aria-label="Ticketing modules">
         {TICKET_MODULES.map(module => {
           const Icon = MODULE_ICONS[module.id];
           const selected = active === module.id;
@@ -44,24 +111,52 @@ export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", 
             <Link
               key={module.id}
               to={module.path}
-              className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium transition ${selected ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/25" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"}`}
+              className="nx-ticket-module-nav__item"
+              data-active={selected ? "true" : "false"}
               aria-current={selected ? "page" : undefined}
               data-testid={`ticket-module-${module.id}`}
             >
-              <Icon className="h-3.5 w-3.5" />{module.label}
+              <Icon />
+              <span><strong>{module.label}</strong><small>{module.description}</small></span>
             </Link>
           );
         })}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className={`h-9 shrink-0 gap-1.5 px-3 text-xs ${activeTool ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/25" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"}`} data-testid="ticket-module-more">
-              <MoreHorizontal className="h-3.5 w-3.5" />{activeTool?.label || "More"}<ChevronDown className="h-3 w-3 opacity-60" />
+            <Button variant="outline" size="sm" className={`nx-ticket-module-nav__tools ${activeTool ? "is-active" : ""}`} data-testid="ticket-module-more">
+              <MoreHorizontal className="h-3.5 w-3.5" />{activeTool?.label || "Desk tools"}<ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            {TICKET_WORKSPACE_TOOLS.map(tool => <DropdownMenuItem key={tool.id} asChild className={activeTool?.id === tool.id ? "bg-violet-500/10 text-violet-200" : ""}>
-              <Link to={tool.path}>{tool.label}</Link>
-            </DropdownMenuItem>)}
+          <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-2">
+            {hint && adapted && (
+              <DropdownMenuLabel
+                className="flex items-center gap-1.5 pb-1 pt-2 text-[10px] font-medium text-violet-300"
+                data-testid="ticket-tools-learning"
+                data-learning-tone={hint.tone}
+                title={hint.detail}
+              >
+                <Sparkles className="h-3 w-3" />{hint.label}
+              </DropdownMenuLabel>
+            )}
+            {groups.map(entry => (
+              <DropdownMenuGroup key={entry.group}>
+                <DropdownMenuLabel className="pb-1 pt-3 text-[10px] uppercase tracking-wider text-muted-foreground">{entry.group}</DropdownMenuLabel>
+                {entry.tools.map(tool => <DropdownMenuItem key={tool.id} asChild className={`rounded-lg px-3 py-2.5 ${activeTool?.id === tool.id ? "bg-violet-500/10 text-violet-200" : ""}`} data-testid={`ticket-tool-${tool.id}`} onSelect={() => onRecordAction?.(LEARNING_VIEW, tool.id)}>
+                  <Link to={tool.path} className="flex flex-col items-start gap-1" aria-current={activeTool?.id === tool.id ? "page" : undefined}>
+                    <span className="text-xs font-medium">{tool.label}</span>
+                    <span className="text-[11px] leading-4 text-muted-foreground">{tool.description}</span>
+                  </Link>
+                </DropdownMenuItem>)}
+              </DropdownMenuGroup>
+            ))}
+            {hint && adapted && onForgetLearning && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => forgetLearning()} className="gap-2 text-muted-foreground" data-testid="ticket-tools-forget-learning" title="Return the desk-tools menu to the Nexus default order and clear what Nexus learned about your tools">
+                  <RotateCcw className="mr-2 h-3.5 w-3.5" />Forget learned ordering
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         {children}
@@ -80,28 +175,93 @@ const PRIMARY_TABS = [
 
 const MORE_TABS = [
   { value: "blueprint", label: "Blueprint / worksheet", icon: FileText },
-  { value: "suggestions", label: "Suggested fixes", icon: Sparkles },
+  { value: "suggestions", label: "Historical matches", icon: Sparkles },
+  { value: "devices", label: "Endpoint actions", icon: Gauge },
   { value: "items", label: "Products & billing", icon: Wrench, countKey: "items" },
   { value: "procurement", label: "Procurement & cost", icon: ShoppingCart, countKey: "procurement" },
   { value: "children", label: "Related tickets", icon: LayoutList, countKey: "children" },
+  { value: "flow", label: "Outcome & flow", icon: Target },
   { value: "audit", label: "Audit log", icon: ShieldCheck },
 ];
 
-export function TicketWorkspaceTabs({ activeTab, onTabChange, counts = {} }) {
-  const moreActive = MORE_TABS.find(tab => tab.value === activeTab);
+/**
+ * How many tabs may sit in the visible bar. Learning adds slots for the views a
+ * technician actually opens (so a tab they live in stops hiding behind More),
+ * but the bar is capped: beyond this the tab bar stops being scannable and the
+ * rest of the views stay one menu away.
+ */
+const MAX_VISIBLE_TABS = PRIMARY_TABS.length + 2;
+
+/**
+ * Ticket detail tab bar.
+ *
+ * Nexus remembers which detail view a technician opens and which ones the team
+ * opens, and orders the bar around that evidence: a view the technician really
+ * uses moves to the front, and one that deserves a place in the bar is promoted
+ * out of the More menu. Every view stays reachable from the same menu it was in
+ * before, and with no evidence the bar is exactly the order this file declares.
+ */
+export function TicketWorkspaceTabs({
+  activeTab,
+  onTabChange,
+  counts = {},
+  personal = NO_EVIDENCE,
+  team = NO_EVIDENCE,
+  onRecordAction,
+  onForgetLearning,
+}) {
+  // One catalogue, so a promoted view competes with the views already in the bar
+  // instead of merely being appended to them.
+  const catalogue = [...PRIMARY_TABS, ...MORE_TABS];
+  const rankOptions = { surface: LEARNING_VIEW, personal, team, idOf: (tab) => tab.value };
+  const ranked = rankByUse(catalogue, rankOptions);
+  const promoted = promotedItems(MORE_TABS, rankOptions).length;
+  const visibleCount = Math.min(MAX_VISIBLE_TABS, PRIMARY_TABS.length + promoted);
+  const visible = ranked.slice(0, visibleCount);
+  const overflow = ranked.slice(visibleCount);
+  const hint = learningHint({ surface: LEARNING_VIEW, personal, team });
+  // The More trigger reports the overflow view it is holding, not the declared
+  // menu, so a promoted tab no longer names the menu it just left.
+  const moreActive = overflow.find(tab => tab.value === activeTab);
+
+  const record = (tab) => onRecordAction?.(LEARNING_VIEW, tab.value);
+
+  const forgetLearning = async () => {
+    try {
+      const removed = await onForgetLearning?.();
+      toast.success(`${removed || 0} learned tab signal${removed === 1 ? "" : "s"} forgotten`, {
+        description: "The tab bar is back to the Nexus default order and will learn again from your next visit.",
+      });
+    } catch {
+      toast.error("Nexus could not forget the learned ordering. Nothing has been changed.");
+    }
+  };
+
   return (
     <div className="flex items-center gap-1 border-b border-white/[0.08]" data-testid="ticket-workspace-tabs">
       <TabsList className="ticket-workspace-scroll h-auto flex-1 justify-start gap-0 overflow-x-auto rounded-none bg-transparent p-0">
-        {PRIMARY_TABS.map(tab => {
+        {visible.map(tab => {
           const Icon = tab.icon;
           const count = tab.countKey ? counts[tab.countKey] : null;
           return (
-            <TabsTrigger key={tab.value} value={tab.value} className="h-10 shrink-0 rounded-none border-b-2 border-transparent px-3 text-xs font-medium text-zinc-500 shadow-none transition-colors hover:bg-white/[0.035] hover:text-zinc-200 data-[state=active]:border-violet-400 data-[state=active]:bg-transparent data-[state=active]:text-zinc-100 data-[state=active]:shadow-none">
+            <TabsTrigger key={tab.value} value={tab.value} onClick={() => record(tab)} className="h-10 shrink-0 rounded-none border-b-2 border-transparent px-3 text-xs font-medium text-zinc-500 shadow-none transition-colors hover:bg-white/[0.035] hover:text-zinc-200 data-[state=active]:border-violet-400 data-[state=active]:bg-transparent data-[state=active]:text-zinc-100 data-[state=active]:shadow-none">
               <Icon className="mr-1.5 h-3.5 w-3.5" />{tab.label}{count != null && <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full bg-white/[0.05] px-1 text-[9px] text-zinc-500">{count}</span>}
             </TabsTrigger>
           );
         })}
       </TabsList>
+      {hint && (
+        <Badge
+          variant="outline"
+          data-testid="ticket-workspace-tabs-learning"
+          data-learning-tone={hint.tone}
+          title={hint.detail}
+          className="h-6 shrink-0 gap-1 border-violet-400/25 bg-violet-500/[0.07] px-2 text-[10px] font-medium text-violet-300"
+        >
+          <Sparkles className="h-3 w-3" />
+          {hint.label}
+        </Badge>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="sm" className={`h-10 shrink-0 gap-1.5 rounded-none border-b-2 border-transparent px-3 text-xs ${moreActive ? "border-violet-400 bg-transparent text-zinc-100" : "text-zinc-500 hover:bg-white/[0.035] hover:text-zinc-200"}`} data-testid="ticket-more-tabs">
@@ -109,10 +269,18 @@ export function TicketWorkspaceTabs({ activeTab, onTabChange, counts = {} }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          {MORE_TABS.map(tab => {
+          {overflow.map(tab => {
             const Icon = tab.icon;
-            return <DropdownMenuItem key={tab.value} onSelect={() => onTabChange(tab.value)} className={activeTab === tab.value ? "bg-violet-500/10 text-violet-200" : ""}><Icon className="mr-2 h-3.5 w-3.5" />{tab.label}{tab.countKey && <Badge variant="outline" className="ml-auto h-4 px-1.5 text-[9px]">{counts[tab.countKey] || 0}</Badge>}</DropdownMenuItem>;
+            return <DropdownMenuItem key={tab.value} onSelect={() => { record(tab); onTabChange(tab.value); }} className={activeTab === tab.value ? "bg-violet-500/10 text-violet-200" : ""}><Icon className="mr-2 h-3.5 w-3.5" />{tab.label}{tab.countKey && <Badge variant="outline" className="ml-auto h-4 px-1.5 text-[9px]">{counts[tab.countKey] || 0}</Badge>}</DropdownMenuItem>;
           })}
+          {hint && onForgetLearning && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => forgetLearning()} className="gap-2 text-muted-foreground" data-testid="ticket-forget-learning" title="Return the tab bar to the Nexus default order and clear what Nexus learned about your views">
+                <RotateCcw className="mr-2 h-3.5 w-3.5" />Forget learned ordering
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

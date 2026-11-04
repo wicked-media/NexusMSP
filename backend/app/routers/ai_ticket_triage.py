@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import uuid, os
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -10,9 +11,10 @@ router = APIRouter()
 @router.post("/tickets/{ticket_id}/ai-triage")
 async def ai_triage_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Use GPT to analyze a ticket and suggest category, priority, assignment, and resolution."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.ai_triage.use", resource_name="Ticket",
+    )
 
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
@@ -21,7 +23,10 @@ async def ai_triage_ticket(ticket_id: str, current_user: dict = Depends(get_curr
     from app.services.ai_provider import LlmChat, UserMessage
 
     # Get technicians for assignment suggestion
-    techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1, "specialties": 1}).to_list(50)
+    techs = await db.users.find(
+        tenant_scoped_query(current_user, {"role": {"$in": ["technician", "admin"]}}),
+        {"_id": 0, "id": 1, "name": 1, "specialties": 1},
+    ).to_list(50)
     tech_list = ", ".join([f"{t['name']} (specialties: {', '.join(t.get('specialties', []))})" for t in techs[:10]])
 
     prompt = f"""Analyze this IT support ticket and provide triage recommendations.
@@ -82,7 +87,9 @@ Respond in this exact JSON format only, no other text:
     # Save triage result
     triage_record = {
         "id": f"triage-{uuid.uuid4().hex[:8]}",
+        "tenant_id": ticket.get("tenant_id") or platform_tenant_id(current_user),
         "ticket_id": ticket_id,
+        "client_id": ticket.get("client_id"),
         "triage_data": triage,
         "triaged_by": current_user.get("name", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -95,9 +102,10 @@ Respond in this exact JSON format only, no other text:
 @router.post("/tickets/{ticket_id}/ai-triage/apply")
 async def apply_ai_triage(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Apply AI triage suggestions to a ticket."""
-    ticket = await db.tickets.find_one({"id": ticket_id})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.ai_triage.apply", resource_name="Ticket",
+    )
 
     update = {}
     if data.get("priority"):
@@ -105,7 +113,9 @@ async def apply_ai_triage(ticket_id: str, data: dict, current_user: dict = Depen
     if data.get("category"):
         update["category"] = data["category"]
     if data.get("assigned_to"):
-        tech = await db.users.find_one({"name": data["assigned_to"]}, {"_id": 0})
+        tech = await db.users.find_one(
+            tenant_scoped_query(current_user, {"name": data["assigned_to"]}), {"_id": 0}
+        )
         if tech:
             update["assigned_to"] = tech["id"]
             update["assigned_name"] = tech["name"]
@@ -114,14 +124,14 @@ async def apply_ai_triage(ticket_id: str, data: dict, current_user: dict = Depen
 
     if update:
         update["updated_at"] = datetime.now(timezone.utc).isoformat()
-        await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+        await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": update})
 
     return {"message": "AI triage applied", "updates": update}
 
 
 @router.get("/ai-triage/stats")
 async def get_triage_stats(current_user: dict = Depends(get_current_user)):
-    total = await db.ai_triage_logs.count_documents({})
+    total = await db.ai_triage_logs.count_documents(tenant_scoped_query(current_user))
     return {"total_triages": total}
 
 
@@ -171,10 +181,15 @@ async def keyword_triage_ticket(body: dict, current_user: dict = Depends(get_cur
     triage = _keyword_triage(title, description)
 
     # Auto-route to best tech based on workload
-    techs = await db.users.find({"role": {"$in": ["admin", "technician"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
+    techs = await db.users.find(
+        tenant_scoped_query(current_user, {"role": {"$in": ["admin", "technician"]}}),
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(20)
     scored = []
     for t in techs:
-        load = await db.tickets.count_documents({"assigned_to": t["id"], "status": {"$in": ["open", "in_progress"]}})
+        load = await db.tickets.count_documents(
+            tenant_scoped_query(current_user, {"assigned_to": t["id"], "status": {"$in": ["open", "in_progress"]}})
+        )
         scored.append({"tech_id": t["id"], "tech_name": t["name"], "workload": load, "score": max(0, 100 - load * 10)})
     scored.sort(key=lambda x: x["score"], reverse=True)
 
@@ -204,5 +219,9 @@ async def auto_route_ticket(data: dict, current_user: dict = Depends(get_current
     if triage.get("tags"): update["tags"] = triage["tags"]
     update["ai_triaged"] = True
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.ai_triage.auto_route", resource_name="Ticket",
+    )
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": update})
     return {"message": "Ticket auto-routed", "updates": update}

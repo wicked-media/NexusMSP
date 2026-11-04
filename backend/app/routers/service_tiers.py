@@ -87,11 +87,19 @@ DEFAULT_TIERS = [
 
 
 async def _seed_if_empty():
-    count = await db.service_tiers.count_documents({})
-    if count == 0:
-        now = datetime.now(timezone.utc).isoformat()
-        for t in DEFAULT_TIERS:
-            await db.service_tiers.insert_one({**t, "created_at": now, "is_default": True})
+    """Idempotent default-tier seeding.
+
+    Concurrent first requests must never double-insert the defaults. Each tier is
+    upserted on its stable ``id`` with ``$setOnInsert``, so this is safe under any
+    race and never overwrites a tier an admin has since edited or deactivated.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    for t in DEFAULT_TIERS:
+        await db.service_tiers.update_one(
+            {"id": t["id"]},
+            {"$setOnInsert": {**t, "created_at": now, "is_default": True}},
+            upsert=True,
+        )
 
 
 async def _is_admin(user_id: str) -> bool:
@@ -119,8 +127,18 @@ def _tier_sla_due(ticket: dict, resolution_minutes: int) -> str:
 @router.get("/service-tiers")
 async def list_service_tiers(current_user: dict = Depends(get_current_user)):
     await _seed_if_empty()
-    tiers = await db.service_tiers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
-    return tiers
+    tiers = await db.service_tiers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(500)
+    # Collapse any duplicate ids left behind by the old double-seed race so every
+    # client always sees exactly one row per tier. First by sort order wins.
+    seen: set[str] = set()
+    unique = []
+    for tier in tiers:
+        tier_id = tier.get("id")
+        if tier_id in seen:
+            continue
+        seen.add(tier_id)
+        unique.append(tier)
+    return unique
 
 
 @router.get("/service-tiers/{tier_id}")

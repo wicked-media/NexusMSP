@@ -28,13 +28,15 @@ export default function AnomalyInbox() {
   const navigate = useNavigate();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [observed, setObserved] = useState(false);
 
   useEffect(() => {
     let live = true;
     const tick = () => axios.get(`${API}/devices/anomalies?limit=20`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => { if (live) setList(r.data?.anomalies || []); }).catch(() => {});
+      .then(r => { if (live) { setList(r.data?.anomalies || []); setObserved(true); } })
+      .catch(() => { if (live) setObserved(false); })
+      .finally(() => { if (live) setLoading(false); });
     tick();
-    setLoading(false);
     const id = setInterval(tick, 25000);
     return () => { live = false; clearInterval(id); };
   }, [token]);
@@ -49,7 +51,7 @@ export default function AnomalyInbox() {
         <span className="ml-auto text-[10px] text-zinc-500">{list.length}</span>
       </div>
       <div className="max-h-[260px] overflow-y-auto">
-        {list.length === 0 && <p className="px-3 py-4 text-[11px] text-zinc-500">No anomalies right now.</p>}
+        {list.length === 0 && <div className="px-3 py-5 text-[11px] text-zinc-500"><p className="font-medium text-zinc-400">{observed ? "No observed anomalies in your accessible fleet." : "Anomaly evidence is unavailable."}</p><p className="mt-1 leading-relaxed">{observed ? "Nexus will surface recorded endpoint alerts here; it does not invent incidents to fill the queue." : "Refresh this panel before making an incident decision."}</p></div>}
         {list.map(a => (
           <button
             key={a.id}

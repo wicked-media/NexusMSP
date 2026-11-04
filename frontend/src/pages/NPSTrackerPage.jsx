@@ -4,21 +4,31 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { Users, Loader2, MessageSquare, RefreshCw, ThumbsUp, ThumbsDown, Minus } from "lucide-react";
+import { Users, MessageSquare, RefreshCw, ThumbsUp, ThumbsDown, Minus } from "lucide-react";
+import { ErrorState, LoadingState } from "@/components/design-system";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function NPSTrackerPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try { setData((await axios.get(`${API}/nps-tracker/overview`, { headers: { Authorization: `Bearer ${token}` } })).data); }
+    catch (loadError) {
+      // Previously a failed read left `data` null and the spinner ran forever.
+      setError(apiErrorMessage(loadError, "Nexus could not read the recorded NPS responses."));
+    }
     finally { setLoading(false); }
   }, [token]);
   useEffect(() => { load(); }, [load]);
 
-  if (loading || !data) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+  if (loading || error || !data) return <div className="space-y-5" data-testid="nps-tracker-page">{error
+    ? <Card className="border-rose-500/20 bg-rose-500/[0.04]"><ErrorState error={error} title="NPS evidence could not be read" description="Nexus withholds a satisfaction score it could not read rather than showing a reassuring zero. Recorded responses are unchanged." icon={<MessageSquare className="h-7 w-7" />} retryLabel="Retry" onRetry={load} /></Card>
+    : <LoadingState label="Reading recorded NPS responses…" rows={4} />}</div>;
   const s = data.summary || {};
   const evidenceAvailable = data.evidence_state === "evidence_available";
   const scoreColour = s.nps_score >= 50 ? "text-emerald-400" : s.nps_score >= 0 ? "text-amber-400" : "text-red-400";
@@ -36,7 +46,7 @@ export default function NPSTrackerPage() {
           <Metric label="Detractors (0–6)" value={s.detractors} colour="text-red-400" icon={ThumbsDown} />
         </div>
         {data.trend?.length > 0 && <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recorded NPS trend</CardTitle></CardHeader><CardContent><ResponsiveContainer width="100%" height={250}><LineChart data={data.trend}><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, color: "hsl(var(--card-foreground))" }} /><Line type="monotone" connectNulls={false} dataKey="nps" stroke="#38bdf8" strokeWidth={2} dot={{ fill: "#38bdf8" }} name="NPS score" /></LineChart></ResponsiveContainer></CardContent></Card>}
-        <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recent responses</CardTitle></CardHeader><CardContent><div className="space-y-2">{data.surveys.slice(0, 15).map(survey => <div key={survey.id} className="flex items-center gap-4 rounded-lg p-2 hover:bg-muted/50"><div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${survey.score >= 9 ? "bg-emerald-500/20 text-emerald-400" : survey.score >= 7 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"}`}>{survey.score}</div><div className="flex-1"><div className="text-sm font-medium">{survey.respondent || "Respondent"}</div><div className="text-xs text-muted-foreground">{survey.client_name || "Unassigned client"}</div></div><div className="max-w-md truncate text-sm text-muted-foreground">{survey.feedback || "No feedback"}</div><span className="text-xs text-muted-foreground">{survey.submitted_at ? new Date(survey.submitted_at).toLocaleDateString() : ""}</span></div>)}</div></CardContent></Card>
+        <Card><CardHeader className="pb-2"><CardTitle className="text-base">Recent responses</CardTitle></CardHeader><CardContent><div className="space-y-2">{(data.surveys || []).slice(0, 15).map(survey => <div key={survey.id} className="flex items-center gap-4 rounded-lg p-2 hover:bg-muted/50"><div className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${survey.score >= 9 ? "bg-emerald-500/20 text-emerald-400" : survey.score >= 7 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400"}`}>{survey.score}</div><div className="flex-1"><div className="text-sm font-medium">{survey.respondent || "Respondent"}</div><div className="text-xs text-muted-foreground">{survey.client_name || "Unassigned client"}</div></div><div className="max-w-md truncate text-sm text-muted-foreground">{survey.feedback || "No feedback"}</div><span className="text-xs text-muted-foreground">{survey.submitted_at ? new Date(survey.submitted_at).toLocaleDateString() : ""}</span></div>)}</div></CardContent></Card>
       </>}
     </div>
   );

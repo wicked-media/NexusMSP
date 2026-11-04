@@ -18,7 +18,7 @@ Endpoints:
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import Response
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import os
 import re
 import json
@@ -28,6 +28,13 @@ import jwt
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.services.nexus_document_pdf import render_nexus_document_pdf
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -62,9 +69,12 @@ def _quarter_window(label: str | None):
     return f"{year}-Q{q}", start, end
 
 
-async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
+async def _gather_qbr_data(client_id: str, start: datetime, end: datetime, current_user: dict):
     """Aggregate raw operational data for the client across the quarter."""
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    client = await assert_tenant_record_scope(
+        current_user, db.clients, client_id,
+        operation="qbr.generate", resource_name="Client",
+    )
     if not client:
         raise HTTPException(404, "Client not found")
 
@@ -72,14 +82,14 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
     e_iso = end.isoformat()
 
     # Tickets opened in the quarter
-    tix = await db.tickets.find({
+    tix = await db.tickets.find(tenant_scoped_query(current_user, {
         "client_id": client_id,
         "$or": [
             {"created_at": {"$gte": s_iso, "$lt": e_iso}},
             {"resolved_at": {"$gte": s_iso, "$lt": e_iso}},
             {"updated_at": {"$gte": s_iso, "$lt": e_iso}},
         ],
-    }, {"_id": 0, "id": 1, "title": 1, "priority": 1, "category": 1, "status": 1,
+    }), {"_id": 0, "id": 1, "title": 1, "priority": 1, "category": 1, "status": 1,
         "created_at": 1, "resolved_at": 1, "sla_breached": 1, "ticket_number": 1}).limit(2000).to_list(2000)
 
     by_priority = {"critical": 0, "high": 0, "medium": 0, "low": 0}
@@ -100,61 +110,64 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
     top_issues = sorted(by_category.items(), key=lambda kv: -kv[1])[:5]
 
     # Device health snapshot (live)
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "id": 1, "status": 1, "device_type": 1}).to_list(500)
+    devices = await db.devices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "id": 1, "status": 1, "device_type": 1}).to_list(500)
     dev_online = sum(1 for d in devices if d.get("status") == "online")
     dev_warning = sum(1 for d in devices if d.get("status") == "warning")
     dev_offline = sum(1 for d in devices if d.get("status") == "offline")
 
     # Backup health
-    bk_failed = await db.backup_status.count_documents({"client_id": client_id, "backup_health": "failed"}) if "backup_status" in await db.list_collection_names() else 0
-    bk_ok = await db.backup_status.count_documents({"client_id": client_id, "backup_health": {"$in": ["healthy", "ok"]}}) if "backup_status" in await db.list_collection_names() else 0
+    bk_failed = await db.backup_status.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "backup_health": "failed"})) if "backup_status" in await db.list_collection_names() else 0
+    bk_ok = await db.backup_status.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "backup_health": {"$in": ["healthy", "ok"]}})) if "backup_status" in await db.list_collection_names() else 0
 
     # Active critical alerts
-    alerts = await db.alerts.count_documents({"client_id": client_id, "severity": "critical"}) if "alerts" in await db.list_collection_names() else 0
+    alerts = await db.alerts.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "severity": "critical"})) if "alerts" in await db.list_collection_names() else 0
 
     # Spend
-    invoices = await db.invoices.find({
+    invoices = await db.invoices.find(tenant_scoped_query(current_user, {
         "client_id": client_id,
         "issue_date": {"$gte": s_iso[:10], "$lt": e_iso[:10]},
-    }, {"_id": 0, "total": 1, "status": 1}).to_list(500)
+    }), {"_id": 0, "total": 1, "status": 1}).to_list(500)
     spend_total = sum(float(i.get("total") or 0) for i in invoices)
 
-    # Cross-client patterns that touched this client this quarter
+    # Cross-client patterns are MSP-level intelligence.  A technician with a
+    # restricted client scope must not infer another customer's ticket volume
+    # or incident patterns from a client-facing QBR.
     pattern_hits = []
-    try:
-        from app.routers.blueprints import _bigrams, _tokens
-        cross_tix = await db.tickets.find({
-            "status": {"$in": ["resolved", "closed"]},
-            "$or": [
-                {"resolved_at": {"$gte": s_iso, "$lt": e_iso}},
-                {"updated_at": {"$gte": s_iso, "$lt": e_iso}},
-            ],
-        }, {"_id": 0, "id": 1, "title": 1, "client_id": 1}).limit(2000).to_list(2000)
-        pool = {}
-        for t in cross_tix:
-            seen = set()
-            for bg in _bigrams(_tokens(t.get("title", ""))):
-                if bg in seen:
+    if effective_scope(current_user)["mode"] == "all":
+        try:
+            from app.routers.blueprints import _bigrams, _tokens
+            cross_tix = await db.tickets.find(tenant_scoped_query(current_user, {
+                "status": {"$in": ["resolved", "closed"]},
+                "$or": [
+                    {"resolved_at": {"$gte": s_iso, "$lt": e_iso}},
+                    {"updated_at": {"$gte": s_iso, "$lt": e_iso}},
+                ],
+            }), {"_id": 0, "id": 1, "title": 1, "client_id": 1}).limit(2000).to_list(2000)
+            pool = {}
+            for t in cross_tix:
+                seen = set()
+                for bg in _bigrams(_tokens(t.get("title", ""))):
+                    if bg in seen:
+                        continue
+                    seen.add(bg)
+                    pool.setdefault(bg, []).append(t)
+            # Find patterns where multiple clients are affected AND THIS client is one of them.
+            for bg, tickets in pool.items():
+                clients = {x.get("client_id") for x in tickets if x.get("client_id")}
+                if client_id not in clients or len(clients) < 2 or len(tickets) < 3:
                     continue
-                seen.add(bg)
-                pool.setdefault(bg, []).append(t)
-        # Find patterns where multiple clients are affected AND THIS client is one of them
-        for bg, tickets in pool.items():
-            clients = {x.get("client_id") for x in tickets if x.get("client_id")}
-            if client_id not in clients or len(clients) < 2 or len(tickets) < 3:
-                continue
-            mine = sum(1 for x in tickets if x.get("client_id") == client_id)
-            pattern_hits.append({
-                "name": f"{bg[0].title()} {bg[1].title()}",
-                "tokens": list(bg),
-                "client_tickets": mine,
-                "msp_tickets": len(tickets),
-                "msp_clients": len(clients),
-            })
-        pattern_hits.sort(key=lambda p: -p["client_tickets"])
-        pattern_hits = pattern_hits[:3]
-    except Exception:
-        pattern_hits = []
+                mine = sum(1 for x in tickets if x.get("client_id") == client_id)
+                pattern_hits.append({
+                    "name": f"{bg[0].title()} {bg[1].title()}",
+                    "tokens": list(bg),
+                    "client_tickets": mine,
+                    "msp_tickets": len(tickets),
+                    "msp_clients": len(clients),
+                })
+            pattern_hits.sort(key=lambda p: -p["client_tickets"])
+            pattern_hits = pattern_hits[:3]
+        except Exception:
+            pattern_hits = []
 
     return {
         "client_name": client.get("name"),
@@ -174,7 +187,7 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
 def _format_qbr_prompt(quarter: str, snap: dict) -> str:
     pat_lines = "\n".join([
         f"  - '{p['name']}': {p['client_tickets']} tickets at this client (this issue affected "
-        f"{p['msp_clients']} other MSP clients Â· {p['msp_tickets']} total) â€” recommend rolling out a Blueprint."
+        f"{max(0, int(p['msp_clients']) - 1)} other managed clients Â· {p['msp_tickets']} total) â€” recommend rolling out a Blueprint."
         for p in snap.get("pattern_hits", [])
     ]) or "  - none significant"
     top = "\n".join([f"  - {t['category']}: {t['count']}" for t in snap.get("top_issues", [])]) or "  - none"
@@ -202,7 +215,7 @@ def _format_qbr_prompt(quarter: str, snap: dict) -> str:
 async def generate_qbr(client_id: str, quarter: str | None = None, current_user: dict = Depends(get_current_user)):
     """Draft a QBR for the client + quarter. Returns AI prose + structured snapshot."""
     quarter_label, start, end = _quarter_window(quarter)
-    snap = await _gather_qbr_data(client_id, start, end)
+    snap = await _gather_qbr_data(client_id, start, end, current_user)
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -271,10 +284,11 @@ async def save_qbr(client_id: str, data: dict, current_user: dict = Depends(get_
     if not quarter or not sections:
         raise HTTPException(400, "quarter and sections required")
 
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    client = await assert_tenant_record_scope(current_user, db.clients, client_id, operation="qbr.save", resource_name="Client")
     doc = {
         "id": f"qbr-{uuid.uuid4().hex[:12]}",
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "client_name": (client or {}).get("name"),
         "quarter": quarter,
         "stats": stats,
@@ -289,15 +303,17 @@ async def save_qbr(client_id: str, data: dict, current_user: dict = Depends(get_
 
 @router.get("/qbr/{client_id}/list")
 async def list_qbrs(client_id: str, current_user: dict = Depends(get_current_user)):
-    items = await db.qbrs.find({"client_id": client_id}, {"_id": 0, "sections": 0, "stats": 0}).sort("saved_at", -1).to_list(50)
+    await assert_tenant_record_scope(current_user, db.clients, client_id, operation="qbr.read", resource_name="Client")
+    items = await db.qbrs.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "sections": 0, "stats": 0}).sort("saved_at", -1).to_list(50)
     return items
 
 
 @router.get("/qbrs/{qbr_id}")
 async def get_qbr(qbr_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.qbrs.find_one({"id": qbr_id}, {"_id": 0})
+    doc = await db.qbrs.find_one(tenant_scoped_query(current_user, {"id": qbr_id}), {"_id": 0})
     if not doc:
         raise HTTPException(404, "QBR not found")
+    await assert_client_scope(current_user, doc.get("client_id"), operation="qbr.read", mask_not_found=True)
     return doc
 
 
@@ -360,7 +376,7 @@ def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
         {
             "Pattern": item.get("name") or "Pattern",
             "This client": f"{item.get('client_tickets', 0)} tickets",
-            "MSP impact": f"{item.get('msp_clients', 0)} other clients",
+            "MSP impact": f"{max(0, int(item.get('msp_clients') or 0) - 1)} other clients",
         }
         for item in stats.get("pattern_hits") or []
     ]
@@ -516,12 +532,13 @@ def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
 
 @router.get("/qbrs/{qbr_id}/pdf")
 async def qbr_pdf(qbr_id: str, user: dict = Depends(_qbr_user_from_token)):
-    qbr = await db.qbrs.find_one({"id": qbr_id}, {"_id": 0})
+    qbr = await db.qbrs.find_one(tenant_scoped_query(user, {"id": qbr_id}), {"_id": 0})
     if not qbr:
         raise HTTPException(404, "QBR not found")
+    await assert_client_scope(user, qbr.get("client_id"), operation="qbr.export", mask_not_found=True)
     branding_document = (
-        await db.settings.find_one({"type": "branding"}, {"_id": 0})
-        or await db.settings.find_one({"key": "branding"}, {"_id": 0})
+        await db.settings.find_one(tenant_scoped_query(user, {"type": "branding"}), {"_id": 0})
+        or await db.settings.find_one(tenant_scoped_query(user, {"key": "branding"}), {"_id": 0})
         or {}
     )
     pdf_bytes = _render_qbr_pdf(qbr, (branding_document.get("value") or branding_document))

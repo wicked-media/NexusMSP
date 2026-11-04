@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -44,6 +44,12 @@ function formatUptime(seconds) {
   return d > 0 ? `${d}d ${h}h` : `${h}h`;
 }
 
+function formatEvidenceTime(value) {
+  if (!value) return "Not reported";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Not reported" : parsed.toLocaleString();
+}
+
 const StatusDot = ({ status }) => {
   const c = { online: "bg-emerald-500", warning: "bg-amber-500", offline: "bg-red-500", pending_adoption: "bg-blue-500", pending_sync: "bg-amber-500", pending_configuration: "bg-slate-500", sync_failed: "bg-red-500", recorded: "bg-sky-500" };
   return <span className={`inline-block w-2.5 h-2.5 rounded-full ${c[status] || "bg-slate-500"}`} />;
@@ -72,7 +78,7 @@ function WlanTab({ siteId, headers }) {
       catch {} finally { setLoading(false); }
     };
     fetch();
-  }, [siteId]);
+  }, [headers, siteId]);
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   return (
     <div className="space-y-3" data-testid="wlan-tab">
@@ -115,7 +121,7 @@ function DpiTab({ siteId, headers }) {
       catch {} finally { setLoading(false); }
     };
     fetch();
-  }, [siteId]);
+  }, [headers, siteId]);
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   if (!dpi || !dpi.categories) return <p className="text-center text-muted-foreground py-8">No traffic data</p>;
   
@@ -229,9 +235,9 @@ export default function NetworkingPage() {
   const [editingDevice, setEditingDevice] = useState(null);
   const [testing, setTesting] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
@@ -247,9 +253,9 @@ export default function NetworkingPage() {
       setLoadError("Nexus could not load site, controller and customer context. No network changes have been made.");
     }
     finally { setLoading(false); }
-  };
+  }, [headers]);
 
-  const fetchSiteData = async (siteId) => {
+  const fetchSiteData = useCallback(async (siteId) => {
     try {
       const [ovRes, devRes, cliRes] = await Promise.all([
         axios.get(`${API}/networking/sites/${siteId}/overview`, { headers }),
@@ -260,10 +266,10 @@ export default function NetworkingPage() {
       setSiteDevices(devRes.data);
       setSiteClients(cliRes.data);
     } catch { toast.error("Failed to load site data"); }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (selectedSite) fetchSiteData(selectedSite.id); }, [selectedSite]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { if (selectedSite) fetchSiteData(selectedSite.id); }, [fetchSiteData, selectedSite]);
 
   const openAddSite = () => { setEditingSite(null); setSiteForm({ ...emptySiteForm }); setSiteDialog(true); };
   const openEditSite = (site) => {
@@ -369,18 +375,15 @@ export default function NetworkingPage() {
 
   // Dashboard data
   const [dashboard, setDashboard] = useState(null);
-  const [dashLoading, setDashLoading] = useState(false);
-
-  const fetchDashboard = async () => {
-    setDashLoading(true);
+  const fetchDashboard = useCallback(async () => {
     try {
       const res = await axios.get(`${API}/networking/dashboard`, { headers });
       setDashboard(res.data);
     } catch { toast.error("Failed to load dashboard"); }
-    finally { setDashLoading(false); }
-  };
+    finally { /* retain the current dashboard while refreshing */ }
+  }, [headers]);
 
-  useEffect(() => { if (!selectedSite) fetchDashboard(); }, [selectedSite]);
+  useEffect(() => { if (!selectedSite) fetchDashboard(); }, [fetchDashboard, selectedSite]);
 
   if (loading) return <WorkspaceLoadingState label="Loading network operations" />;
   if (loadError) return <WorkspaceErrorState title="Networking needs attention" description={loadError} onRetry={fetchData} retryLabel="Retry network data" />;
@@ -518,7 +521,7 @@ export default function NetworkingPage() {
           actions={(
             <>
               <Button variant="outline" size="sm" onClick={() => { setSelectedSite(null); setSiteOverview(null); }} data-testid="back-to-sites"><Globe className="w-4 h-4 mr-1" />All sites</Button>
-              <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit Site</Button>
+              <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit site</Button>
               <Button variant="outline" size="sm" onClick={() => handleTestConnection(selectedSite.id)} disabled={testing || !selectedSite.controller_url} title={selectedSite.controller_url ? "Test controller reachability" : "Configure a controller URL first"}><Plug className="w-3 h-3 mr-1" />{testing ? "Testing..." : "Test"}</Button>
               <Button variant="default" size="sm" disabled={!selectedSite.controller_url} title={selectedSite.controller_url ? "Sync from the configured UniFi controller" : "Configure a controller URL first"} onClick={async () => {
                 toast.info("Syncing from controller...");
@@ -713,7 +716,7 @@ export default function NetworkingPage() {
         actions={(
           <>
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={openAddSite} data-testid="add-site-btn"><Plus className="w-4 h-4 mr-1" />Add Site</Button>
+          <Button onClick={openAddSite} data-testid="add-site-btn"><Plus className="w-4 h-4 mr-1" />Add site</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" data-testid="network-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>
@@ -753,11 +756,18 @@ export default function NetworkingPage() {
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-7">
           <HeroTile label="Sites online" value={stats.online_sites ?? 0} icon={Globe} glow="sky" subtitle={`of ${stats.total_sites ?? 0} managed`} />
           <HeroTile label="Devices online" value={stats.online_devices ?? 0} icon={Router} glow="emerald" subtitle={`of ${stats.total_devices ?? 0} discovered`} />
-          <HeroTile label="Network clients" value={stats.total_clients ?? 0} icon={Users} glow="indigo" subtitle="Currently discovered" />
-          <HeroTile label="Access points" value={stats.access_points ?? 0} icon={Wifi} glow="sky" subtitle="Managed wireless" />
-          <HeroTile label="Switches" value={stats.switches ?? 0} icon={Server} glow="violet" subtitle="Managed switching" />
-          <HeroTile label="Gateways" value={stats.gateways ?? 0} icon={Shield} glow="amber" subtitle="Managed edge" />
-          <HeroTile label="Network health" value={stats.online_sites < stats.total_sites ? "Attention" : "Healthy"} icon={stats.online_sites < stats.total_sites ? AlertTriangle : CheckCircle2} glow={stats.online_sites < stats.total_sites ? "amber" : "emerald"} subtitle={stats.online_sites < stats.total_sites ? "One or more sites offline" : "All sites reporting"} animated={false} />
+          <HeroTile label="Network clients" value={stats.total_clients ?? 0} icon={Users} glow="indigo" subtitle="Recorded network clients" />
+          <HeroTile label="Access points" value={stats.access_points ?? 0} icon={Wifi} glow="sky" subtitle="Recorded access points" />
+          <HeroTile label="Switches" value={stats.switches ?? 0} icon={Server} glow="violet" subtitle="Recorded switching" />
+          <HeroTile label="Gateways" value={stats.gateways ?? 0} icon={Shield} glow="amber" subtitle="Recorded edge devices" />
+          <HeroTile
+            label="Network health"
+            value={stats.total_sites === 0 ? "Not monitored" : stats.online_sites < stats.total_sites ? "Attention" : "Reporting"}
+            icon={stats.total_sites === 0 || stats.online_sites < stats.total_sites ? AlertTriangle : CheckCircle2}
+            glow={stats.total_sites === 0 || stats.online_sites < stats.total_sites ? "amber" : "emerald"}
+            subtitle={stats.total_sites === 0 ? "No managed sites are in scope" : stats.online_sites < stats.total_sites ? "One or more sites are not online" : "Every scoped site reports online"}
+            animated={false}
+          />
         </div>
       )}
 
@@ -779,11 +789,22 @@ export default function NetworkingPage() {
         </Card>
       )}
 
-      {/* Site Bandwidth Overview */}
+      {dashboard?.meta && (
+        <Card className="border-border/60 bg-muted/[0.16]" data-testid="network-evidence-freshness">
+          <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3 text-xs text-muted-foreground">
+            <span>Inventory freshness: <span className="font-medium text-foreground">{formatEvidenceTime(dashboard.meta.inventory_observed_at)}</span></span>
+            <span>Workspace generated: <span className="font-medium text-foreground">{formatEvidenceTime(dashboard.meta.generated_at)}</span></span>
+            <span>{dashboard.meta.counter_note}</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Retained transfer counters — explicitly not a live throughput graph. */}
       {dashboard && dashboard.site_bandwidth && dashboard.site_bandwidth.length > 0 && (
         <Card data-testid="site-bandwidth-card">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" />Site Bandwidth Overview</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-2"><Activity className="w-4 h-4 text-cyan-500" />Recorded site transfer counters</CardTitle>
+            <p className="text-xs text-muted-foreground">These are cumulative bytes from current client records, not live throughput or a speed test.</p>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -791,7 +812,7 @@ export default function NetworkingPage() {
                 <TableRow>
                   <TableHead>Site</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead>
                   <TableHead>Devices</TableHead><TableHead>Clients</TableHead><TableHead>ISP</TableHead>
-                  <TableHead>Speed</TableHead><TableHead className="text-right">RX / TX</TableHead>
+                  <TableHead>Advertised link</TableHead><TableHead className="text-right">Recorded RX / TX</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

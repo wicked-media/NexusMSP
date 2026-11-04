@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import Optional
 from datetime import datetime, timezone
-import uuid, os, base64
+import uuid, base64
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
@@ -48,7 +47,13 @@ async def get_wallpaper_templates(current_user: dict = Depends(get_current_user)
 
 @router.put("/settings/login-wallpaper")
 async def update_login_wallpaper(data: dict, current_user: dict = Depends(get_current_user)):
-    """Update login wallpaper setting"""
+    """Update the organisation-wide login wallpaper setting.
+
+    The login page is public, but its visual treatment is organisation
+    branding rather than a per-technician preference.  Keep this mutation
+    aligned with the upload route and require branding-admin authority.
+    """
+    await _require_branding_admin(current_user)
     wallpaper_type = data.get("type", "default")  # default, template, custom
     url = data.get("url")
     overlay_opacity = data.get("overlay_opacity", 0.7)

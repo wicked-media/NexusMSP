@@ -1,9 +1,6 @@
 from fastapi import APIRouter, Depends
-from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
-import random; random = random.SystemRandom()
-import uuid
 
 router = APIRouter()
 
@@ -41,7 +38,7 @@ async def nlp_query(q: str = "", current_user: dict = Depends(get_current_user))
     elif "client" in q_lower and "ticket" in q_lower:
         pipeline = [{"$match": {"status": "open"}}, {"$group": {"_id": "$client_name", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
         agg = await db.tickets.aggregate(pipeline).to_list(50)
-        interpretation = f"Ticket counts by client"
+        interpretation = "Ticket counts by client"
         results = [{"type": "stat", "client_name": a["_id"], "open_tickets": a["count"]} for a in agg]
     else:
         devices = await db.devices.find({"$or": [{"name": {"$regex": q, "$options": "i"}}, {"client_name": {"$regex": q, "$options": "i"}}]}, {"_id": 0, "id": 1, "name": 1, "client_name": 1, "status": 1}).to_list(50)

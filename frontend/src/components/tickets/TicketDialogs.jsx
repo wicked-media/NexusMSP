@@ -1,4 +1,6 @@
 import DOMPurify from "dompurify";
+import { useState, useEffect } from "react";
+import { ticketProductMatches } from "@/lib/ticketProductSearch";
 import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
@@ -13,14 +15,16 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import {
-  Send, GitBranch, Merge, Timer, BellRing, ShoppingCart, Plus, Trash2, Receipt, SpellCheck,
+  Send, GitBranch, Merge, Timer, BellRing, ShoppingCart, Plus, Trash2, Receipt, SpellCheck, Paperclip, Loader2,
 } from "lucide-react";
 import { priorityConfig } from "@/config/ticketConfig";
 
 export function EmailDialog({
   open, onOpenChange, emailForm, setEmailForm, emailSignature, handleSendEmail,
-  handleProofread, proofreadResult, setProofreadResult, proofreadLoading, clientContacts = [],
+  handleProofread, proofreadResult, setProofreadResult, proofreadLoading, clientContacts = [], ticketAttachments = [],
 }) {
+  const selectedAttachmentIds = emailForm.attachment_ids || [];
+  const sendableAttachments = ticketAttachments.filter(attachment => attachment.email_attachable);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <NexusWorkflowDialog
@@ -52,6 +56,25 @@ export function EmailDialog({
               )}
             </div>
           </div>
+          {ticketAttachments.length > 0 && (
+            <div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.035] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Include ticket files</p><p className="mt-0.5 text-[10px] text-zinc-500">Only retained private files can be emailed. Max 10 files / 20 MB total.</p></div>
+                <span className="text-[10px] text-sky-300/75">{selectedAttachmentIds.length} selected</span>
+              </div>
+              {sendableAttachments.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {sendableAttachments.map(attachment => {
+                    const selected = selectedAttachmentIds.includes(attachment.id);
+                    const canSelect = selected || selectedAttachmentIds.length < 10;
+                    return <button key={attachment.id} type="button" disabled={!canSelect} title={!canSelect ? "A ticket email can include up to 10 files" : undefined} onClick={() => setEmailForm({ ...emailForm, attachment_ids: selected ? selectedAttachmentIds.filter(id => id !== attachment.id) : [...selectedAttachmentIds, attachment.id] })} className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] transition disabled:cursor-not-allowed disabled:opacity-40 ${selected ? "border-sky-400/45 bg-sky-400/15 text-sky-100" : "border-white/[0.08] bg-black/10 text-zinc-400 hover:border-sky-400/25 hover:text-zinc-200"}`}>
+                      <Paperclip className="h-3 w-3" />{attachment.filename}
+                    </button>;
+                  })}
+                </div>
+              ) : <p className="mt-2 text-[11px] text-amber-300/80">Existing files are not yet retained in private storage, so they cannot be attached to email.</p>}
+            </div>
+          )}
           <div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.035] p-2.5">
             <div className="flex items-center justify-between gap-3 mb-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Sender signature</p>
@@ -114,21 +137,27 @@ export function MergeDialog({ open, onOpenChange, viewingTicket, tickets, mergeI
   );
 }
 
-export function LogTimeDialog({ open, onOpenChange, timeForm, setTimeForm, handleAddTime }) {
+export function LogTimeDialog({ open, onOpenChange, timeForm, setTimeForm, handleAddTime, labourTypes = [], loggingTime = false }) {
+  const minutes = Number(timeForm.minutes);
+  const validMinutes = Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={nextOpen => { if (!loggingTime) onOpenChange(nextOpen); }}>
       <NexusWorkflowDialog
         eyebrow="Service delivery"
         title="Log technician time"
-        description="Keep the service record, commercial status and billing context accurate without leaving the ticket."
+        description="Record trusted technician time with the labour classification that should follow it through billing."
         icon={Timer}
         tone="emerald"
-        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleAddTime} data-testid="log-time-submit"><Timer className="w-4 h-4 mr-1" />Log time</Button></>}
+        footer={<><Button variant="outline" disabled={loggingTime} onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={loggingTime || !validMinutes} onClick={handleAddTime} data-testid="log-time-submit">{loggingTime ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Timer className="w-4 h-4 mr-1" />}{loggingTime ? "Logging…" : "Log time"}</Button></>}
       >
-        <div className="space-y-3">
-          <div><Label>Minutes</Label><Input type="number" value={timeForm.minutes} onChange={e => setTimeForm({ ...timeForm, minutes: parseInt(e.target.value) || 0 })} data-testid="time-minutes" /></div>
-          <div><Label>Description</Label><Input value={timeForm.description} onChange={e => setTimeForm({ ...timeForm, description: e.target.value })} data-testid="time-desc" /></div>
-          <div className="flex items-center gap-2"><Checkbox checked={timeForm.billable} onCheckedChange={v => setTimeForm({ ...timeForm, billable: v })} id="billable" /><Label htmlFor="billable">Billable</Label></div>
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div><Label>Minutes</Label><Input disabled={loggingTime} type="number" min="1" max="1440" value={timeForm.minutes} onChange={e => setTimeForm({ ...timeForm, minutes: parseInt(e.target.value) || 0 })} data-testid="time-minutes" /></div>
+            <div><Label>Labour type</Label><Select disabled={loggingTime} value={timeForm.labour_type_id || "__default__"} onValueChange={value => { const labourTypeId = value === "__default__" ? "" : value; const type = labourTypes.find(item => item.id === labourTypeId); setTimeForm({ ...timeForm, labour_type_id: labourTypeId, billable: type ? type.billable_default !== false : timeForm.billable }); }}><SelectTrigger data-testid="time-labour-type"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="__default__">Technician default</SelectItem>{labourTypes.map(type => <SelectItem key={type.id} value={type.id}>{type.name}{type.code ? ` · ${type.code}` : ""}</SelectItem>)}</SelectContent></Select></div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2"><div><Label>Description</Label><Input disabled={loggingTime} value={timeForm.description} onChange={e => setTimeForm({ ...timeForm, description: e.target.value })} placeholder="What work was completed?" data-testid="time-desc" /></div><div><Label>Performed at <span className="text-muted-foreground">(optional)</span></Label><Input disabled={loggingTime} type="datetime-local" value={timeForm.performed_at || ""} onChange={e => setTimeForm({ ...timeForm, performed_at: e.target.value })} data-testid="time-performed-at" /></div></div>
+          <div className="flex items-center gap-2"><Checkbox disabled={loggingTime} checked={timeForm.billable} onCheckedChange={v => setTimeForm({ ...timeForm, billable: v === true })} id="billable" /><Label htmlFor="billable">Billable time</Label></div>
+          <p className="rounded-lg border border-cyan-400/15 bg-cyan-400/[0.04] px-3 py-2 text-[11px] text-cyan-100/75">Nexus snapshots the selected labour type and rate when time is logged, so later configuration changes never rewrite historical billing evidence.</p>
         </div>
       </NexusWorkflowDialog>
     </Dialog>
@@ -149,10 +178,13 @@ export function NotifyClientDialog({ open, onOpenChange, notifyForm, setNotifyFo
 
 export function AddItemsDialog({
   open, onOpenChange, allProducts, addItemProduct, setAddItemProduct, addItemQty, setAddItemQty,
-  handleAddItemToTicket, ticketProducts, handleRemoveItemFromTicket,
+  handleAddItemToTicket, ticketProducts, handleRemoveItemFromTicket, adding = false,
 }) {
+  const [productSearch, setProductSearch] = useState("");
+  useEffect(() => { if (!open) setProductSearch(""); }, [open]);
+  const matchingProducts = allProducts.filter(product => ticketProductMatches(product, productSearch));
   const unbilledItems = ticketProducts.filter(item => !item.invoice_id);
-  const unbilledTotal = unbilledItems.reduce((sum, item) => sum + (item.total || 0), 0);
+  const unbilledTotal = unbilledItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
   const selectedProduct = allProducts.find(product => product.id === addItemProduct);
   const selectedTracksStock = selectedProduct?.track_inventory ?? ["Hardware", "Accessories", "Networking", "Security"].includes(selectedProduct?.category);
   const selectedStockInsufficient = Boolean(selectedProduct && selectedTracksStock && Number(selectedProduct.quantity_in_stock || 0) < Number(addItemQty || 1));
@@ -168,29 +200,33 @@ export function AddItemsDialog({
         description="Attach products and services used on this ticket. Nexus keeps stock, pricing and invoice readiness in sync."
         icon={ShoppingCart}
         tone="emerald"
-        className="max-w-lg"
-        footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>}
+        className="max-w-3xl"
+        footer={<Button variant="outline" disabled={adding} onClick={() => onOpenChange(false)}>Done · back to ticket</Button>}
       >
         <div className="space-y-4">
-          <p className="text-xs text-muted-foreground">Add products/items used on this ticket. Stock will be deducted automatically.</p>
-          <div className="flex items-center gap-2">
-            <Select value={addItemProduct || "__none"} onValueChange={v => setAddItemProduct(v === "__none" ? "" : v)}>
-              <SelectTrigger className="flex-1" data-testid="add-item-product-select"><SelectValue placeholder="Select product..." /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none">Choose product...</SelectItem>
-                {allProducts.filter(p => p.is_active !== false).map(p => {
-                  const tracksStock = p.track_inventory ?? ["Hardware", "Accessories", "Networking", "Security"].includes(p.category);
-                  const unavailable = tracksStock && Number(p.quantity_in_stock || 0) < Number(addItemQty || 1);
-                  return (
-                    <SelectItem key={p.id} value={p.id} disabled={unavailable}>
-                      {p.name} - ${p.retail_price?.toFixed(2)} {tracksStock ? `(${p.quantity_in_stock} in stock${unavailable ? " — insufficient" : ""})` : "(not stock tracked)"}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
-            <Input type="number" min="1" className="w-20" value={addItemQty} onChange={e => setAddItemQty(parseInt(e.target.value) || 1)} />
-            <Button onClick={handleAddItemToTicket} disabled={!addItemProduct || selectedStockInsufficient} data-testid="confirm-add-item"><Plus className="w-4 h-4 mr-1" />Add</Button>
+          <p className="text-xs text-muted-foreground">Choose a product, review the quantity and price, then add it. Tracked stock is deducted when you add; this does not send an invoice.</p>
+          <div className="space-y-1.5">
+            <Label htmlFor="ticket-product-search">Find a product or service</Label>
+            <Input id="ticket-product-search" value={productSearch} onChange={event => setProductSearch(event.target.value)} placeholder="Name, SKU, barcode or manufacturer…" disabled={adding} />
+            <p role="status" className="text-xs text-muted-foreground">{matchingProducts.length} matching products · pricing and stock shown below</p>
+          </div>
+          <div className="grid max-h-48 gap-2 overflow-y-auto rounded-xl border p-2 sm:grid-cols-2" aria-label="Matching products">
+            {matchingProducts.slice(0, 30).map(product => (
+              <button key={product.id} type="button" disabled={adding} aria-pressed={addItemProduct === product.id}
+                onClick={() => setAddItemProduct(product.id)}
+                className={`min-w-0 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${addItemProduct === product.id ? "border-cyan-400/50 bg-cyan-400/10" : "border-transparent hover:border-white/15 hover:bg-white/5"}`}>
+                <span className="block truncate text-sm font-medium">{product.name}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{product.sku || "No SKU"} · ${Number(product.retail_price || 0).toFixed(2)} each</span>
+              </button>
+            ))}
+            {!matchingProducts.length && <p className="p-3 text-sm text-muted-foreground">No matches. Try a product name, SKU or barcode.</p>}
+          </div>
+          {matchingProducts.length > 30 && <p className="text-xs text-muted-foreground">Showing the first 30 matches. Refine your search to find a specific item.</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1 text-sm font-medium">{selectedProduct?.name || "Select a product above"}</span>
+            <span className="text-xs text-muted-foreground">Qty</span>
+            <Input aria-label="Quantity" disabled={adding} type="number" min="1" step="1" className="w-20" value={addItemQty} onChange={e => setAddItemQty(Number(e.target.value))} />
+            <Button onClick={handleAddItemToTicket} aria-busy={adding} disabled={adding || !selectedProduct || selectedProduct.is_active === false || selectedStockInsufficient || !Number.isInteger(addItemQty) || addItemQty < 1} data-testid="confirm-add-item"><Plus className="w-4 h-4 mr-1" />{adding ? "Adding…" : "Add"}</Button>
           </div>
           {selectedProduct && <div className="rounded-lg border border-violet-500/20 bg-violet-500/[0.05] px-3 py-2 text-xs text-violet-100">
             <span className="font-semibold">Applied price:</span> ${selectedUnitPrice.toFixed(2)} each · ${((Number(addItemQty || 1)) * selectedUnitPrice).toFixed(2)} total
@@ -218,7 +254,7 @@ export function AddItemsDialog({
                     </TableRow>
                   ))}
                   <TableRow>
-                    <TableCell colSpan={3} className="text-right font-semibold">Total</TableCell>
+                    <TableCell colSpan={3} className="text-right font-semibold">Unbilled total</TableCell>
                     <TableCell className="text-right font-mono font-bold text-green-400">${unbilledTotal.toFixed(2)}</TableCell>
                     <TableCell></TableCell>
                   </TableRow>

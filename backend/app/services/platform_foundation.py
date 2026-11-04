@@ -13,7 +13,6 @@ import re
 import uuid
 from typing import Any
 
-from app.database import db
 from app.services.event_backbone import persist_platform_event
 
 
@@ -28,6 +27,13 @@ EVENT_SUBJECTS = [
     {"subject": "device.health.changed", "owner": "Managed Assets", "risk": "medium", "description": "Endpoint health or protection posture changed."},
     {"subject": "dns.query.blocked", "owner": "Nexus DNS", "risk": "high", "description": "A resolver-attested DNS policy decision blocked a query."},
     {"subject": "backup.job.failed", "owner": "Backups", "risk": "high", "description": "A protected workload reported a failed backup run."},
+    {"subject": "virtualization.inventory.observed", "owner": "Proxmox Studio", "risk": "low", "description": "The guest and node inventory was reconciled from what the Proxmox provider itself reported, by an operator sync or by the scheduled proxmox-inventory pass (which attributes the event to a system actor). A provider that could not be observed emits nothing and leaves the stored inventory untouched."},
+    {"subject": "virtualization.vm.action.simulated", "owner": "Proxmox Studio", "risk": "low", "description": "A guest power action was simulated; no provider call was made."},
+    {"subject": "virtualization.vm.action.blocked", "owner": "Proxmox Studio", "risk": "medium", "description": "A guest power action was blocked (no configured connection); nothing was executed."},
+    {"subject": "virtualization.vm.action.approval.requested", "owner": "Proxmox Studio", "risk": "high", "description": "A destructive guest power action is awaiting independent approval."},
+    {"subject": "virtualization.vm.action.completed", "owner": "Proxmox Studio", "risk": "medium", "description": "A guest power action completed with a verified provider task and observed state."},
+    {"subject": "virtualization.vm.action.failed", "owner": "Proxmox Studio", "risk": "high", "description": "A guest power action failed before a verified outcome was recorded."},
+    {"subject": "virtualization.vm.action.outcome.unknown", "owner": "Proxmox Studio", "risk": "high", "description": "A guest power action was submitted but its outcome could not be confirmed in the verification window."},
     {"subject": "ticket.created", "owner": "Service Desk", "risk": "low", "description": "A new auditable service record was created."},
     {"subject": "user.offboard.requested", "owner": "Nexus Control Plane", "risk": "high", "description": "A governed identity offboarding workflow was requested."},
     {"subject": "invoice.reconciliation.failed", "owner": "Nexus Finance", "risk": "medium", "description": "An invoice could not be reconciled to its accounting source."},
@@ -45,6 +51,8 @@ EVENT_SUBJECTS = [
     {"subject": "autopilot.resumed", "owner": "Nexus Autopilot", "risk": "high", "description": "An authorised manager resumed Autopilot inside its configured and readiness-capped boundary."},
     {"subject": "executive.scenario.simulated", "owner": "Nexus Executive", "risk": "low", "description": "An owner ran a non-mutating business scenario against the current evidence-backed baseline."},
     {"subject": "executive.board.snapshot.saved", "owner": "Nexus Executive", "risk": "low", "description": "An owner retained a point-in-time executive briefing and its source-quality statement."},
+    {"subject": "executive.watchlist.changed", "owner": "Nexus Executive", "risk": "low", "description": "An owner added or removed one client from their personal owner watchlist."},
+    {"subject": "executive.mrr_target.changed", "owner": "Nexus Executive", "risk": "low", "description": "An owner recorded, revised, or cleared the tenant's recurring-revenue goal. The event carries the starting run rate that applied: the contract-backed MRR captured when the goal was recorded, which a revision keeps rather than re-baselining."},
     {"subject": "automation.compensation.completed", "owner": "Automation", "risk": "high", "description": "A governed compensation attempt completed with its conflict evidence preserved."},
     {"subject": "automation.pack.installed", "owner": "Automation", "risk": "medium", "description": "A verified workflow pack and its governed draft components were installed from the Nexus Marketplace."},
     {"subject": "automation.pack.removed", "owner": "Automation", "risk": "medium", "description": "An installed workflow pack was removed while its lifecycle and audit evidence were preserved."},
@@ -55,6 +63,7 @@ EVENT_SUBJECTS = [
     {"subject": "intelligence.memory.reviewed", "owner": "Nexus Intelligence", "risk": "low", "description": "A technician reviewed an evidence-backed Second Brain recommendation without executing an external change."},
     {"subject": "connector.health.changed", "owner": "Integrations", "risk": "medium", "description": "A connector changed connection, sync or rate-limit state."},
     {"subject": "platform.readiness.reviewed", "owner": "Nexus Foundation", "risk": "high", "description": "A production-readiness item, test result or launch-blocker decision was reviewed."},
+    {"subject": "endpoint.deviation.change.proposed", "owner": "Nexus Endpoint", "risk": "medium", "description": "A recurring fleet deviation shape was raised as a change request for investigation; nothing was executed on any endpoint."},
 ]
 
 _SUBJECT_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$")

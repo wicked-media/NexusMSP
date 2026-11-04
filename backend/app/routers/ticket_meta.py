@@ -8,6 +8,7 @@ import uuid
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity, ticket_audit
+from app.services.scope_permissions import assert_client_scope, assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -23,10 +24,11 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
     new_client_id = data.get("client_id")
     if not new_client_id:
         raise HTTPException(400, "client_id required")
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
-    new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0})
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id, operation="ticket.customer.change", resource_name="Ticket"
+    )
+    await assert_client_scope(current_user, new_client_id, operation="ticket.customer.change")
+    new_client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": new_client_id}), {"_id": 0})
     if not new_client:
         raise HTTPException(404, "Target client not found")
 
@@ -39,7 +41,9 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
     new_contact_id = data.get("contact_id")
     new_contact_name = None
     if new_contact_id:
-        c = await db.client_contacts.find_one({"id": new_contact_id, "client_id": new_client_id}, {"_id": 0})
+        c = await db.client_contacts.find_one(
+            tenant_scoped_query(current_user, {"id": new_contact_id, "client_id": new_client_id}), {"_id": 0}
+        )
         if c:
             new_contact_name = c.get("name")
 
@@ -67,10 +71,22 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
         update["contact_id"] = None
         update["contact_name"] = None
 
-    await db.tickets.update_one({"id": ticket_id}, {
-        "$set": update,
-        "$push": {"customer_history": history_entry},
-    })
+    move_result = await db.tickets.update_one(
+        tenant_scoped_query(current_user, {
+            "id": ticket_id,
+            "client_id": old_client_id,
+            "automation_note_lock": {"$exists": False},
+        }),
+        {
+            "$set": update,
+            "$push": {"customer_history": history_entry},
+        },
+    )
+    if move_result.matched_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="This ticket has a protected automation note in progress. Retry the customer change shortly.",
+        )
 
     # Audit comment
     comment_text = (
@@ -79,6 +95,7 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
     )
     await db.ticket_comments.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": ticket.get("tenant_id") or platform_tenant_id(current_user),
         "ticket_id": ticket_id,
         "author": current_user.get("name"),
         "author_id": current_user.get("id"),
@@ -86,7 +103,7 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
         "kind": "customer_changed",
         "created_at": _now(),
     })
-    await db.tickets.update_one({"id": ticket_id}, {"$inc": {"comments_count": 1}})
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$inc": {"comments_count": 1}})
     await log_activity(current_user, "customer_changed", "ticket", ticket_id,
                        ticket.get("ticket_number", ""),
                        f"{old_client_name or '—'} → {new_client.get('name')}")
@@ -98,24 +115,24 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
         f"{old_client_name or 'Unassigned'} -> {new_client.get('name')}"
         + (f"; {history_entry['reason']}" if history_entry["reason"] else ""),
     )
-    fresh = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    fresh = await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
     return {"success": True, "ticket": fresh, "history_entry": history_entry}
 
 
 @router.get("/tickets/{ticket_id}/customer-history")
 async def customer_history(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "customer_history": 1})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id, operation="ticket.customer.history", resource_name="Ticket"
+    )
     return ticket.get("customer_history", [])
 
 
 @router.post("/tickets/{ticket_id}/revert-customer")
 async def revert_customer(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """One-click revert to the previous customer (uses the latest history entry)."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id, operation="ticket.customer.revert", resource_name="Ticket"
+    )
     history = ticket.get("customer_history") or []
     if not history:
         raise HTTPException(400, "No previous customer to revert to")

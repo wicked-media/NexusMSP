@@ -16,6 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import { toast } from "sonner";
 import { AlertTriangle, Bell, Check, ChevronsUpDown, Clock, Edit3, GitBranch, Loader2, Play, Plus, RefreshCw, Shield, Trash2, Zap } from "lucide-react";
 
@@ -123,13 +124,13 @@ function RuleEditor({ open, form, setForm, options, clients, devices, editingRul
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-amber-400/20 bg-background p-0" aria-describedby="alert-rule-editor-description" data-testid="alert-rule-editor">
+      <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-amber-400/20 bg-background p-0 sm:rounded-2xl" aria-describedby="alert-rule-editor-description" data-testid="alert-rule-editor">
         <DialogHeader className="border-b border-amber-400/15 bg-[linear-gradient(135deg,rgba(245,158,11,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300">Monitoring policy</p>
           <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/10"><Bell className="h-4 w-4 text-amber-300" /></span>{editingRule ? "Edit alert rule" : "Create alert rule"}</DialogTitle>
           <DialogDescription id="alert-rule-editor-description" className="mt-2">Define what to watch, who it applies to, and whether a matching signal should open a linked service ticket.</DialogDescription>
         </DialogHeader>
-        <div className="space-y-5 px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
           <section className="space-y-3">
             <div><Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Rule name</Label><Input className="mt-1" value={form.name} onChange={(event) => set("name", event.target.value)} placeholder="e.g. CPU critical - servers" data-testid="rule-name" /></div>
             <div><Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Technician guidance</Label><Input className="mt-1" value={form.description} onChange={(event) => set("description", event.target.value)} placeholder="Explain the condition and first response." /></div>
@@ -167,7 +168,7 @@ function RuleEditor({ open, form, setForm, options, clients, devices, editingRul
             {form.create_ticket && <div className="grid gap-3 sm:grid-cols-2"><div><Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Ticket priority</Label><Select value={form.ticket_priority} onValueChange={(value) => set("ticket_priority", value)}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="critical">Critical</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent></Select></div><div><Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Ticket category</Label><Input className="mt-1" value={form.ticket_category} onChange={(event) => set("ticket_category", event.target.value)} placeholder="monitoring" /></div></div>}
           </section>
         </div>
-        <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={onSave} disabled={saving} data-testid="rule-submit">{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}{editingRule ? "Save rule" : "Create rule"}</Button></DialogFooter>
+        <DialogFooter className="shrink-0 border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={onSave} disabled={saving} data-testid="rule-submit">{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}{editingRule ? "Save rule" : "Create rule"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -271,7 +272,7 @@ export default function AlertRulesPage() {
 
   return (
     <div className="space-y-5" data-testid="alert-rules-page">
-      <OperationalPageHeader eyebrow="Monitoring policy" title="Alert Rules Engine" description="Evaluate Nexus Agent telemetry, route an auditable response, and validate coverage before a signal reaches the service desk." icon={Bell} tone="amber" actions={<><Button variant="outline" onClick={() => navigate("/change-management")}><GitBranch className="mr-1.5 h-4 w-4" />Change control</Button><Button variant="outline" onClick={fetchData} data-testid="refresh-alert-rules-btn"><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button><Button variant="outline" onClick={evaluateRules} disabled={evaluating} data-testid="evaluate-rules-btn">{evaluating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Play className="mr-1.5 h-4 w-4" />}Run health check</Button><Button onClick={openCreate} data-testid="create-rule-btn"><Plus className="mr-1.5 h-4 w-4" />New rule</Button></>} />
+      <OperationalPageHeader eyebrow="Monitoring policy" title="Alert Rules Engine" description="Evaluate Nexus Agent telemetry, route an auditable response, and validate coverage before a signal reaches the service desk." icon={Bell} tone="amber" actions={<><WorkspaceActionMenu testId="alert-rules-more-actions"><WorkspaceActionMenuItem icon={GitBranch} onSelect={() => navigate("/change-management")}>Change control</WorkspaceActionMenuItem><WorkspaceActionMenuItem icon={RefreshCw} onSelect={fetchData} testId="refresh-alert-rules-btn">Refresh rules</WorkspaceActionMenuItem></WorkspaceActionMenu><Button variant="outline" onClick={evaluateRules} disabled={evaluating} data-testid="evaluate-rules-btn">{evaluating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Play className="mr-1.5 h-4 w-4" />}Run health check</Button><Button onClick={openCreate} data-testid="create-rule-btn"><Plus className="mr-1.5 h-4 w-4" />New rule</Button></>} />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4"><HeroTile label="All rules" value={stats?.total ?? rules.length} subtitle="Configured policies" icon={Shield} glow="violet" animated={false} active={ruleFilter === "all"} onClick={() => setRuleFilter("all")} testId="alert-rules-total-tile" /><HeroTile label="Active" value={stats?.active ?? activeRules} subtitle="Watching managed assets" icon={Zap} glow="emerald" animated={false} active={ruleFilter === "active"} onClick={() => setRuleFilter("active")} testId="alert-rules-active-tile" /><HeroTile label="Critical" value={criticalRules} subtitle="Priority coverage" icon={AlertTriangle} glow="rose" animated={false} active={ruleFilter === "critical"} onClick={() => setRuleFilter("critical")} testId="alert-rules-critical-tile" /><HeroTile label="Paused" value={pausedRules} subtitle={`${stats?.total_triggered ?? 0} total triggers`} icon={Clock} glow="amber" animated={false} active={ruleFilter === "paused"} onClick={() => setRuleFilter("paused")} testId="alert-rules-paused-tile" /></div>
 

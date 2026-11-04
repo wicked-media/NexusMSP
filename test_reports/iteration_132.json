@@ -32,7 +32,7 @@
     "backend": "100% (17/17 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Test data created with TEST_ prefix for blueprints",
   "retest_needed": false,
   "should_main_agent_self_test": false,

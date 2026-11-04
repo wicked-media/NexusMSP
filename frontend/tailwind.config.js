@@ -43,9 +43,17 @@ module.exports = {
   				DEFAULT: 'hsl(var(--destructive))',
   				foreground: 'hsl(var(--destructive-foreground))'
   			},
-  			border: 'hsl(var(--border))',
-  			input: 'hsl(var(--input))',
-  			ring: 'hsl(var(--ring))',
+			border: 'hsl(var(--border))',
+			input: 'hsl(var(--input))',
+			ring: 'hsl(var(--ring))',
+			chip: {
+				sky: 'hsl(var(--nx-chip-sky))',
+				blue: 'hsl(var(--nx-chip-blue))',
+				indigo: 'hsl(var(--nx-chip-indigo))',
+				amber: 'hsl(var(--nx-chip-amber))',
+				emerald: 'hsl(var(--nx-chip-emerald))',
+				rose: 'hsl(var(--nx-chip-rose))'
+			},
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',

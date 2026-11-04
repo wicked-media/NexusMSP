@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from datetime import datetime, timezone
+from datetime import datetime
 from app.database import db
 from app.auth import get_current_user
 

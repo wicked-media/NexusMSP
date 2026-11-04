@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -43,9 +43,9 @@ export default function ITDocumentationPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [docForm, setDocForm] = useState(emptyDocument);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [docsRes, clientsRes] = await Promise.all([
@@ -59,9 +59,9 @@ export default function ITDocumentationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const resetEditor = () => {
     setSelectedDoc(null);
@@ -144,11 +144,12 @@ export default function ITDocumentationPage() {
             <DialogTrigger asChild>
               <Button onClick={() => openEditor()}><Plus className="mr-2 h-4 w-4" />New document</Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
+            <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+              <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12">
                 <DialogTitle>{selectedDoc ? "Edit document" : "Create document"}</DialogTitle>
               </DialogHeader>
-              <form className="space-y-4" onSubmit={saveDocument}>
+              <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveDocument}>
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Client</Label>
@@ -182,7 +183,9 @@ export default function ITDocumentationPage() {
                   <Label>Tags <span className="text-muted-foreground">(comma separated)</span></Label>
                   <Input value={docForm.tags} onChange={(event) => setDocForm({ ...docForm, tags: event.target.value })} placeholder="windows, onboarding, network" />
                 </div>
-                <DialogFooter>
+                </div>
+                <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
+                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                   <Button type="submit">{selectedDoc ? "Save changes" : "Create document"}</Button>
                 </DialogFooter>
               </form>
@@ -204,6 +207,14 @@ export default function ITDocumentationPage() {
         </CardContent>
       </Card>
 
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">Documentation library</p><p className="mt-1 text-sm text-muted-foreground">Create client-scoped records, keep global procedures reusable, and protect the credential boundary.</p></div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" className="rounded-xl" onClick={fetchData} data-testid="refresh-it-docs-toolbar"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button>
+          <Button size="sm" className="rounded-xl" onClick={() => openEditor()} data-testid="new-it-document-toolbar"><Plus className="mr-1.5 h-3.5 w-3.5" />New document</Button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <HeroTile label="Documents" value={docs.length} icon={FileText} glow="sky" />
         <HeroTile label="Clients covered" value={coveredClients} icon={Folder} glow="emerald" />
@@ -211,13 +222,13 @@ export default function ITDocumentationPage() {
         <HeroTile label="Visible now" value={filteredDocs.length} icon={Search} glow="amber" />
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row">
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/55 p-3 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] sm:flex-row">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-9" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search titles, content, tags, or client…" />
+          <Input className="border-border/70 bg-background/65 pl-9" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search titles, content, tags, or client…" />
         </div>
         <Select value={clientFilter} onValueChange={setClientFilter}>
-          <SelectTrigger className="w-full sm:w-56"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full border-border/70 bg-background/65 sm:w-56"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All clients</SelectItem>
             {clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}
@@ -230,7 +241,7 @@ export default function ITDocumentationPage() {
       ) : filteredDocs.length ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredDocs.map((doc) => (
-            <Card key={doc.id} className="group border-border/80 transition-colors hover:border-primary/35">
+            <Card key={doc.id} className="group overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] transition-all hover:-translate-y-0.5 hover:border-sky-400/35 hover:shadow-[0_22px_42px_-34px_rgba(56,189,248,0.5)]">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-3">
                   <button className="min-w-0 flex-1 text-left" onClick={() => openEditor(doc)}>

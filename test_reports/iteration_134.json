@@ -22,7 +22,7 @@
     "backend": "100% (23/23 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Using existing client-001 (Acme Corporation) and ticket data",
   "retest_needed": false,
   "should_main_agent_self_test": false,

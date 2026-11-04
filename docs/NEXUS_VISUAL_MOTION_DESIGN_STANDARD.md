@@ -34,6 +34,37 @@ Used only where retained or live telemetry supports it. It may show a status hea
 
 For NOC, QBR, incident review, and customer-facing proof of value. It may use larger state transitions, topology/replay views, and health transformation storytelling; it must still label forecasts, gaps, and inferred relationships clearly.
 
+## Canonical workspace header
+
+Every operational workspace uses `NexusWorkspaceHeader`, normally through the backwards-compatible `OperationalPageHeader` wrapper. Module shells such as Service Desk may add descriptive navigation immediately below it, but must preserve the same identity, state and action grammar.
+
+Required anatomy:
+
+1. A domain icon and restrained status orb.
+2. A short operational eyebrow, clear title and one-sentence purpose.
+3. An optional truthful state summary derived from supplied workspace evidence.
+4. Permission-aware actions, with one visually primary action at most.
+5. Inferred back navigation on nested workspace views.
+6. A compact command-rail label when actions are present, so horizontal space explains the control group instead of becoming an empty button shelf.
+
+Approved variants are `workspace`, `module`, `record`, `command`, and `portal`. Variants may change density and supporting content, but not the meaning or position of identity, state and actions. Domain tone may vary; interaction behaviour, spacing rhythm and responsive collapse must not.
+
+Do not duplicate the same action in the header, navigation rail and overflow menu. Do not display a healthy state when evidence is missing. Custom headers require a measurable workflow reason and must still follow this contract.
+
+### Header action hierarchy
+
+Header controls use a predictable priority order so technicians do not have to relearn each workspace:
+
+1. Show no more than one filled primary action. It represents the most common safe next step.
+2. Show no more than two secondary controls beside it when they are genuinely frequent in-context actions.
+3. Place setup, navigation, import/export, administrative and infrequent actions in the shared `WorkspaceActionMenu` labelled `More`.
+4. Keep action labels in sentence case while preserving product names and acronyms such as PBX, CSV, YCM and RMM.
+5. Do not place the same action both in the visible rail and the overflow menu.
+
+The overflow menu changes presentation only. Existing permission checks, disabled states, confirmation flows and audit ownership remain attached to the underlying action.
+
+Immersive chat, wallboard, public portal, record cockpit and full-screen command canvases may keep specialist headers. Those exceptions are declared in the workspace consistency audit. Route-only wrappers are separately classified when they delegate to a shared header. A new generic routed workspace cannot avoid the release gate by omitting a literal `<h1>`; it must use the canonical header, delegate to a classified shared surface, or be reviewed as a deliberate specialist canvas.
+
 ## Motion language
 
 Use existing tokens in `frontend/src/index.css`:
@@ -133,6 +164,28 @@ Celebrate a measurable operational outcome—such as completed recovery coverage
 - Prefer CSS transform/opacity; pause off-screen or hidden visualisations.
 - Spatial/topology and replay views must offer a static list/table alternative.
 
+## Client-facing documents
+
+Reports, invoices, purchase orders, estimates and portal audit records are documents rather
+than screens: they are read away from Nexus, printed, and attached to a customer file. Every
+document surface renders through `backend/app/services/nexus_document_pdf.py`, so one
+document language governs all of them, and the on-screen report reader
+(`frontend/src/pages/ReportsHubPage.jsx`) borrows the same rules through
+`frontend/src/lib/documentValueFormat.js` so the screen and the printed pack cannot describe
+the same recorded number two different ways.
+
+- A stored field name is never printed as a database column: `sla_compliance_pct` reads as
+  "SLA Compliance", and acronyms keep their case (SLA, RPO, M365, ID) instead of becoming
+  "Sla" and "Pct".
+- A unit is read from the field name, never from magnitude: a count called `tickets_total`
+  never becomes currency, money keeps its cents, and a measured value drops float padding
+  (96.4%, 6.4 hours).
+- An unrecorded dimension is disclosed as not recorded with its reason — never as a zero and
+  never as a clean, healthy state.
+- A section is numbered so a review can cite it, a record group renders as ranked evidence
+  with its share of total rather than one line of joined strings, the masthead and footer
+  carry provenance, and the footer states "Page X of Y" rather than an unbound page number.
+
 ## Review checklist for a new workspace
 
 - Does the header explain the operational question the page answers?
@@ -145,9 +198,14 @@ Celebrate a measurable operational outcome—such as completed recovery coverage
 
 ## Current reference implementations
 
-- `NexusGlobalPulse`: sidebar estate pulse built from retained navigation evidence.
+- `NexusWorkspaceHeader`: canonical workspace identity, evidence state and action surface.
+- `TicketModuleHeader`: module variant with descriptive Queue, Triage, SLA and Dispatch navigation.
+- Devices Fleet Cockpit: high-density operational variant for endpoint evidence.
+- `EstateStatus`: compact sidebar operating-health summary backed by the authenticated Mission Control overview; it remains distinct from personal notifications and module work counts.
 - `NexusVerifiedSequence`: Work Session, Tickets, Nexus Verify, Diagnostics, and Assurance completion language.
 - `Nexus Expected State`: explicit evidence boundary and canonical Nexus Agent heartbeat coverage.
 - Appearance settings: user-controlled System, Full, Minimal, and Static motion modes.
+- Report documents: the shared Nexus document language above, proven by
+  `backend/tests/test_report_document_output.py` and `frontend/src/lib/documentValueFormat.test.js`.
 
 This document is the source of truth for future Nexus visual and interaction work. Changes must update both this standard and the shared implementation primitives.

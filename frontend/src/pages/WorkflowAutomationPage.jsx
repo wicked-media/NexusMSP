@@ -976,7 +976,7 @@ export default function WorkflowAutomationPage() {
                   <div className="flex flex-wrap gap-2"><Badge variant="outline" className={RISK_STYLE[item.risk_level]}>{titleCase(item.risk_level)} risk</Badge><Badge variant="outline" className={STATUS_STYLE[item.status]}>{titleCase(item.status)}</Badge><Badge variant="outline">{item.summary?.steps || 0} steps</Badge><Badge variant="outline" className="border-emerald-500/25 text-emerald-200">0 executed</Badge></div>
                 </button>
               ))}
-              {!simulations.length && <div className="py-16 text-center"><Sparkles className="mx-auto h-10 w-10 text-muted-foreground/30" /><p className="mt-4 font-medium">No simulations recorded</p><p className="mt-1 text-sm text-muted-foreground">Choose a workflow in Studio and run its first zero-change preview.</p><Button className="mt-4" onClick={() => selectTab("studio")}>Open Studio</Button></div>}
+              {!simulations.length && <div className="py-16 text-center"><Sparkles className="mx-auto h-10 w-10 text-muted-foreground/30" /><p className="mt-4 font-medium">No simulations recorded</p><p className="mt-1 text-sm text-muted-foreground">Choose a workflow in Studio and run its first zero-change preview.</p><Button className="mt-4" onClick={() => selectTab("studio")}>Open studio</Button></div>}
             </CardContent>
           </Card>
         </TabsContent>

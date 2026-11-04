@@ -21,7 +21,6 @@ async def contract_profitability(current_user: dict = Depends(get_current_user))
         cid = c.get("client_id", "")
         monthly_value = c.get("value", 0)
         included_hours = c.get("included_hours", 0)
-        hourly_rate = c.get("overage_rate", 100)
 
         # Actual hours used this month
         month_start = datetime.now(timezone.utc).replace(day=1).date().isoformat()

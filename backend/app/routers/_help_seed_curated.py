@@ -7,7 +7,7 @@ can stay useful in the moment of work rather than becoming an implementation
 archive.
 """
 
-HELP_CATALOG_VERSION = "2026-08-14-guide-system-v20-voice-fleet"
+HELP_CATALOG_VERSION = "2026-10-03-remote-and-billing-v23"
 
 
 _WORKSPACE_VISUALS = {
@@ -220,6 +220,18 @@ Read the newest entry before a shift. If an item changes a procedure, follow its
         "The outgoing message appears in the conversation timeline and is linked to the client contact. If delivery fails, correct the mailbox route or contact data before retrying.",
         "Messages sent from NexusMSP are retained in the ticket and client communication history for audit.",
         "[Configure service mailboxes](/help/configure-mailboxes).",
+    ),
+    _guide(
+        "ticket-evidence", "Attach and send protected ticket evidence", "Service desk", "📎", 12.5,
+        "Retain diagnostics, screenshots, customer documents and email evidence against the right ticket without exposing files outside Nexus access controls.",
+        "The correct ticket holds the required evidence, customer-safe files can be sent from Nexus, and every add, download and removal is attributable in the ticket audit trail.",
+        "- Confirm the ticket, client and recipient before uploading or sending any file.\n- Remove passwords, secrets, unrelated client data and unnecessary personal information before attaching evidence.\n- You need **Add ticket evidence** permission to upload. Permanent removal requires the separate **Permanently remove ticket evidence** permission.",
+        "1. Open the ticket and select **Attachments**.\n2. Choose **Upload file** and add only the evidence required for the service record.\n3. Confirm the filename, source and uploader appear in the file list.\n4. To send a file to the customer, open either customer email composer and select it under **Include ticket files**.\n5. Confirm recipients, selected files, message and delivery result before sending.\n6. Use the secure download control when you need to inspect retained evidence.\n7. Remove a file only when it is incorrect, duplicate, or no longer approved; confirm the permanent removal workflow.",
+        "The file is visible on the ticket, outbound correspondence records the attachment count, and the Audit tab shows attached, downloaded or removed evidence with the responsible technician and time.",
+        "- Ticket files are served only through the authorised Nexus ticket route; do not copy or use an old uploads URL.\n- Existing files that are not retained in private storage cannot be attached to outgoing email. Upload an approved replacement if the evidence is still required.\n- A delete failure caused by private artifact storage availability leaves the file and metadata intact; retry after storage health is restored.",
+        "Do not remove material evidence simply to tidy the record. If a file is inaccurate, add corrected evidence and an explanatory ticket note first. If evidence may be relevant to an incident, dispute, security event or compliance matter, stop and escalate through the client service owner or incident process.",
+        "- Nexus records the upload/download/removal actor, ticket, client, filename, source and time in the ticket audit trail.\n- BCC recipients are never added to the ticket participant list.\n- Customer email uses the configured Microsoft 365 route and preserves the ticket thread reference.",
+        "[Work a service ticket](/help/work-ticket), [Send email, SMS, and updates from a ticket](/help/ticket-communications), and [Configure service mailboxes](/help/configure-mailboxes).",
     ),
     _guide(
         "dispatch-and-scheduling", "Dispatch and schedule a technician", "Service desk", "📅", 13,
@@ -549,12 +561,36 @@ CURATED_ARTICLES.extend([
     ),
     _workspace_guide(
         "expected-state",
-        "Define and review expected state",
+        "Use Nexus Assurance",
         "Infrastructure & security", "✅", 51,
         "Define the controls Nexus must be able to prove for a client and route unproven coverage to accountable remediation.",
-        "1. Open **Expected State** and choose the client or baseline.\n2. Review each control’s source, scope, freshness, confidence, and exception path.\n3. Do not mark a control compliant when its source has not reported or cannot prove it.\n4. Assign a named owner and due date for any gap.\n5. Create a ticket, change, or remediation campaign from the control owner flow.\n6. Re-evaluate after the source system reports the corrected state.\n7. Record accepted risk with an expiry and reviewer.",
+        "1. Open **Nexus Assurance** and set the scoped client context if needed.\n2. Review the attention board, then the named source, scope and evidence boundary for each control.\n3. Do not mark a control compliant when its source has not reported or cannot prove it.\n4. Continue into the owning workspace for any investigation, approval, change or remediation.\n5. Re-evaluate after that source records the corrected state.\n6. Record accepted risk through the governing workflow with an expiry and reviewer.",
         "Each control has attributable evidence or a visible exception; gaps have an owner and remediation path; accepted risks have a reason and review date.",
         related="[Use AI Operations safely](/help/auto-ops-hub) and [Review client insights](/help/client-insights-hub).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-academy",
+        "Use Nexus Academy",
+        "Personal workspace", "🎓", 52,
+        "Build role-safe Nexus capability through versioned guidance and retain readiness acknowledgements without confusing them with evidence of live customer work.",
+        "1. Open **Nexus Academy** from Team.\n2. Administrators open **Course studio** to create or edit lessons, add knowledge-check questions and set the passing score. Use **Open security-awareness starter** for an editable starter course.\n3. Save drafts for review, then publish and choose **Assign** to select staff, required status and an optional due date.\n4. Learners open **My learning** or **Security awareness**, review their assigned material, answer the knowledge check and confirm completion.\n5. Course edits create a new version; existing assignments keep their original material and results. Assign the newer version for fresh learning. Archive a course to stop new assignments while retaining history.\n6. Complete the separate first-use readiness steps below the course library. Use the owning ticket, client, device, billing or security workspace for live customer work.",
+        "The account-owned readiness record shows the current guide version, technician and acknowledgement time; all customer-impacting work remains evidenced in its owning workflow.",
+        related="[Browse task-first guides](/documentation-hub?tab=help) and [Open Team](/team-hub).",
+        before="- Confirm that you are in your own signed-in account before acknowledging a learning standard.\n- Treat Academy as capability evidence only; it never grants permission or replaces an approval.\n- Open the linked source workflow if you need to verify a real operational action.",
+        audit="- Academy retains the technician identity, guide version and acknowledgement time.\n- Tickets, approvals, remote sessions, changes and billing records retain the separate evidence for live work.\n- Administrators can review readiness without using that view to alter another technician's evidence.",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-exposure",
+        "Use Nexus Exposure",
+        "Infrastructure & security", "🛰️", 53,
+        "Review client-scoped, retained exposure evidence across domains, certificates, email posture, website health, endpoint findings and canaries without silently turning incomplete coverage into a security claim.",
+        "1. Open **Nexus Exposure** from Nexus Shield and confirm the permitted client context.\n2. Read the discovery boundary and source cards before relying on a signal or quiet result.\n3. Filter observed signals by client, severity or named asset, then inspect the source and evidence time.\n4. Treat unavailable, stale or unassessed coverage as an explicit gap—not as a clean result.\n5. Open the owning source workspace to investigate, request approval, renew, contain or remediate.\n6. Verify the changed state in that source and retain the decision in its governing ticket, change, security or commercial workflow.",
+        "Every conclusion links to a permitted source record; unknowns remain visible; no discovery, containment or remediation is represented as complete merely because this summary page opened.",
+        related="[Use Nexus Assurance](/help/expected-state), [Open Nexus Shield](/nexus-shield), and [Manage domains in Web Studio](/web-studio).",
+        before="- Confirm the client and asset scope before interpreting a domain, certificate, email or endpoint signal.\n- Check source availability and timestamps; a quiet, unavailable or unassessed source is not a pass.\n- Do not initiate external discovery or a customer-impacting change from a summary view without the owning workflow and required approval.",
+        audit="- Nexus Exposure is a read-only composed response; source workspaces retain authoritative evidence.\n- No domain, address, DNS record or external service is queried merely by opening the workspace.\n- All remediation, renewal, containment and accepted-risk evidence remains in its governing workflow.",
         screenshots=[],
     ),
     _workspace_guide(
@@ -808,26 +844,38 @@ CURATED_ARTICLES.extend([
         2,
         "Review business performance, customer resilience, aggregate capacity, cash outlook, and owner decisions without mixing operational noise into the executive view.",
         "1. Open **Executive > CEO Mode**.\n"
-        "2. Read the six headline tiles. **Contract MRR** is agreement-backed; **Contribution** remains Not assessed until explicit direct costs exist; **Cash outlook** is receivables less open purchase commitments, not a bank balance.\n"
-        "3. Read **Owner pulse** and open the first decision only after confirming its source and evidence label.\n"
-        "4. Follow **How the business is moving** from contract revenue to recorded direct costs, service contribution, and the 30-day cash outlook.\n"
-        "5. Review **What needs an owner**. Each item states the source, evidence, decision, and source-workspace link.\n"
-        "6. Review **Service burden outliers**. Nexus compares each client's share of contract MRR with its share of tickets, after-hours tickets, and recorded service time. This is a commercial-fit signal, not an accounting profit claim.\n"
-        "7. Review **Portfolio resilience** and open a client only when a health score, evidence-coverage percentage, or service pattern requires action.\n"
-        "8. Read **Team capacity** as aggregate time coverage only. CEO Mode deliberately does not expose technician location, breaks, or live movement.\n"
-        "9. Review **Evidence confidence** before using any figure externally. Correct missing costs, health sources, time entries, invoices, or purchase-order data in the owning workspace.\n"
-        "10. Select **MSP Simulator** to model a client loss, pricing change, new monthly cost, and optional cash reserve. Confirm the result says no operational changes were made.\n"
-        "11. Select **Board briefing**, review wins, risks, decisions, and outlook, then choose **Save board snapshot** to retain the reviewed point-in-time brief.",
+        "2. Choose the reporting **period** — 30 days, 90 days, or 12 months — in the control bar. The period applies to every windowed figure, including the capacity model and the board pack, and never widens which records you may see.\n"
+        "3. Read the six headline tiles. **Contract MRR** is agreement-backed; **Contribution** remains Not assessed until explicit direct costs exist; **Cash outlook** is receivables less open purchase commitments, not a bank balance.\n"
+        "4. Use the **At your fingertips** command rail to search the loaded briefing by client, owner decision, renewal, or workspace, and to open any owner workspace in one click. The rail searches only evidence this briefing already returned.\n"
+        "5. Read **Owner pulse** and open the first decision only after confirming its source and evidence label.\n"
+        "6. Follow **How the business is moving** from contract revenue to recorded direct costs, service contribution, and the 30-day cash outlook.\n"
+        "7. Review the **Recurring revenue goal**. This is the target you recorded, not a Nexus estimate: progress is contract-backed MRR divided by it. Recording a goal also captures the contract-backed run rate at that moment as its **starting run rate**, so the card states progress as growth since the goal was recorded as well as distance to it. Use **Record a goal** or **Update goal** to set the amount, an optional target month, and an optional owner note. Leave the month blank when you do not want a pace stated — Nexus will state the gap without inventing one. Updating the goal keeps the run rate it was originally recorded against; clearing and recording it again captures a fresh starting line. Clearing the goal reports **No revenue goal is recorded**; no target is ever assumed in its place.\n"
+        "8. Review **What needs an owner**. Each item states the source, evidence, decision, and source-workspace link. A recorded goal whose target month has passed without being met is raised here as an evidenced miss.\n"
+        "9. Review **Receivables ageing**. Buckets are aged from the due date each invoice records; an invoice with no due date appears in **No due date recorded** rather than being treated as current.\n"
+        "10. Review **Revenue concentration**. This is the arithmetic share of contract MRR held by your largest accounts — a relationship-risk signal, not a churn probability.\n"
+        "11. Review **Invoiced vs collected** for monthly movement. A month with no invoice records is drawn as a gap, not as zero revenue, and no change is shown until two months have records.\n"
+        "12. Review **Next renewals**. Only contracts with a recorded end date are listed; a missing end date is an evidence gap, not an assumption that the agreement is evergreen.\n"
+        "13. Review **Service burden outliers**. Nexus compares each client's share of contract MRR with its share of tickets, after-hours tickets, and recorded service time. This is a commercial-fit signal, not an accounting profit claim.\n"
+        "14. Review **Portfolio resilience**. Use the star to add an account to your personal **Owner watchlist**, and switch on **Watched only** to work just those accounts. The watchlist grants no access and changes no client record.\n"
+        "15. Read **Team capacity** as aggregate time coverage only. CEO Mode deliberately does not expose technician location, breaks, or live movement.\n"
+        "16. Review **Evidence confidence** before using any figure externally. Correct missing costs, health sources, time entries, invoices, or purchase-order data in the owning workspace. **Recorded revenue goal** appears here as Missing until a goal exists.\n"
+        "17. Select **MSP Simulator** to model a client loss, pricing change, new monthly cost, and optional cash reserve against the selected period. Confirm the result says no operational changes were made.\n"
+        "18. Select **Board briefing**, review wins, risks, decisions, and outlook, then choose **Save board snapshot** to retain the reviewed point-in-time brief, or **Download owner pack** for a plain-text pack that states each figure's evidence state and your recorded goal.",
         "The figures reconcile to their source workspaces, unavailable accounting inputs remain clearly labelled, the simulator states `will_execute: false`, and a saved board briefing appears as the latest retained snapshot with actor and time.",
         related="[Open CEO Mode](/executive), [Review Billing & Finance](/billing-dashboard), [Open Financial Analytics](/financial-analytics), [Review Client Health](/client-insights?tab=client-health), [Open Contracts](/contracts), and [Review the Audit Trail](/audit-trail).",
         before="- CEO Mode is cross-client commercial information. Use an administrator or explicitly authorised owner role with global client scope.\n"
         "- Reconcile invoices, contracts, purchase orders, and client mappings before relying on the briefing.\n"
         "- Record direct unit, wholesale, or internal costs before describing service contribution as profit.\n"
         "- Treat the simulator as a planning aid; obtain accounting and legal review for material business decisions.\n"
+        "- Record the revenue goal as your own deliberate statement, and agree it with the board before it is used to judge performance. Nexus measures against it but does not set it.\n"
+        "- Record the goal only when the contract and client records behind contract-backed MRR are accurate: the run rate captured at that moment becomes the starting line every later growth figure is measured from.\n"
         "- Discuss aggregate capacity with the team as a planning input, never as individual surveillance.",
-        audit="- CEO Mode reads existing contract, invoice, purchase-order, time, health, project, and approval evidence; it does not edit those records.\n"
+        audit="- CEO Mode reads existing contract, invoice, purchase-order, time, health, project, and approval evidence; it does not edit those records. Ageing, concentration, renewal-calendar, and monthly-trend figures are computed at request time and no second copy of an operational record is stored.\n"
         "- Scenario simulations retain their inputs, assumptions, result, actor, time, correlation ID, and `will_execute: false` state.\n"
         "- Board snapshots retain the source-quality statement that existed when the owner saved the briefing.\n"
+        "- Owner watchlist changes are audited (`executive.watchlist.changed`). The watchlist is partitioned by tenant and by user, so it is personal to one owner, and a client the owner cannot see inside their own tenant is refused rather than stored.\n"
+        "- The recorded revenue goal is one authoritative row per tenant. Recording it, revising it, and clearing it are audited (`executive.mrr_target.changed`), and each revision retains the goal it replaced, so a changed target never erases the one it superseded.\n"
+        "- The goal also records the contract-backed run rate observed when it was recorded: a point-in-time snapshot of the same figure the cockpit reports, not a second source of revenue truth. It is captured only when revenue evidence exists, a revision never rewrites it, and clearing the goal retires it into the retained revision.\n"
         "- Scenario and board-snapshot events are published to the durable Nexus event ledger.\n"
         "- Source corrections remain in their owning billing, contract, project, team, client, or health workflow.",
         at_a_glance="- **Expected time:** 10-20 minutes for weekly review; 20-40 minutes for a monthly board snapshot\n"
@@ -841,8 +889,18 @@ CURATED_ARTICLES.extend([
         "| Capacity looks unexpectedly low | Time-entry date, duration, technician mapping, and active service-team roles | Correct missing time evidence; do not infer that a technician was idle |\n"
         "| Cash outlook differs from the bank | Open invoices, due dates, purchase commitments, tax, and bank feeds | Treat the tile as an operational outlook and reconcile in the accounting platform |\n"
         "| A service-burden finding looks wrong | Contract MRR, ticket client, ticket time, and after-hours timestamp | Correct ownership at the source and refresh CEO Mode |\n"
+        "| Ageing shows **No due date recorded** | Invoice due dates | Add the due date at the source; Nexus will not assume an undated invoice is current |\n"
+        "| Concentration says **Not measurable** | Contract monthly values and client fallback MRR | Record the agreement value or client MRR at the source; concentration is not estimated |\n"
+        "| Invoiced vs collected says **Needs two recorded months** | Invoice created dates for the period | Nothing is broken — a single month is not a trend, and Nexus will not draw one |\n"
+        "| The watchlist star does nothing | Executive watchlist permission, and whether the client is visible in your tenant | Ask an administrator for the owner permission deliberately; a client outside your tenant is refused |\n"
+        "| The goal card says **No revenue goal is recorded** | Whether a target has been recorded for this tenant | Nothing is broken — Nexus does not assume a target. Use **Record a goal** to state one deliberately |\n"
+        "| The goal says **In progress** with no required step | Whether a target month was recorded | Leave it unset to state the gap only, or record a target month to see the arithmetic monthly step |\n"
+        "| The goal says **Goal missed** | The recorded target month and the current contract-backed MRR | Replan the goal, the sales motion, or the price book; revise the goal deliberately rather than deleting the miss from history |\n"
+        "| Progress percentage looks lower than the invoiced total | The difference between contract-backed MRR and invoiced revenue | The goal is measured against recurring contract value, not one-off or part-month billing; reconcile contract values at the source |\n"
+        "| The goal card says no starting run rate was recorded | Whether the goal predates the revenue evidence, or was recorded before this line existed | Nothing is broken — growth is simply not stated. Clear the goal and record it again to capture today's run rate as the starting line |\n"
+        "| Growth since the goal was recorded looks wrong | The starting run rate recorded with the goal, and the contract-backed MRR shown on the card | Both are printed on the card and come from the same figure; correct the contract or client values at the source. A revision deliberately keeps the original starting line |\n"
         "| Access is denied | Executive action permission and global client scope | Ask an administrator to grant the owner role deliberately; do not broaden technician scope |",
-        rollback="CEO Mode does not modify contracts, invoices, clients, projects, or team records. If a saved snapshot used incorrect evidence, correct the source, refresh CEO Mode, save a replacement snapshot, and retain a note explaining why the earlier briefing was superseded. A scenario has no operational rollback because it never executes.",
+        rollback="CEO Mode does not modify contracts, invoices, clients, projects, or team records. If a saved snapshot used incorrect evidence, correct the source, refresh CEO Mode, save a replacement snapshot, and retain a note explaining why the earlier briefing was superseded. A scenario has no operational rollback because it never executes. Removing a client from the owner watchlist deletes your own watchlist row only; it changes no client record and no other owner's list. Revising or clearing the revenue goal changes nothing in contracts or billing: it changes the yardstick the cockpit reports against, and the value it replaced is retained as its last revision. A revision keeps the starting run rate the goal was recorded against, so targeted changes cannot reset reported growth; clearing the goal retires that starting line into the retained revision, and recording a goal again captures the current run rate as a new starting line.",
         screenshots=[],
     ),
 ])
@@ -1199,6 +1257,7 @@ CURATED_ARTICLES.extend([
     _workspace_guide("live-client-chat", "Start a client asset chat", "Service desk", "💬", 18, "Contact the person at an endpoint while preserving the technician and device context.", "1. Open the managed asset or linked ticket.\n2. Choose **Start device chat**.\n3. Confirm the target user and write the purpose of the conversation.\n4. Wait for the client session to connect before requesting action.\n5. Add material outcomes to the ticket when the chat is complete.", "The conversation is linked to the correct asset and any service action is documented on the ticket."),
     _workspace_guide("team-chat-guide", "Use Team Chat for internal coordination", "Service desk", "💭", 19, "Coordinate technicians without losing the separation between internal chat and client audit records.", "1. Choose the relevant channel or create one for the incident or project.\n2. Mention the technician or team needed for the next action.\n3. Link the client, ticket, asset, or war room where context is required.\n4. Keep client-specific decisions in the ticket timeline.\n5. Archive or close temporary coordination channels after handover.", "The team has the needed context and the client record contains the auditable customer-impacting decisions."),
     _workspace_guide("client-documents", "Manage client documents", "Client operations", "📁", 25, "Store and retrieve client documentation without losing ownership or audit context.", "1. Open the client profile and select **Documents**.\n2. Search before uploading to avoid duplicates.\n3. Add a clear title, document type, visibility, and review date.\n4. Upload the approved document or link the source record.\n5. Record a ticket note when the document changes an active service task.", "The document is discoverable from the client profile with an owner, current version, and appropriate visibility."),
+    _workspace_guide("client-follow-ups", "Manage client follow-ups", "Client operations", "🗓️", 28, "Keep an owned, auditable register of client commitments without turning every promise into a ticket or project.", "1. Open the client profile and select **Follow-ups**.\n2. Check the open and overdue commitments before adding another.\n3. Create the follow-up with a clear outcome, due date, priority, type, and named active technician owner.\n4. Reassign the owner when accountability moves; keep the client and commitment intact.\n5. Complete it only after recording the outcome, or create/link a ticket or project when delivery work is required.\n6. If Nexus reports a version conflict, reload the latest record, review the other change, and retry deliberately.", "The client has one current follow-up record with a named owner, due date, status, version, and completion evidence; material changes are visible in the client activity history.", related="[Manage client documents](/help/client-documents) · [Use ticket blueprints](/help/ticket-blueprints)", before="- Confirm the correct client profile before creating or updating a commitment.\n- Use a follow-up for relationship ownership and a promised next step; use a ticket or project for service delivery work.\n- Check the current owner, due date, and open work so the client is not given duplicate or conflicting promises.", audit="- Nexus records create, reassignment, completion, and other material changes against the client history with the actor and timestamp.\n- Keep the follow-up outcome concise and place detailed technical work, approvals, time, and attachments on the linked ticket or project.\n- Do not treat a follow-up as a substitute for a ticket, project plan, or approval record."),
     _workspace_guide("client-subscriptions", "Review client subscriptions", "Client operations", "🔁", 26, "Confirm linked subscriptions, source quantities, and billing relationships for a client.", "1. Open the client profile and select **Subscriptions**.\n2. Review the provider source, quantity, product mapping, and sync state.\n3. Investigate a pending or failed change before approving billing.\n4. Follow the linked agreement or recurring invoice for commercial context.\n5. Create a ticket for any provider data that needs correction.", "Each subscription has a known source, product mapping, and commercial owner; exceptions are visible and owned."),
     _workspace_guide("client-portal-admin", "Manage the client portal", "Client operations", "🌐", 27, "Control client-facing portal access, content, and request visibility safely.", "1. Open the client profile and select **Client Portal**.\n2. Review active contacts and their role.\n3. Enable only the requested client-facing modules.\n4. Preview or test the visible experience with an approved account.\n5. Record material access changes in the client history.", "The intended contacts have only the approved portal access and the client can see the correct content."),
     _workspace_guide("asset-discovery", "Discover managed assets", "Infrastructure & security", "📡", 50, "Bring newly discovered endpoints into the managed asset workflow with correct ownership.", "1. Open **Managed Assets** and choose **Discover**.\n2. Select the client or site scope.\n3. Review discovered devices and remove duplicates or excluded hardware.\n4. Assign the client, site, and management policy.\n5. Enrol or link the Nexus Agent where appropriate.\n6. Confirm the first health check-in.", "The asset appears once, under the correct client, with a current management and health state."),
@@ -1473,5 +1532,149 @@ CURATED_ARTICLES.extend([
         "| Open evidence is unavailable | Permissions and legacy source route | Escalate through the incident ticket and retain the path ID |",
         rollback="Security Graph itself is read-only. If a source remediation or containment action was incorrect, stop further work, use the owning workspace's rollback or release control, validate endpoint and identity state, and record the correction in the linked incident and change.",
         screenshots=[],
+    ),
+])
+
+
+# Focused guides for the newest delivered workspaces: Nexus Remote's
+# single-window multi-display support experience, automated invoice reminders,
+# and Billing settings. They follow the same task-first structure as the core
+# procedures above so the Help Centre stays consistent as new workspaces ship.
+CURATED_ARTICLES.extend([
+    _guide(
+        "nexus-remote-sessions",
+        "Nexus Remote: run an attended multi-display support session",
+        "Infrastructure & security",
+        "🖥️",
+        6,
+        "Start an attended remote session, switch between multiple displays, and move files — all from one session window.",
+        outcome="The technician has run an attended Nexus Remote session across one or more displays, moved the files the job needed through the audited **Files in this session** panel, and ended the session with capture stopped and evidence retained.",
+        before="- Confirm the endpoint is enrolled and online in **Managed Assets** and is running the Nexus Remote Companion.\n"
+        "- Confirm the endpoint user is at the machine — Nexus Remote is consent-driven and they must accept the session prompt.\n"
+        "- Agree a specific purpose for the session; it is shown to the endpoint user and stored in the evidence.\n"
+        "- For file movement, keep transfers under 25MB and know the exact destination path on the endpoint.\n"
+        "- Interactive control needs administrator access or the Agent command execution permission; view-only does not.",
+        steps="### What the controls do\n"
+        "- **Display switcher (All displays / DISPLAY1 / DISPLAY2 …):** every attached monitor is captured in one virtual-desktop frame. Select a display chip to focus a single monitor; select **All displays** to see the complete desktop. Mouse and keyboard input stays exact in both views.\n"
+        "- **Zoom out / Fit / Zoom in:** scales the desktop canvas; **Fit** returns to the full view.\n"
+        "- **Focus desktop / Show evidence:** hides or restores the session evidence sidebar when the desktop needs the space.\n"
+        "- **Full screen:** expands the session window to the whole local display. **Pop out** opens the session in its own browser window.\n"
+        "- **End session:** closes the session immediately and stops all capture on the endpoint.\n"
+        "- **Files in this session:** **Browse** requests a directory listing from the endpoint, **Retrieve** asks the agent to stage one endpoint file for download, and **Send** stages a scanned file for the agent to pull to an explicit destination path. Every transfer appears in the transfer list with its direction and status.\n"
+        "> **Boundary:** Nexus Remote is consent-driven. View-only is the default; interactive control needs the endpoint user to accept a separate control prompt for that session. Clipboard bridging is deliberately not included — use the scanned, audited Files panel instead.\n\n"
+        "### Run a session\n"
+        "1. Open **Devices & RMM -> Nexus Remote** and select the target endpoint.\n"
+        "2. Choose **Start session**, pick **View only** or **Control**, write a specific purpose, tick the consent confirmation, and start. The endpoint user sees the technician name, purpose, and expiry and must accept.\n"
+        "3. Once live, use the **display chips** to move between monitors; the status label shows the live capture time.\n"
+        "4. For interactive work, click the desktop to send input. Function keys, modifiers, and navigation keys are relayed through the agent and recorded.\n"
+        "5. Use the **Files in this session** panel when the job needs a log pulled or a tool pushed, and watch each transfer reach its final status.\n"
+        "6. Choose **End session** when the work is finished. Capture stops immediately and the session evidence is retained.",
+        verify="- The status label reads **Live** with a fresh server capture time.\n"
+        "- The **Session evidence** panel shows consent recorded, input queued, and endpoint acknowledgement for control sessions.\n"
+        "- File transfers reach a final **completed** or **failed** status; anything scanned unsafe is quarantined before delivery.",
+        audit="- Record the session purpose, technician, endpoint, consent decision, control approval, and start/stop times from the retained session evidence.\n"
+        "- Attach the transferred files and their scan results to the linked ticket or client history.\n"
+        "- Raise any refused consent or failed transfer as follow-up work with a named owner.",
+        at_a_glance="- **Expected time:** 5-15 minutes to start; the session length follows the job\n"
+        "- **Risk:** Medium — interactive control sends input to a live endpoint\n"
+        "- **Required access:** Agent command execution permission or administrator; the endpoint user must be present to consent\n"
+        "- **Evidence location:** Nexus Remote session evidence and device activity history",
+        troubleshooting="- **Waiting for endpoint consent:** the endpoint user has not accepted yet — confirm they are at the machine and can see the prompt.\n"
+        "- **Capture is stale or disconnected:** the companion stopped sending frames. Ask the endpoint user to reopen the Nexus Remote Companion from the system tray, then start a new session.\n"
+        "- **Control input does nothing:** the session is view-only, or the control prompt was declined. Restart with **Control** and have the user accept the second prompt.\n"
+        "- **A display shows the wrong area:** choose **All displays** first to see the full virtual desktop, then reselect the display chip.\n"
+        "- **A file will not send:** transfers are limited to 25MB and are signature-checked. Use a direct destination path and confirm the agent is online.",
+        rollback="End the session immediately if the endpoint user withdraws consent or the scope changes. Capture stops on end; if an interactive action was wrong, undo it on the endpoint within the session or hand over to the linked ticket with the session evidence.",
+        related="[Managed assets](/help/managed-assets) for endpoint health, and [Agent installer and enrolment](/help/agent-installer) when the companion is missing.",
+        screenshots=[{"url": "/uploads/help/guides/nexus-remote-session-window.svg", "caption": "Nexus Remote session window — display switcher, live canvas, session evidence, and the Files panel."}],
+    ),
+    _guide(
+        "automated-invoice-reminders",
+        "Invoice reminders: automate payment follow-up",
+        "Billing & commercial",
+        "🔔",
+        6,
+        "Set up automatic payment reminders with custom messages, then review exactly what is scheduled and what was sent.",
+        outcome="The technician has configured the invoice reminder programme, confirmed the schedule it produces, and verified a real delivery in the reminder history.",
+        before="- Confirm each client's verified billing contact — reminders only ever go to that address.\n"
+        "- Connect the Microsoft 365 mailbox in **Settings** if reminders must send for real; otherwise deliveries are recorded as mocked.\n"
+        "- Agree the tone progression (friendly to firm) and the minimum balance to chase with the account owner.\n"
+        "- Check open invoices and their due dates so the stage offsets make sense.",
+        steps="### What the controls do\n"
+        "- **Programme tab:** the reminder stage builder. Each stage has a kind (**Before due date / On due date / After due date**), a day offset, a tone (**Friendly / Professional / Firm**), and full subject and message templates.\n"
+        "- **Variable chips:** insert merge fields such as client name, invoice number, amount due, and due date. The preview renders them with real values before anything is sent.\n"
+        "- **Scheduled tab:** every reminder set up to fire, per invoice, with its planned stage and date.\n"
+        "- **History tab:** every delivery with recipient, amount, status, and who triggered it.\n"
+        "- **Run now:** executes due reminders immediately without waiting for the hourly scheduler.\n"
+        "- **Automation tiles:** show whether the programme is active, how many stages are enabled, and what is due in the next seven days.\n\n"
+        "### Set up the programme\n"
+        "1. Open **Billing -> Invoice reminders** and turn the programme on.\n"
+        "2. Review the default stages; add, edit, or disable stages to match how your MSP follows up.\n"
+        "3. For each stage, set the trigger day and write the message. Keep the tone progression gentle to firm across the sequence.\n"
+        "4. Set a **minimum balance** so small invoices are not chased, and enable **business days only** if weekend sends are unwanted.\n"
+        "5. Use the preview to confirm the rendered subject and message, then save. The hourly scheduler takes over.",
+        verify="- The **Scheduled** tab lists upcoming reminders with dates that match your stage rules.\n"
+        "- After a send, the **History** tab shows the delivery record against the verified billing contact.\n"
+        "- Re-running the scheduler never double-sends: one reminder fires once per invoice per stage per day.",
+        audit="- Every delivery records the invoice, stage, recipient, amount, status, and trigger source in the reminder history.\n"
+        "- Programme changes are recorded as audited billing-configuration updates.\n"
+        "- Keep the delivery record with the client's financial history when a dispute arises.",
+        at_a_glance="- **Expected time:** 10-20 minutes\n"
+        "- **Risk:** Medium — reminders are customer-facing emails on a schedule\n"
+        "- **Required access:** Billing or administrator permission\n"
+        "- **Evidence location:** Reminder history and the billing configuration audit",
+        troubleshooting="- **Nothing is scheduled:** the programme is paused, no invoices are open, or every open invoice is below the minimum balance.\n"
+        "- **A reminder shows as mocked:** the Microsoft 365 mailbox is not connected. The delivery is recorded safely and sends for real once the mailbox is connected in **Settings**.\n"
+        "- **Wrong recipient:** reminders only go to the verified billing contact. Update the client's billing contact rather than the template.\n"
+        "- **A reminder went out early or late:** check the stage day offset, the business-days-only setting, and the invoice due date.",
+        rollback="Pause the programme to stop all scheduled sends immediately. Already-sent reminders cannot be recalled, so follow up any incorrect reminder with the client directly and record it in the client's billing history.",
+        related="[Create an invoice from ticket work](/help/invoice-from-ticket) and [Recurring billing](/help/recurring-billing).",
+        screenshots=[{"url": "/uploads/help/guides/invoices-workspace.png", "caption": "Billing workspace — reminder outcomes and invoice status are reflected on the invoice list."}],
+    ),
+    _guide(
+        "billing-settings-workspace",
+        "Billing settings: invoice numbering, approvals and tax compliance",
+        "Billing & commercial",
+        "🧾",
+        7,
+        "Configure organisation-wide invoice numbering, the approval policy for high-value invoices, and AU/NZ tax invoice details.",
+        outcome="The technician has configured organisation-wide invoice numbering, the high-value approval policy, and AU/NZ tax details, and verified each one on a test invoice.",
+        before="- Decide the numbering pattern, the financial year start month, and the next sequence number before changing anything.\n"
+        "- Collect the business number (ABN or NZBN), GST registration and rate, company contact details, and remittance bank details.\n"
+        "- Confirm which role may approve high-value invoices and the approval threshold.\n"
+        "- Remember existing invoice numbers never change when you edit the format.",
+        steps="### What the controls do\n"
+        "- **Invoice numbering -> Number format:** the pattern used for new invoice numbers. Click a variable chip to insert a token: **{YYYY}** calendar year, **{YY}** short year, **{MM}** month, **{FY}** financial year, **{CLIENT}** client code, **{SEQ}** sequence number. The live preview shows the next number as you type.\n"
+        "- **Financial year starts:** the month used for the **{FY}** token and yearly sequence resets. July is the AU default.\n"
+        "- **Next sequence number / Include client code / Reset sequence each financial year:** optional numbering behaviour.\n"
+        "- **Approvals:** enable approval for high-value invoices, set the threshold, and choose which role may approve or reject. Requests and decisions are written to the audit log.\n"
+        "- **Tax & compliance:** country, ABN or NZBN, GST registration and rate, the **Tax invoice** label, company contact details, and the remittance bank details printed on invoices and remittance advice.\n"
+        "> **Boundary:** these settings are organisation-wide and administrator-only. Bank details never leave billing documents.\n\n"
+        "### Configure numbering\n"
+        "1. Open **Billing -> Configuration & insights -> Billing settings**.\n"
+        "2. On **Invoice numbering**, build the format with the variable chips — for example **INV-{FY}-{SEQ:05d}**.\n"
+        "3. Check the preview reads as expected, including the zero-padded sequence.\n"
+        "4. Set the financial year start month and confirm the next sequence number, then select **Save numbering**. The format applies to the next invoice created.\n\n"
+        "### Configure approvals and tax\n"
+        "1. On **Approvals**, enable high-value approval, set the threshold, and choose the approver role.\n"
+        "2. On **Tax & compliance**, enter the country and business number, confirm the GST rate, and fill the company and remittance bank details.\n"
+        "3. Select **Save** on each tab. Every change is recorded as an audited billing-configuration update.",
+        verify="- Create a draft invoice and confirm its number matches the preview pattern.\n"
+        "- An invoice at or above the approval threshold routes to **Awaiting approval** instead of sending.\n"
+        "- Generate an invoice PDF and confirm the tax invoice label, business number, and bank details appear correctly.",
+        audit="- Every numbering, approval, and tax change is written to the audit log with actor and timestamp.\n"
+        "- Approval requests and decisions retain requester, approver, amount, and outcome.\n"
+        "- Generated invoice PDFs are the evidence that the tax invoice details print correctly.",
+        at_a_glance="- **Expected time:** 15-25 minutes\n"
+        "- **Risk:** Medium — these settings affect every new invoice the organisation issues\n"
+        "- **Required access:** Administrator (organisation-wide billing configuration)\n"
+        "- **Evidence location:** Billing configuration audit log and generated invoice PDFs",
+        troubleshooting="- **The save button is disabled:** the format preview is showing an error. Formats must have balanced braces and should include **{SEQ}**.\n"
+        "- **Numbers restarted unexpectedly:** the financial year reset is on and the year boundary passed. Set the next sequence number to continue the old run.\n"
+        "- **An approval cannot be granted:** only the configured approver role (or an administrator) can decide approval requests.\n"
+        "- **Tax details are missing from the PDF:** confirm the country, GST registration, and that the billing settings saved successfully.",
+        rollback="Restore the previous format, sequence number, threshold, or tax details in the same Billing settings tab. Numbering applies only to invoices created after the change, so correct any mis-numbered drafts before sending and record the correction in the client's billing history.",
+        related="[Invoice reminders: automate payment follow-up](/help/automated-invoice-reminders) and [Create an invoice from ticket work](/help/invoice-from-ticket).",
+        screenshots=[{"url": "/uploads/help/guides/invoices-workspace.png", "caption": "Billing workspace — new invoice numbers and approval state are reflected here."}],
     ),
 ])

@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { ResponseTimeline } from "@/components/security/ResponseTimeline";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const SEV_BADGE = {
   critical: "bg-rose-500/20 text-rose-400 border-rose-500/30",
@@ -44,6 +45,8 @@ const VULNERABILITY_SEVERITIES = [
   { key: "low", label: "Low", tone: "text-sky-400" },
 ];
 
+const SECURITY_SURFACE = "overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.95)]";
+
 export default function SecurityDashboardPage() {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
@@ -54,6 +57,7 @@ export default function SecurityDashboardPage() {
   const [endpointSecurity, setEndpointSecurity] = useState(null);
   const [vulnerabilityData, setVulnerabilityData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sourceFailures, setSourceFailures] = useState([]);
 
   // Incident response state
   const [actionDialog, setActionDialog] = useState(null); // { incident, action }
@@ -99,30 +103,34 @@ export default function SecurityDashboardPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [huntRes, socRes, endpointRes, vulnerabilityRes] = await Promise.all([
-        axios.get(`${API}/huntress/summary`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/soc/dashboard`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/endpoint-security/scores`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/vulnerability-scanner/overview`, { headers }).catch(() => ({ data: null })),
-      ]);
-      setHunt(huntRes.data);
-      setSoc(socRes.data);
-      setEndpointSecurity(endpointRes.data);
-      setVulnerabilityData(vulnerabilityRes.data);
-    } catch {
-      toast.error("Failed to load security data");
-    } finally { setLoading(false); }
+    const sources = [
+      { key: "huntress", label: "Huntress", request: axios.get(`${API}/huntress/summary`, { headers }) },
+      { key: "soc", label: "SOC evidence", request: axios.get(`${API}/soc/dashboard`, { headers }) },
+      { key: "endpoint", label: "Endpoint posture", request: axios.get(`${API}/endpoint-security/scores`, { headers }) },
+      { key: "vulnerabilities", label: "Vulnerability scanner", request: axios.get(`${API}/vulnerability-scanner/overview`, { headers }) },
+    ];
+    const results = await Promise.allSettled(sources.map((source) => source.request));
+    const valueFor = (key) => results[sources.findIndex((source) => source.key === key)];
+    const failureLabels = results.flatMap((result, index) => result.status === "rejected" ? [sources[index].label] : []);
+    setHunt(valueFor("huntress")?.status === "fulfilled" ? valueFor("huntress").value.data : null);
+    setSoc(valueFor("soc")?.status === "fulfilled" ? valueFor("soc").value.data : null);
+    setEndpointSecurity(valueFor("endpoint")?.status === "fulfilled" ? valueFor("endpoint").value.data : null);
+    setVulnerabilityData(valueFor("vulnerabilities")?.status === "fulfilled" ? valueFor("vulnerabilities").value.data : null);
+    setSourceFailures(failureLabels);
+    if (failureLabels.length === sources.length) toast.error("Nexus could not retrieve security evidence. You can retry safely.");
+    setLoading(false);
   }, [token]); // eslint-disable-line
 
   useEffect(() => { load(); }, [load]);
 
   if (loading && !hunt && !soc) {
     return (
-      <div className="flex h-96 items-center justify-center text-muted-foreground">
-        <Loader2 className="mr-2 h-6 w-6 animate-spin" />Loading Security Operations Center...
-      </div>
+      <WorkspaceLoadingState className="mt-4" label="Loading security operations evidence…" />
     );
+  }
+
+  if (!loading && sourceFailures.length === 4) {
+    return <WorkspaceErrorState className="mt-4" title="Security evidence is unavailable" description="Nexus could not retrieve the current security sources. No response action has been attempted." onRetry={load} retryLabel="Retry security evidence" />;
   }
 
   const configured = !!hunt?.configured;
@@ -207,8 +215,9 @@ export default function SecurityDashboardPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem asChild><Link to="/soc-feed"><Activity className="mr-2 h-4 w-4" />SOC feed</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/soc-realtime"><Activity className="mr-2 h-4 w-4" />SOC realtime</Link></DropdownMenuItem>
                 <DropdownMenuItem asChild><Link to="/security-graph"><GitBranch className="mr-2 h-4 w-4" />Security graph</Link></DropdownMenuItem>
-                <DropdownMenuItem asChild><Link to="/soc-realtime"><Zap className="mr-2 h-4 w-4" />Smart automation</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/smart-automation"><Zap className="mr-2 h-4 w-4" />Smart automation</Link></DropdownMenuItem>
                 <DropdownMenuItem asChild><Link to="/threat-timeline"><History className="mr-2 h-4 w-4" />Threat timeline</Link></DropdownMenuItem>
                 <DropdownMenuItem asChild><Link to="/identity-threats"><Users className="mr-2 h-4 w-4" />Identity threats</Link></DropdownMenuItem>
               </DropdownMenuContent>
@@ -229,8 +238,17 @@ export default function SecurityDashboardPage() {
         <HeroTile label={configured ? "Assessed organisations" : "Verified posture"} value={assessmentValue} animated={false} icon={Shield} glow="indigo" subtitle={configured ? "Huntress organisations" : "Verified / enrolled endpoints"} testId="sec-metric-orgs" />
       </div>
 
+      {sourceFailures.length > 0 && (
+        <Card className={`${SECURITY_SURFACE} border-amber-400/25 bg-amber-400/[0.045]`} data-testid="security-source-status">
+          <CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">Partial evidence view</p><p className="mt-1 text-sm font-medium">{sourceFailures.join(" and ")} {sourceFailures.length === 1 ? "is" : "are"} currently unavailable.</p><p className="mt-1 text-xs text-muted-foreground">Unavailable sources are shown as not assessed, not as healthy. Existing response workflows remain unchanged.</p></div>
+            <Button size="sm" variant="outline" className="shrink-0 rounded-xl" onClick={load}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry sources</Button>
+          </CardContent>
+        </Card>
+      )}
+
         {/* Threat Level Banner */}
-        <Card className={`${levelTone.bg} overflow-hidden`} data-testid="threat-level-banner">
+        <Card className={`${levelTone.bg} ${SECURITY_SURFACE}`} data-testid="threat-level-banner">
           <CardContent className="py-4 px-5 flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-4">
               <div className={`w-14 h-14 rounded-full flex items-center justify-center ${levelTone.bg} ${levelTone.pulse}`}>
@@ -251,7 +269,7 @@ export default function SecurityDashboardPage() {
         </Card>
 
         {/* Endpoint Health */}
-        <Card>
+        <Card className={SECURITY_SURFACE}>
           <CardContent className="py-3 px-5">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">Endpoint Health</span>
@@ -265,7 +283,7 @@ export default function SecurityDashboardPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Recent Huntress Incidents */}
-          <Card className="lg:col-span-8" data-testid="recent-incidents">
+          <Card className={`lg:col-span-8 ${SECURITY_SURFACE}`} data-testid="recent-incidents">
             <CardContent className="p-0">
               <div className="flex items-center justify-between px-5 py-3 border-b border-border">
                 <div className="flex items-center gap-2 text-sm font-semibold">
@@ -347,15 +365,15 @@ export default function SecurityDashboardPage() {
                     }
                     {configured && (hunt.recent_incidents || []).length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-xs">
-                          No recent incidents. All quiet from Huntress.
+                        <TableCell colSpan={6} className="py-10 text-center text-xs text-muted-foreground">
+                          <div className="flex flex-col items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-400" />No recent incidents are open in Huntress.</div>
                         </TableCell>
                       </TableRow>
                     )}
                     {!configured && (soc?.incidents || []).length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-10 text-muted-foreground text-xs">
-                          No persisted security alerts. Connect Huntress to add managed detection and response telemetry.
+                        <TableCell colSpan={5} className="py-10 text-center text-xs text-muted-foreground">
+                          <div className="flex flex-col items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-400" />No persisted security alerts are open. Connect Huntress to add live MDR telemetry.</div>
                         </TableCell>
                       </TableRow>
                     )}
@@ -369,7 +387,7 @@ export default function SecurityDashboardPage() {
           <div className="lg:col-span-4 space-y-4">
             {configured ? (
               <>
-                <Card data-testid="severity-mix">
+                <Card className={SECURITY_SURFACE} data-testid="severity-mix">
                   <CardContent className="p-4">
                     <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-3">Severity Mix</div>
                     <div className="space-y-2">
@@ -392,7 +410,7 @@ export default function SecurityDashboardPage() {
                   </CardContent>
                 </Card>
 
-                <Card data-testid="per-org-breakdown">
+                <Card className={SECURITY_SURFACE} data-testid="per-org-breakdown">
                   <CardContent className="p-0">
                     <div className="px-4 py-3 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
                       Top Organizations
@@ -420,7 +438,7 @@ export default function SecurityDashboardPage() {
                 </Card>
 
                 {(hunt.recent_signals || []).length > 0 && (
-                  <Card data-testid="recent-signals">
+                  <Card className={SECURITY_SURFACE} data-testid="recent-signals">
                     <CardContent className="p-0">
                       <div className="px-4 py-3 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
                         Recent Signals
@@ -442,7 +460,7 @@ export default function SecurityDashboardPage() {
               </>
             ) : (
               /* Not configured — big CTA */
-              <Card className="border-orange-500/30 bg-orange-500/5">
+              <Card className={`${SECURITY_SURFACE} border-orange-500/30 bg-orange-500/5`}>
                 <CardContent className="p-5 text-center space-y-3">
                   <Shield className="w-10 h-10 text-orange-400 mx-auto" />
                   <div className="text-sm font-semibold">Connect Huntress to light up this cockpit</div>
@@ -457,7 +475,7 @@ export default function SecurityDashboardPage() {
             )}
 
             {/* Non-Huntress secondary telemetry */}
-            <Card data-testid="vuln-summary">
+            <Card className={SECURITY_SURFACE} data-testid="vuln-summary">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold flex items-center gap-1">
@@ -482,7 +500,7 @@ export default function SecurityDashboardPage() {
               </CardContent>
             </Card>
 
-            <Card data-testid="extra-threats">
+            <Card className={SECURITY_SURFACE} data-testid="extra-threats">
               <CardContent className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs"><Users className="w-3.5 h-3.5 text-cyan-400" />Identity threats</div>
@@ -501,7 +519,7 @@ export default function SecurityDashboardPage() {
         </div>
 
         {/* Quick nav chips to other security surfaces */}
-        <Card>
+        <Card className={SECURITY_SURFACE}>
           <CardContent className="p-3">
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-2 flex items-center gap-1">
               <Link2 className="w-3 h-3" />Jump to

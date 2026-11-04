@@ -11,8 +11,8 @@ Collections used:
   db.maintenance_window_runs  per-device per-action records
 """
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any
 import os
 import uuid
 import json
@@ -23,6 +23,13 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
 from app.routers.nexus_agent import require_agent_operator
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,8 +38,11 @@ router = APIRouter()
 VALID_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
 
 
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+def _unsafe_parallel_actions(actions: list[str]) -> bool:
+    return "reboot" in actions and bool({"install-patches", "install-winget"}.intersection(actions))
+
+
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _parse_dt(s):
@@ -45,9 +55,134 @@ def _parse_dt(s):
             dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+        return dt.astimezone(timezone.utc)
     except Exception:
         return None
+
+
+def _normalise_device_ids(value: Any) -> list[str]:
+    """Return stable, de-duplicated device IDs without accepting scalar aliases."""
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def _window_client_ids(window: dict) -> list[str]:
+    values = _normalise_device_ids(window.get("client_ids"))
+    if values:
+        return values
+    legacy_client_id = str(window.get("client_id") or "").strip()
+    return [legacy_client_id] if legacy_client_id else []
+
+
+def _window_site_ids(window: dict) -> list[str]:
+    return _normalise_device_ids(window.get("site_ids"))
+
+
+def _window_scope_query(current_user: dict, query: dict | None = None) -> dict:
+    """Return a fail-closed list query for maintenance-window aggregate scope.
+
+    A restricted technician may only list windows whose complete client/site
+    target set is within their existing scope.  This deliberately hides legacy
+    multi-client records that have no durable aggregate provenance.
+    """
+    operational = dict(query or {})
+    scope = effective_scope(current_user)
+    if scope["mode"] == "all":
+        return tenant_scoped_query(current_user, operational)
+
+    client_clause = {
+        "$or": [
+            {
+                "client_ids.0": {"$exists": True},
+                "client_ids": {"$not": {"$elemMatch": {"$nin": scope["client_ids"]}}},
+            },
+            {
+                "client_ids": {"$exists": False},
+                "client_id": {"$in": scope["client_ids"]},
+            },
+        ]
+    }
+    clauses = ([operational] if operational else []) + [client_clause]
+    if scope["site_ids"]:
+        clauses.append({
+            "site_ids": {
+                "$exists": True,
+                "$not": {"$elemMatch": {"$nin": scope["site_ids"]}},
+            }
+        })
+    return tenant_scoped_query(current_user, clauses[0] if len(clauses) == 1 else {"$and": clauses})
+
+
+def _window_tenant_query(window: dict, query: dict | None = None) -> dict:
+    """Scope a worker-side child operation to the window's immutable tenant."""
+    return tenant_scoped_query({"tenant_id": str(window.get("tenant_id") or "nexus-local")}, query)
+
+
+async def _resolve_scoped_devices(current_user: dict, device_ids: Any, *, operation: str) -> list[dict]:
+    """Resolve every requested asset before mutating or queuing any work."""
+    ids = _normalise_device_ids(device_ids)
+    if not ids:
+        raise HTTPException(400, "device_ids required")
+    return [
+        await assert_tenant_record_scope(
+            current_user,
+            db.devices,
+            device_id,
+            operation=operation,
+            resource_name="Managed asset",
+        )
+        for device_id in ids
+    ]
+
+
+async def _load_scoped_window(wid: str, current_user: dict, *, operation: str) -> tuple[dict, list[dict]]:
+    """Load a window and prove every current target remains in technician scope."""
+    window = await db.maintenance_windows.find_one(tenant_scoped_query(current_user, {"id": wid}), {"_id": 0})
+    if not window:
+        raise HTTPException(404, "Window not found")
+
+    device_ids = _normalise_device_ids(window.get("device_ids"))
+    if not device_ids:
+        await assert_client_scope(
+            current_user,
+            window.get("client_id"),
+            operation=operation,
+            mask_not_found=True,
+        )
+        return window, []
+
+    devices = await _resolve_scoped_devices(current_user, device_ids, operation=operation)
+    declared_client_ids = set(_window_client_ids(window))
+    current_client_ids = {str(device.get("client_id") or "").strip() for device in devices}
+    if declared_client_ids and (not current_client_ids or current_client_ids != declared_client_ids):
+        raise HTTPException(409, "Maintenance window target ownership changed and requires revalidation")
+    return window, devices
+
+
+async def _current_window_device(window: dict, stored_device: dict) -> tuple[dict | None, str | None]:
+    """Use current device ownership when a trusted scheduler dispatches a window."""
+    device_id = str(stored_device.get("id") or "").strip()
+    if not device_id:
+        return None, "window contains an invalid target device"
+    allowed_client_ids = set(_window_client_ids(window))
+    if not allowed_client_ids:
+        return None, "window requires client-scope revalidation before dispatch"
+    device = await db.devices.find_one(_window_tenant_query(window, {"id": device_id}), {"_id": 0})
+    if not device:
+        return None, "target device no longer exists"
+    current_client_id = str(device.get("client_id") or "").strip()
+    stored_client_id = str(stored_device.get("client_id") or "").strip()
+    if (
+        not current_client_id
+        or current_client_id not in allowed_client_ids
+        or not stored_client_id
+        or stored_client_id != current_client_id
+    ):
+        return None, "target client ownership changed; command was not dispatched"
+    if str(device.get("site_id") or "").strip() != str(stored_device.get("site_id") or "").strip():
+        return None, "target site changed; command was not dispatched"
+    return device, None
 
 
 async def _ai_chat(session_id: str, system_msg: str):
@@ -68,16 +203,18 @@ async def list_windows(status: str | None = None, limit: int = 100, current_user
     q = {}
     if status:
         q["status"] = status
-    items = await db.maintenance_windows.find(q, {"_id": 0}).sort("scheduled_at", -1).to_list(limit)
+    items = await db.maintenance_windows.find(
+        _window_scope_query(current_user, q), {"_id": 0}
+    ).sort("scheduled_at", -1).to_list(limit)
     return items
 
 
 @router.get("/maintenance-windows/{wid}")
 async def get_window(wid: str, current_user: dict = Depends(require_agent_operator)):
-    w = await db.maintenance_windows.find_one({"id": wid}, {"_id": 0})
-    if not w:
-        raise HTTPException(404, "Window not found")
-    runs = await db.maintenance_window_runs.find({"window_id": wid}, {"_id": 0}).to_list(2000)
+    w, _ = await _load_scoped_window(
+        wid, current_user, operation="maintenance_window.read"
+    )
+    runs = await db.maintenance_window_runs.find(_window_tenant_query(w, {"window_id": wid}), {"_id": 0}).to_list(2000)
     w["runs"] = runs
     return w
 
@@ -93,40 +230,57 @@ async def create_window(data: dict, current_user: dict = Depends(require_agent_o
     for a in actions:
         if a not in VALID_ACTIONS:
             raise HTTPException(400, f"invalid action {a}; must be in {sorted(VALID_ACTIONS)}")
+    if _unsafe_parallel_actions(actions):
+        raise HTTPException(400, "Schedule reboots separately from update installation; maintenance actions are not sequenced")
     scheduled = _parse_dt(data.get("scheduled_at"))
     if not scheduled:
         raise HTTPException(400, "scheduled_at required (ISO or 'YYYY-MM-DD HH:MM:SS')")
-    device_ids = list(dict.fromkeys(str(device_id).strip() for device_id in device_ids if str(device_id).strip()))
-    devices = await db.devices.find({"id": {"$in": device_ids}}, {"_id": 0}).to_list(500)
-    found_ids = {device.get("id") for device in devices}
-    unknown_ids = [device_id for device_id in device_ids if device_id not in found_ids]
-    if unknown_ids:
-        raise HTTPException(400, f"Unknown managed asset: {unknown_ids[0]}")
+    device_ids = _normalise_device_ids(device_ids)
+    devices = await _resolve_scoped_devices(
+        current_user, device_ids, operation="maintenance_window.create"
+    )
     unmanaged = [device.get("name") or device.get("id") for device in devices if not device.get("nexus_agent_id")]
     if unmanaged:
         raise HTTPException(409, f"Nexus Agent is not enrolled on: {', '.join(unmanaged[:3])}")
+    client_ids = sorted({str(device.get("client_id") or "").strip() for device in devices})
+    if not client_ids or "" in client_ids:
+        raise HTTPException(409, "Each maintenance target requires a client binding")
+    site_ids = sorted({str(device.get("site_id") or "").strip() for device in devices if str(device.get("site_id") or "").strip()})
     parent_ticket_id = (data.get("parent_ticket_id") or "").strip()
     if parent_ticket_id:
         parent_ticket = await db.tickets.find_one(
-            {"$or": [{"id": parent_ticket_id}, {"ticket_number": parent_ticket_id}]},
-            {"_id": 0, "id": 1, "ticket_number": 1},
+            tenant_scoped_query(current_user, {"$or": [{"id": parent_ticket_id}, {"ticket_number": parent_ticket_id}]}),
+            {"_id": 0, "id": 1, "ticket_number": 1, "client_id": 1, "site_id": 1},
         )
         if not parent_ticket:
             raise HTTPException(400, "Related ticket was not found")
+        await assert_client_scope(
+            current_user,
+            parent_ticket.get("client_id"),
+            site_id=parent_ticket.get("site_id"),
+            operation="maintenance_window.link_ticket",
+            mask_not_found=True,
+        )
+        if not parent_ticket.get("client_id") or set(client_ids) != {str(parent_ticket["client_id"])}:
+            raise HTTPException(409, "Related ticket and maintenance targets must belong to the same client")
         parent_ticket_id = parent_ticket["id"]
     devices_meta = [{
         "id": d["id"], "name": d.get("name"), "client_id": d.get("client_id"), "client_name": d.get("client_name"),
-        "nexus_agent_id": d.get("nexus_agent_id"), "status": d.get("status"),
+        "site_id": d.get("site_id"), "nexus_agent_id": d.get("nexus_agent_id"), "status": d.get("status"),
     } for d in devices]
 
     window = {
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(current_user),
         "name": (data.get("name") or "").strip()[:140] or f"Maintenance - {scheduled.strftime('%Y-%m-%d %H:%M')}",
         "description": (data.get("description") or "").strip()[:600],
         "scheduled_at": scheduled.isoformat(),
         "actions": actions,
         "device_ids": [d["id"] for d in devices_meta],
         "devices_meta": devices_meta,
+        "client_ids": client_ids,
+        "site_ids": site_ids,
+        "client_id": client_ids[0] if len(client_ids) == 1 else None,
         "parent_ticket_id": parent_ticket_id or None,
         "script_id": data.get("script_id"),
         "status": "scheduled",
@@ -142,7 +296,12 @@ async def create_window(data: dict, current_user: dict = Depends(require_agent_o
         window["id"],
         window["name"],
         f"{len(device_ids)} assets - {scheduled.isoformat()}",
-        metadata={"actions": actions, "device_ids": window["device_ids"], "parent_ticket_id": parent_ticket_id or None},
+        metadata={
+            "actions": actions,
+            "device_ids": window["device_ids"],
+            "client_ids": client_ids,
+            "parent_ticket_id": parent_ticket_id or None,
+        },
     )
     window.pop("_id", None)
     return window
@@ -150,20 +309,21 @@ async def create_window(data: dict, current_user: dict = Depends(require_agent_o
 
 @router.delete("/maintenance-windows/{wid}")
 async def cancel_window(wid: str, current_user: dict = Depends(require_agent_operator)):
-    w = await db.maintenance_windows.find_one({"id": wid}, {"_id": 0, "status": 1, "name": 1})
-    if not w:
-        raise HTTPException(404, "Window not found")
+    w, _ = await _load_scoped_window(
+        wid, current_user, operation="maintenance_window.cancel"
+    )
     if w.get("status") != "scheduled":
         raise HTTPException(400, f"Only a scheduled window can be cancelled (current status: {w.get('status')})")
-    await db.maintenance_windows.update_one({"id": wid}, {"$set": {"status": "cancelled", "cancelled_at": _now_iso(), "cancelled_by": current_user.get("name")}})
+    await db.maintenance_windows.update_one(tenant_scoped_query(current_user, {"id": wid}), {"$set": {"status": "cancelled", "cancelled_at": _now_iso(), "cancelled_by": current_user.get("name")}})
     await log_activity(current_user, "maintenance_window_cancelled", "maintenance_window", wid, w["name"], "cancelled")
     return {"success": True}
 
 
 @router.post("/maintenance-windows/{wid}/run-now")
 async def run_now(wid: str, current_user: dict = Depends(require_agent_operator)):
+    await _load_scoped_window(wid, current_user, operation="maintenance_window.run_now")
     claimed = await db.maintenance_windows.update_one(
-        {"id": wid, "status": "scheduled"},
+        tenant_scoped_query(current_user, {"id": wid, "status": "scheduled"}),
         {"$set": {
             "status": "dispatching",
             "run_now_requested_at": _now_iso(),
@@ -171,7 +331,7 @@ async def run_now(wid: str, current_user: dict = Depends(require_agent_operator)
         }},
     )
     if claimed.modified_count != 1:
-        window = await db.maintenance_windows.find_one({"id": wid}, {"_id": 0, "status": 1})
+        window = await db.maintenance_windows.find_one(tenant_scoped_query(current_user, {"id": wid}), {"_id": 0, "status": 1})
         if not window:
             raise HTTPException(404, "Window not found")
         raise HTTPException(409, f"Window is {window.get('status')}")
@@ -194,6 +354,7 @@ async def _run_device_action(device: dict, action: str, window: dict) -> dict:
     """
     rec = {
         "id": str(uuid.uuid4()),
+        "tenant_id": window.get("tenant_id") or "nexus-local",
         "window_id": window["id"],
         "device_id": device["id"],
         "device_name": device.get("name"),
@@ -205,6 +366,11 @@ async def _run_device_action(device: dict, action: str, window: dict) -> dict:
     if not device.get("nexus_agent_id"):
         rec.update({"status": "skipped", "message": "device has no enrolled Nexus Agent", "finished_at": _now_iso()})
         return rec
+    if action in {"install-patches", "install-winget"}:
+        platform = str(device.get("os") or device.get("os_name") or "").strip().lower()
+        if "windows" not in platform:
+            rec.update({"status": "skipped", "message": "Windows update action requires a Windows platform reported by the endpoint", "finished_at": _now_iso()})
+            return rec
     try:
         from app.routers.nexus_agent import queue_command_for_device
         if action == "reboot":
@@ -223,9 +389,13 @@ $session=New-Object -ComObject Microsoft.Update.Session
 $updates=$session.CreateUpdateSearcher().Search(\"IsInstalled=0 and Type='Software' and IsHidden=0\").Updates
 $toInstall=New-Object -ComObject Microsoft.Update.UpdateColl
 foreach($u in $updates){ if(-not $u.EulaAccepted){$u.AcceptEula()}; [void]$toInstall.Add($u) }
-if($toInstall.Count -eq 0){'No applicable Windows updates'; exit 0}
-$result=$session.CreateUpdateInstaller(); $result.Updates=$toInstall; $out=$result.Install()
-[pscustomobject]@{installed=$toInstall.Count;result_code=$out.ResultCode;reboot_required=$out.RebootRequired}|ConvertTo-Json -Compress"""
+if($toInstall.Count -eq 0){[pscustomobject]@{phase='no_updates';attempted=0;updates=@()}|ConvertTo-Json -Compress; exit 0}
+$downloader=$session.CreateUpdateDownloader(); $downloader.Updates=$toInstall; $download=$downloader.Download()
+if($download.ResultCode -ne 2){[pscustomobject]@{phase='download';result_code=[int]$download.ResultCode}|ConvertTo-Json -Compress; exit 1}
+$installer=$session.CreateUpdateInstaller(); $installer.Updates=$toInstall; $out=$installer.Install()
+$results=@(); for($i=0;$i -lt $toInstall.Count;$i++){ $item=$out.GetUpdateResult($i); $results+=@{title=$toInstall.Item($i).Title;result_code=[int]$item.ResultCode;hresult=[int]$item.HResult} }
+[pscustomobject]@{phase='install';attempted=$toInstall.Count;result_code=[int]$out.ResultCode;reboot_required=$out.RebootRequired;updates=$results}|ConvertTo-Json -Compress -Depth 4
+if($out.ResultCode -ne 2 -or @($results | Where-Object { $_.result_code -ne 2 }).Count -gt 0){exit 1}"""
             command_id = await queue_command_for_device(device, "run_powershell", {"script": script, "timeout_sec": 7200}, queued_by="maintenance-window")
         elif action == "install-winget":
             policy = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
@@ -237,7 +407,7 @@ $result=$session.CreateUpdateInstaller(); $result.Updates=$toInstall; $out=$resu
             command_id = await queue_command_for_device(device, "run_powershell", {"script": "$ErrorActionPreference='Continue'; " + commands, "timeout_sec": 7200}, queued_by="maintenance-window")
         elif action == "run-script":
             script_id = window.get("script_id")
-            script = await db.scripts.find_one({"id": script_id}, {"_id": 0}) if script_id else None
+            script = await db.scripts.find_one(_window_tenant_query(window, {"id": script_id}), {"_id": 0}) if script_id else None
             if not script or not (script.get("content") or "").strip():
                 rec.update({"status": "skipped", "message": "select a valid script for this maintenance window", "finished_at": _now_iso()})
                 return rec
@@ -257,7 +427,7 @@ async def _post_completion_to_ticket(window: dict, counts: dict, summary: str) -
     parent_ticket_id = window.get("parent_ticket_id")
     if not parent_ticket_id:
         return
-    ticket = await db.tickets.find_one({"id": parent_ticket_id}, {"_id": 0, "id": 1})
+    ticket = await db.tickets.find_one(_window_tenant_query(window, {"id": parent_ticket_id}), {"_id": 0, "id": 1})
     if not ticket:
         return
     body = (
@@ -268,6 +438,7 @@ async def _post_completion_to_ticket(window: dict, counts: dict, summary: str) -
     )
     await db.ticket_comments.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": window.get("tenant_id") or "nexus-local",
         "ticket_id": parent_ticket_id,
         "author": "Nexus Agent",
         "author_id": "nexus-agent",
@@ -276,7 +447,7 @@ async def _post_completion_to_ticket(window: dict, counts: dict, summary: str) -
         "window_id": window["id"],
         "created_at": _now_iso(),
     })
-    await db.tickets.update_one({"id": parent_ticket_id}, {"$inc": {"comments_count": 1}, "$set": {"updated_at": _now_iso()}})
+    await db.tickets.update_one(_window_tenant_query(window, {"id": parent_ticket_id}), {"$inc": {"comments_count": 1}, "$set": {"updated_at": _now_iso()}})
 
 
 async def reconcile_window_from_runs(wid: str) -> dict | None:
@@ -285,7 +456,12 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
     if not window or window.get("status") in {"completed", "failed", "cancelled"}:
         return window
 
-    runs = await db.maintenance_window_runs.find({"window_id": wid}, {"_id": 0, "status": 1}).to_list(2000)
+    # Results can arrive while other targets are still being dispatched. Do not
+    # close a window until its complete set of run records has been persisted.
+    if window.get("status") == "running" and window.get("dispatch_complete") is False:
+        return window
+
+    runs = await db.maintenance_window_runs.find(_window_tenant_query(window, {"window_id": wid}), {"_id": 0, "status": 1}).to_list(2000)
     counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
     for run in runs:
         status = run.get("status", "skipped")
@@ -293,18 +469,19 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
 
     if counts.get("queued", 0) or any(run.get("status") == "running" for run in runs):
         await db.maintenance_windows.update_one(
-            {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}},
+            _window_tenant_query(window, {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}}),
             {"$set": {"status": "awaiting_results", "summary_counts": counts, "reconciled_at": _now_iso()}},
         )
         return {**window, "status": "awaiting_results", "summary_counts": counts}
 
-    final_status = "failed" if counts.get("failed", 0) else "completed"
+    final_status = "failed" if counts.get("failed", 0) or counts.get("skipped", 0) or window.get("dispatch_errors") or not runs else "completed"
     summary = (
         f"Endpoint results returned for {len(runs)} action(s): {counts.get('ok', 0)} successful, "
-        f"{counts.get('failed', 0)} failed, and {counts.get('skipped', 0)} skipped."
+        f"{counts.get('failed', 0)} failed, and {counts.get('skipped', 0)} skipped. "
+        f"Dispatch errors: {window.get('dispatch_errors', 0)}."
     )
     completed = await db.maintenance_windows.update_one(
-        {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}},
+        _window_tenant_query(window, {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}}),
         {"$set": {
             "status": final_status,
             "finished_at": _now_iso(),
@@ -331,25 +508,68 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
     if not w or w.get("status") not in expected_statuses:
         return
     claimed = await db.maintenance_windows.update_one(
-        {"id": wid, "status": {"$in": expected_statuses}},
-        {"$set": {"status": "running", "started_at": _now_iso()}},
+        _window_tenant_query(w, {"id": wid, "status": {"$in": expected_statuses}}),
+        {"$set": {"status": "running", "started_at": _now_iso(), "dispatch_complete": False}},
     )
     if claimed.modified_count != 1:
+        return
+
+    if _unsafe_parallel_actions(w.get("actions") or []):
+        await db.maintenance_windows.update_one(
+            _window_tenant_query(w, {"id": wid, "status": "running"}),
+            {"$set": {"status": "failed", "finished_at": _now_iso(), "dispatch_complete": True,
+                      "dispatch_errors": 1, "ai_summary": "Not dispatched: reboot and update installation must be scheduled separately."}},
+        )
         return
 
     sem = asyncio.Semaphore(8)
     actions = w.get("actions") or []
     devices = w.get("devices_meta") or []
 
-    async def run_one(device, action):
+    async def run_one(stored_device, action):
         async with sem:
-            rec = await _run_device_action(device, action, w)
+            device, skip_reason = await _current_window_device(w, stored_device)
+            if not device:
+                rec = {
+                    "id": str(uuid.uuid4()),
+                    "tenant_id": w.get("tenant_id") or "nexus-local",
+                    "window_id": w["id"],
+                    "device_id": stored_device.get("id"),
+                    "device_name": stored_device.get("name"),
+                    "action": action,
+                    "started_at": _now_iso(),
+                    "finished_at": _now_iso(),
+                    "status": "skipped",
+                    "message": skip_reason or "target could not be safely resolved",
+                }
+            else:
+                rec = await _run_device_action(device, action, w)
             await db.maintenance_window_runs.insert_one(rec)
             rec.pop("_id", None)
+            # An agent may return between queueing the command and inserting its
+            # run record. Recover that already-accepted result after insertion.
+            if rec.get("command_id") and rec.get("status") == "queued":
+                command = await db.nexus_agent_commands.find_one(
+                    {"id": rec["command_id"], "device_id": device["nexus_agent_id"], "status": {"$in": ["ok", "error", "timeout"]}},
+                    {"_id": 0, "status": 1, "exit_code": 1, "stdout": 1},
+                )
+                if command:
+                    from app.routers.nexus_agent import _maintenance_result_status, _patch_result_summary
+                    patch_summary = _patch_result_summary(command.get("stdout") or "") if action == "install-patches" else None
+                    status = _maintenance_result_status(action, command.get("status"), command.get("exit_code"), patch_summary)
+                    await db.maintenance_window_runs.update_one(
+                        _window_tenant_query(w, {"id": rec["id"], "status": "queued"}),
+                        {"$set": {"status": status, "finished_at": _now_iso(),
+                                  "message": f"Agent command {command.get('status')} (exit code {command.get('exit_code')}); maintenance result {status}" + ("; patch evidence missing or unsuccessful" if action == "install-patches" and status == "failed" else ""),
+                                  "patch_result": patch_summary}},
+                    )
             return rec
 
     tasks = [run_one(d, a) for d in devices for a in actions]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    dispatch_errors = sum(isinstance(result, BaseException) for result in results)
+    if dispatch_errors:
+        logger.error("Maintenance window %s had %s dispatch errors", wid, dispatch_errors)
     results = [r for r in results if isinstance(r, dict)]
     summary_counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
     for r in results:
@@ -357,6 +577,10 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
 
     # Queueing is only dispatch. The command-result callback reconciles actual
     # endpoint results and closes the window once every queued action returns.
+    await db.maintenance_windows.update_one(
+        _window_tenant_query(w, {"id": wid, "status": "running"}),
+        {"$set": {"dispatch_complete": True, "dispatch_errors": dispatch_errors}},
+    )
     await reconcile_window_from_runs(wid)
     return
 
@@ -441,10 +665,10 @@ async def maintenance_window_scheduler():
 
 @router.get("/maintenance-windows/stats/summary")
 async def stats_summary(current_user: dict = Depends(get_current_user)):
-    pipeline = [{"$group": {"_id": "$status", "n": {"$sum": 1}}}]
+    pipeline = [{"$match": _window_scope_query(current_user)}, {"$group": {"_id": "$status", "n": {"$sum": 1}}}]
     rows = await db.maintenance_windows.aggregate(pipeline).to_list(20)
     counts = {r["_id"]: r["n"] for r in rows}
     upcoming = await db.maintenance_windows.find(
-        {"status": "scheduled"}, {"_id": 0, "id": 1, "name": 1, "scheduled_at": 1, "device_ids": 1}
+        _window_scope_query(current_user, {"status": "scheduled"}), {"_id": 0, "id": 1, "name": 1, "scheduled_at": 1, "device_ids": 1}
     ).sort("scheduled_at", 1).limit(5).to_list(5)
     return {"counts": counts, "upcoming": upcoming}

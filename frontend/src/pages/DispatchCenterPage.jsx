@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 import HeroTile from "@/components/HeroTile";
 import { TICKET_PRIORITY_STYLES } from "@/lib/ticketWorkspaceHelpers";
 import { CalendarDays, Clock, Loader2, Plus, ShieldAlert, Truck, UserRoundCheck, Users, Zap } from "lucide-react";
@@ -43,6 +45,9 @@ function DispatchTicketCard({ ticket, tone, onOpen, onAssign, assigned = false }
 
 export default function DispatchCenterPage() {
   const { token } = useAuth();
+  // The dispatch board is part of the ticket workspace, so the desk-tools menu
+  // here shares the same learned memory as the queue, triage and SLA modules.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.TICKETS);
   const navigate = useNavigate();
   const location = useLocation();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -139,10 +144,16 @@ export default function DispatchCenterPage() {
     } finally { setBookingBusy(false); }
   };
 
-  if (loading) return <div className="space-y-5"><TicketModuleHeader title="Dispatch & scheduling" subtitle="Loading live assignments and technician availability..." /><div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div></div>;
+  const moduleHeaderProps = {
+    personal: learning.personal,
+    team: learning.team,
+    onRecordAction: learning.record,
+    onForgetLearning: learning.forget,
+  };
+  if (loading) return <div className="space-y-5"><TicketModuleHeader title="Dispatch & scheduling" subtitle="Loading live assignments and technician availability..." {...moduleHeaderProps} /><div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div></div>;
 
   return <div className="space-y-5" data-testid="dispatch-center">
-    <TicketModuleHeader title="Dispatch & scheduling" subtitle="Assign work, protect calendar commitments, and balance technician capacity." actions={<Button size="sm" onClick={() => { setConflict(null); setBookingOpen(true); }} data-testid="create-dispatch-appointment"><Plus className="mr-1.5 h-4 w-4" />Book appointment</Button>} />
+    <TicketModuleHeader title="Dispatch & scheduling" subtitle="Assign work, protect calendar commitments, and balance technician capacity." {...moduleHeaderProps} actions={<Button size="sm" onClick={() => { setConflict(null); setBookingOpen(true); }} data-testid="create-dispatch-appointment"><Plus className="mr-1.5 h-4 w-4" />Book appointment</Button>} />
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       <HeroTile label="Unassigned" value={unassigned.length} icon={Clock} glow="amber" subtitle="Needs a technician owner" active={tab === "board"} onClick={() => selectTab("board")} testId="dispatch-metric-unassigned" />
       <HeroTile label="Dispatched" value={dispatched.length} icon={Truck} glow="sky" subtitle="In technician ownership" active={tab === "board"} onClick={() => selectTab("board")} testId="dispatch-metric-dispatched" />

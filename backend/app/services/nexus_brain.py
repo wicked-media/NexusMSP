@@ -23,11 +23,7 @@ def _query(user: dict[str, Any], query: dict | None = None, *, field: str = "cli
     return scoped_query(user, query or {}, field=field, site_field=None)
 
 
-def _number(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
+from app.services.number_utils import float_or_zero as _number
 
 
 def _client_key(row: dict) -> str:

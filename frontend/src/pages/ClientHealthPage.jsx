@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,8 +21,6 @@ import {
 import { ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 import HeroTile from "@/components/HeroTile";
 
-const chartStyle = { backgroundColor: "hsl(217, 33%, 17%)", border: "1px solid hsl(217, 33%, 25%)", borderRadius: "8px", color: "hsl(210, 40%, 98%)" };
-
 const STATUS_CONFIG = {
   thriving: { color: "bg-emerald-500/20 text-emerald-400", ring: "ring-emerald-500/30", gradient: "from-emerald-500 to-emerald-600", label: "Thriving" },
   healthy: { color: "bg-blue-500/20 text-blue-400", ring: "ring-blue-500/30", gradient: "from-blue-500 to-blue-600", label: "Healthy" },
@@ -36,7 +34,6 @@ function HealthGauge({ score, size = 64 }) {
   const assessed = Number.isFinite(score);
   const color = !assessed ? "#94a3b8" : score >= 85 ? "#22c55e" : score >= 70 ? "#3b82f6" : score >= 50 ? "#eab308" : score >= 30 ? "#f97316" : "#ef4444";
   const pct = assessed ? Math.min(100, Math.max(0, score)) : 0;
-  const r = (size / 2) - 6;
   const dash = pct * 2.51;
   return (
     <div className="relative" style={{ width: size, height: size }}>
@@ -74,7 +71,7 @@ export default function ClientHealthPage({ embedded = false }) {
   const [settingsDialog, setSettingsDialog] = useState(false);
   const [alertConfig, setAlertConfig] = useState(null);
   const [snapshotting, setSnapshotting] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -87,7 +84,7 @@ export default function ClientHealthPage({ embedded = false }) {
       setAllScores(sRes.data);
     } catch { toast.error("Failed to load health data"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -389,13 +386,13 @@ export default function ClientHealthPage({ embedded = false }) {
 
       {/* Alert Settings Dialog */}
       <Dialog open={settingsDialog} onOpenChange={setSettingsDialog}>
-        <DialogContent aria-describedby="alert-config-desc">
-          <DialogHeader>
+        <DialogContent aria-describedby="alert-config-desc" className="flex h-[min(700px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="client-health-alert-settings-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Health Alert Settings</DialogTitle>
             <DialogDescription id="alert-config-desc">Configure thresholds and notification rules for client health monitoring</DialogDescription>
           </DialogHeader>
           {alertConfig && (
-            <div className="space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
               <div className="grid grid-cols-2 gap-3">
                 <div><Label className="text-xs">Critical Threshold (score below)</Label><Input type="number" value={alertConfig.critical_threshold} onChange={e => setAlertConfig({ ...alertConfig, critical_threshold: parseInt(e.target.value) })} /></div>
                 <div><Label className="text-xs">Warning Threshold (score below)</Label><Input type="number" value={alertConfig.warning_threshold} onChange={e => setAlertConfig({ ...alertConfig, warning_threshold: parseInt(e.target.value) })} /></div>
@@ -409,7 +406,7 @@ export default function ClientHealthPage({ embedded = false }) {
               <div><Label className="text-xs">Notification Email</Label><Input value={alertConfig.notify_email || ""} onChange={e => setAlertConfig({ ...alertConfig, notify_email: e.target.value })} placeholder="alerts@company.com" /></div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button variant="outline" onClick={() => setSettingsDialog(false)}>Cancel</Button>
             <Button onClick={saveAlertConfig} data-testid="save-alert-config"><Check className="w-4 h-4 mr-1" />Save Settings</Button>
           </DialogFooter>

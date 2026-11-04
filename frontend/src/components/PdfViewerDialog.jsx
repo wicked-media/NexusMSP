@@ -1,15 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Download, Maximize2, Loader2, Mail, Send } from "lucide-react";
 
-export function PdfViewerDialog({ open, onOpenChange, pdfUrl, title, downloadUrl, onEmail }) {
+export function PdfViewerDialog({ open, onOpenChange, pdfUrl, title, downloadUrl, onDownload, onEmail }) {
   const [loading, setLoading] = useState(true);
   const [showEmail, setShowEmail] = useState(false);
   const [emailTo, setEmailTo] = useState("");
   const [emailSending, setEmailSending] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+  }, [pdfUrl]);
 
   const handleEmail = async () => {
     if (!emailTo.trim() || !onEmail) return;
@@ -20,6 +25,26 @@ export function PdfViewerDialog({ open, onOpenChange, pdfUrl, title, downloadUrl
       setEmailTo("");
     } finally {
       setEmailSending(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadUrl && !onDownload) return;
+    setDownloading(true);
+    try {
+      if (onDownload) {
+        await onDownload();
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 200);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -38,9 +63,9 @@ export function PdfViewerDialog({ open, onOpenChange, pdfUrl, title, downloadUrl
                   <Mail className="w-3.5 h-3.5 mr-1" />Email
                 </Button>
               )}
-              {downloadUrl && (
-                <Button variant="outline" size="sm" onClick={() => { const a = document.createElement("a"); a.href = downloadUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); setTimeout(() => document.body.removeChild(a), 200); }} data-testid="pdf-download-btn">
-                  <Download className="w-3.5 h-3.5 mr-1" />Download
+              {(downloadUrl || onDownload) && (
+                <Button variant="outline" size="sm" onClick={handleDownload} disabled={downloading} data-testid="pdf-download-btn">
+                  {downloading ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1" />}Download
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => window.open(pdfUrl, "_blank")} data-testid="pdf-fullscreen-btn">

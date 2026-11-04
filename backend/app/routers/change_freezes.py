@@ -14,7 +14,6 @@ Endpoints:
                                           (used by other routers + scheduler)
 """
 from fastapi import APIRouter, Depends, HTTPException, Body
-from datetime import datetime, timezone
 from typing import Optional
 import uuid
 
@@ -24,8 +23,7 @@ from app.auth import get_current_user
 router = APIRouter()
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _normalize(payload: dict) -> dict:

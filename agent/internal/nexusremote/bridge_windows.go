@@ -1,0 +1,446 @@
+//go:build windows
+
+package nexusremote
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+	"nexusagent/internal/config"
+	"nexusagent/internal/transport"
+)
+
+var (
+	kernel32         = syscall.NewLazyDLL("kernel32.dll")
+	getPipeClientPID = kernel32.NewProc("GetNamedPipeClientProcessId")
+)
+
+// StartCompanionBridge owns the privileged half of the native remote pipe.
+// It validates the client image path before disclosing a grant and forwards
+// only bounded, session-matching messages with the protected agent token.
+func StartCompanionBridge(ctx context.Context, cfg *config.Config, client *transport.Client) error {
+	if cfg == nil {
+		reportCompanionHealth("configuration_unavailable", "Native Remote configuration is unavailable.")
+		return errors.New("native remote configuration is unavailable")
+	}
+	api, err := NewAgentAPI(client)
+	if err != nil {
+		reportCompanionHealth("api_unavailable", "The protected Agent bridge could not initialise its API client.")
+		return err
+	}
+	publishCompanionHealth(api, "waiting_for_policy", "Waiting for a valid Native Remote policy and policy-pinned companion.")
+	go func() {
+		for ctx.Err() == nil {
+			policy, policyErr := companionPolicyFromConfig(cfg)
+			if policyErr == nil && policy.Enabled && cfg.NativeRemoteCompanionReady() {
+				publishCompanionHealth(api, "waiting_for_user_session", "Waiting for a signed-in user session to start the verified Remote Companion.")
+				bridgeLoop(ctx, cfg.BaseDir(), policy, api)
+				return
+			}
+			publishCompanionHealth(api, "waiting_for_policy", "Waiting for a valid Native Remote policy and policy-pinned companion.")
+			time.Sleep(10 * time.Second)
+		}
+	}()
+	return nil
+}
+
+func publishCompanionHealth(api *AgentAPI, status, detail string) {
+	reportCompanionHealth(status, detail)
+	if api == nil {
+		return
+	}
+	if err := api.CompanionHealth(status, detail); err != nil {
+		// Readiness reporting is observability, not an authority to start a
+		// remote session. Preserve the local fail-closed state and retry on the
+		// next bridge transition or normal heartbeat.
+		log.Printf("[native-remote] unable to publish companion health: %v", err)
+	}
+}
+
+func companionPolicyFromConfig(cfg *config.Config) (CompanionPolicy, error) {
+	if cfg == nil || cfg.PlatformPolicy == nil {
+		return CompanionPolicy{}, errors.New("native remote policy is unavailable")
+	}
+	p := cfg.PlatformPolicy.NativeRemote
+	value := CompanionPolicy{Enabled: boolValue(p["enabled"]), TenantID: stringValue(p["tenant_id"]), ManagedDeviceID: stringValue(p["managed_device_id"]), GrantKeyID: stringValue(p["grant_key_id"]), GrantPublicKey: stringValue(p["grant_public_key_b64"]), CompanionSHA256: stringValue(p["companion_sha256"])}
+	if !value.Enabled {
+		return value, nil
+	}
+	if _, err := NewCoordinator(value, NewMemoryReplayStore(1), func(string, Mode, time.Time) (bool, string) { return false, "" }, func(string, string, string) error { return nil }); err != nil {
+		return CompanionPolicy{}, err
+	}
+	return value, nil
+}
+func stringValue(value any) string { result, _ := value.(string); return strings.TrimSpace(result) }
+func boolValue(value any) bool     { result, _ := value.(bool); return result }
+
+func bridgeLoop(ctx context.Context, installDir string, policy CompanionPolicy, api *AgentAPI) {
+	for ctx.Err() == nil {
+		pipe, err := createCompanionPipe()
+		if err != nil {
+			log.Printf("[native-remote] bridge pipe unavailable: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		err = windows.ConnectNamedPipe(pipe, nil)
+		if err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+			_ = windows.CloseHandle(pipe)
+			continue
+		}
+		if err := verifyCompanionClient(pipe, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
+			log.Printf("[native-remote] rejected pipe client: %v", err)
+			_ = windows.DisconnectNamedPipe(pipe)
+			_ = windows.CloseHandle(pipe)
+			continue
+		}
+		publishCompanionHealth(api, "ready", "A verified signed-in Remote Companion is connected and can present attended consent.")
+		file := os.NewFile(uintptr(pipe), "nexus-remote-bridge")
+		if err := serveCompanion(ctx, file, installDir, policy, api); err != nil && !errors.Is(err, io.EOF) {
+			log.Printf("[native-remote] companion session ended: %v", err)
+		}
+		_ = file.Close()
+		if ctx.Err() == nil {
+			publishCompanionHealth(api, "waiting_for_user_session", "The verified Remote Companion disconnected; waiting for the signed-in user session to recover it.")
+		}
+	}
+}
+
+func createCompanionPipe() (windows.Handle, error) {
+	return createCompanionOutboundPipe(CompanionPipeName)
+}
+
+func createCompanionEventPipe() (windows.Handle, error) {
+	return createCompanionInboundPipe(CompanionEventPipeName)
+}
+
+func createCompanionOutboundPipe(name string) (windows.Handle, error) {
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
+	if err != nil {
+		return 0, err
+	}
+	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(name), windows.PIPE_ACCESS_OUTBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
+}
+
+func createCompanionFramePipe() (windows.Handle, error) {
+	return createCompanionInboundPipe(CompanionFramePipeName)
+}
+
+func createCompanionInboundPipe(name string) (windows.Handle, error) {
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
+	if err != nil {
+		return 0, err
+	}
+	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	// Frames travel only from the user-session companion to the protected
+	// Agent.  This keeps multi-megabyte JPEG writes away from the lifecycle
+	// pipe, which remains available for consent, liveness, and control.
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(name), windows.PIPE_ACCESS_INBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
+}
+
+func verifyCompanionClient(pipe windows.Handle, expected, expectedSHA256 string) error {
+	var pid uint32
+	result, _, err := getPipeClientPID.Call(uintptr(pipe), uintptr(unsafe.Pointer(&pid)))
+	if result == 0 || pid == 0 {
+		return err
+	}
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(process)
+	path := make([]uint16, 32768)
+	length := uint32(len(path))
+	if err := windows.QueryFullProcessImageName(process, 0, &path[0], &length); err != nil {
+		return err
+	}
+	actual := windows.UTF16ToString(path[:length])
+	if !strings.EqualFold(filepath.Clean(actual), filepath.Clean(expected)) {
+		return errors.New("caller is not the installed Nexus Remote Companion")
+	}
+	file, err := os.Open(actual)
+	if err != nil {
+		return errors.New("unable to verify the connecting Remote Companion")
+	}
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return errors.New("unable to hash the connecting Remote Companion")
+	}
+	if len(strings.TrimSpace(expectedSHA256)) != sha256.Size*2 || !strings.EqualFold(fmt.Sprintf("%x", digest.Sum(nil)), strings.TrimSpace(expectedSHA256)) {
+		return errors.New("connecting Remote Companion does not match the policy-pinned digest")
+	}
+	return nil
+}
+
+func serveCompanion(ctx context.Context, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI) (serveErr error) {
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	defer cancelSession()
+	var grant *DeliveredGrant
+	for ctx.Err() == nil && grant == nil {
+		next, err := api.Pending()
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		grant = next
+		if grant == nil {
+			time.Sleep(time.Second)
+		}
+	}
+	if grant == nil {
+		return context.Canceled
+	}
+	eventPipe, err := createCompanionEventPipe()
+	if err != nil {
+		return fmt.Errorf("create protected event pipe: %w", err)
+	}
+	eventFile := os.NewFile(uintptr(eventPipe), "nexus-remote-events")
+	defer eventFile.Close()
+	framePipe, err := createCompanionFramePipe()
+	if err != nil {
+		return fmt.Errorf("create isolated frame pipe: %w", err)
+	}
+	frameFile := os.NewFile(uintptr(framePipe), "nexus-remote-frames")
+	defer frameFile.Close()
+	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy, FramePipeReady: true, EventPipeReady: true}); err != nil {
+		return err
+	}
+	log.Printf("[native-remote] waiting for protected event pipe client")
+	if err := windows.ConnectNamedPipe(eventPipe, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		return fmt.Errorf("connect protected event pipe: %w", err)
+	}
+	if err := verifyCompanionClient(eventPipe, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
+		return fmt.Errorf("verify protected event pipe client: %w", err)
+	}
+	log.Printf("[native-remote] protected event pipe client verified")
+	go relayCompanionFrames(sessionCtx, framePipe, frameFile, installDir, policy, api, grant)
+	writer := &lockedControlWriter{writer: pipe}
+	transportConnected := false
+	// Liveness flows from the authenticated Agent to the user-session
+	// companion. This avoids a synchronous status request sharing the capture
+	// bridge while still making server revocation fail closed within one poll.
+	go serveGrantLiveness(sessionCtx, api, grant, writer)
+	// The protected control pipe carries only Agent-to-companion instructions.
+	// The server returns no control event until the companion has acknowledged
+	// consent through its separate event uplink.
+	if grant.Mode == Control {
+		go serveControlDelivery(sessionCtx, api, grant, writer)
+	}
+	defer func() {
+		// If a frame relay or pipe operation fails after the companion proved it
+		// was connected, remove the last desktop image at the control plane. A
+		// best-effort report is intentionally ignored here: the agent may itself
+		// be offline, in which case the server freshness window still fails closed.
+		if transportConnected {
+			detail := "agent bridge ended before companion disconnect confirmation"
+			if serveErr != nil && !errors.Is(serveErr, io.EOF) {
+				// Preserve the bounded local failure in the audited session record.
+				// Previously this final safeguard hid an actionable relay or capture
+				// failure behind a generic disconnect message, which made a fail-closed
+				// native session impossible to diagnose from its evidence trail.
+				detail = boundedReason("agent bridge ended: "+serveErr.Error(), detail)
+			}
+			if err := api.Transport(grant.SessionID, "disconnected", detail); err != nil {
+				log.Printf("[native-remote] unable to report bridge disconnect: %v", err)
+			}
+		}
+	}()
+	for {
+		message, err := ReadIPCMessage(eventFile)
+		if err != nil {
+			return err
+		}
+		if message.SessionID != grant.SessionID {
+			return errors.New("companion message session mismatch")
+		}
+		switch message.Type {
+		case "ack":
+			if message.Outcome != "accepted" && message.Outcome != "rejected" {
+				return errors.New("invalid companion acknowledgement")
+			}
+			if err := api.Acknowledge(grant.SessionID, message.Outcome, message.Reason); err != nil {
+				return err
+			}
+		case "input_ack":
+			if message.Control == nil {
+				return errors.New("missing companion control acknowledgement")
+			}
+			event, validateErr := ValidateControlEvent(*message.Control)
+			if validateErr != nil {
+				return validateErr
+			}
+			if err := api.AcknowledgeControl(grant.SessionID, event.Sequence); err != nil {
+				return err
+			}
+		case "transport":
+			if err := api.Transport(grant.SessionID, message.State, message.Reason); err != nil {
+				return err
+			}
+			transportConnected = message.State == "connected"
+		case "stop":
+			if err := api.LocalStop(grant.SessionID, boundedReason(message.Reason, "Endpoint user stopped view-only access")); err != nil {
+				return err
+			}
+			return nil
+		case "frame", "status", "input":
+			return errors.New("message arrived on the protected event pipe with an invalid direction")
+		default:
+			return errors.New("unsupported companion message")
+		}
+	}
+}
+
+// relayCompanionFrames accepts exactly one separately verified, one-way frame
+// connection for the active bridge.  A compromised user-session process cannot
+// inject frames: its executable path and policy-pinned digest are checked again
+// before any payload reaches the authenticated Agent API.
+func relayCompanionFrames(ctx context.Context, handle windows.Handle, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI, grant *DeliveredGrant) {
+	log.Printf("[native-remote] waiting for isolated frame pipe client")
+	if err := windows.ConnectNamedPipe(handle, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		if ctx.Err() == nil {
+			log.Printf("[native-remote] frame pipe connection failed: %v", err)
+		}
+		return
+	}
+	if err := verifyCompanionClient(handle, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
+		log.Printf("[native-remote] rejected frame pipe client: %v", err)
+		return
+	}
+	log.Printf("[native-remote] isolated frame pipe client verified")
+	for ctx.Err() == nil {
+		message, err := ReadIPCMessage(pipe)
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, io.EOF) {
+				log.Printf("[native-remote] frame pipe ended: %v", err)
+			}
+			return
+		}
+		if message.Type != "frame" || message.SessionID != grant.SessionID {
+			log.Printf("[native-remote] rejected invalid frame pipe message")
+			return
+		}
+		jpeg, err := base64.StdEncoding.Strict().DecodeString(message.JPEGBase64)
+		if err != nil {
+			log.Printf("[native-remote] rejected malformed companion frame")
+			return
+		}
+		if err := api.SendFrame(context.Background(), grant.SessionID, jpeg, message.Displays); err != nil {
+			log.Printf("[native-remote] frame relay failed: %v", err)
+			return
+		}
+	}
+}
+
+// serveControlDelivery polls only the signed control grant's delivery queue
+// and sends events over the already verified primary bridge. Events are deleted
+// only after the companion acknowledges their sequence.
+func serveControlDelivery(ctx context.Context, api *AgentAPI, grant *DeliveredGrant, writer *lockedControlWriter) {
+	if api == nil || grant == nil || writer == nil {
+		return
+	}
+	// Pointer movement is coalesced in the viewer. A 100 ms delivery cadence
+	// keeps interactive input responsive while remaining bounded per active
+	// control session and independent from the frame relay.
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	sent := map[uint64]time.Time{}
+	observed := map[uint64]struct{}{}
+	var lastPollDiagnostic time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			events, pollErr := api.ControlEvents(grant.SessionID)
+			if pollErr != nil {
+				if time.Since(lastPollDiagnostic) >= 10*time.Second {
+					log.Printf("[native-remote] control delivery poll failed: %v", pollErr)
+					_ = api.Transport(grant.SessionID, "connected", boundedReason("control delivery poll failed: "+pollErr.Error(), "control delivery poll failed"))
+					lastPollDiagnostic = time.Now()
+				}
+				continue
+			}
+			for _, event := range events {
+				if _, alreadyObserved := observed[event.Sequence]; alreadyObserved {
+					continue
+				}
+				observed[event.Sequence] = struct{}{}
+				// Surface bounded, server-side evidence for the delivery handoff.
+				// This lets the technician distinguish a browser queueing failure
+				// from an endpoint injection/acknowledgement failure without
+				// exposing the underlying key or pointer payload.
+				_ = api.Transport(grant.SessionID, "connected", fmt.Sprintf("protected control event %d received by Agent", event.Sequence))
+			}
+			for _, event := range events {
+				if at, exists := sent[event.Sequence]; exists && time.Since(at) < 2*time.Second {
+					continue
+				}
+				if writeErr := writer.send(IPCMessage{Type: "input", SessionID: grant.SessionID, Control: &event}); writeErr == nil {
+					sent[event.Sequence] = time.Now()
+					_ = api.Transport(grant.SessionID, "connected", fmt.Sprintf("protected control event %d delivered to endpoint companion", event.Sequence))
+				} else {
+					log.Printf("[native-remote] control delivery write failed: %v", writeErr)
+					_ = api.Transport(grant.SessionID, "connected", boundedReason("control delivery write failed: "+writeErr.Error(), "control delivery write failed"))
+				}
+			}
+		}
+	}
+}
+
+func serveGrantLiveness(ctx context.Context, api *AgentAPI, grant *DeliveredGrant, writer *lockedControlWriter) {
+	if api == nil || grant == nil || writer == nil {
+		return
+	}
+	publish := func() bool {
+		active, err := api.Status(grant.SessionID)
+		if err != nil {
+			log.Printf("[native-remote] grant liveness check failed: %v", err)
+			active = false
+		}
+		if err := writer.send(IPCMessage{Type: "status", SessionID: grant.SessionID, Active: active}); err != nil {
+			log.Printf("[native-remote] grant liveness delivery failed: %v", err)
+			return false
+		}
+		return active
+	}
+	if !publish() {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !publish() {
+				return
+			}
+		}
+	}
+}
+
+type lockedControlWriter struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (w *lockedControlWriter) send(message IPCMessage) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return WriteIPCMessage(w.writer, message)
+}

@@ -16,7 +16,7 @@ Friday wrap-up:
 Quirky data:
   GET  /api/clients/{id}/trading-card     â€” client trading card stats
   GET  /api/clients/{id}/mood-ring        â€” 30-day sentiment colour
-  POST /api/network/slow-internet/{client_id} â€” instant "is it the VPN" verdict
+  POST /api/network/slow-internet/{client_id} â€” legacy WAN diagnostic capability status
   GET  /api/devices/graveyard             â€” decommissioned device tombstones
   GET  /api/devices/family-tree/{client_id} â€” devices grouped by model/age
   GET  /api/team/{id}/brain-bucket  / POST â€” private scratchpad
@@ -30,11 +30,15 @@ Quirky data:
 from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
-import os, re, uuid, random
-from typing import Optional
+import os, uuid, random
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.achievement_catalog import ACHIEVEMENT_DEFINITIONS, profile_badge_view
+from app.services.scope_permissions import assert_client_scope, tenant_scoped_query
+from app.services.module_permissions import require_module_permission
+from app.services.tech_rewards import points_summary
+from app.services import tech_fun
 
 router = APIRouter()
 
@@ -46,8 +50,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _now_iso() -> str:
-    return _now().isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _parse_iso(s):
@@ -101,12 +104,12 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     """Determine which achievements a user has earned."""
     earned = []
 
-    closed = await db.tickets.count_documents({"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}})
+    closed = await db.tickets.count_documents({"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}})
     if closed >= 1: earned.append("first_blood")
     if closed >= 10: earned.append("decade")
     if closed >= 100: earned.append("century")
 
-    crit = await db.tickets.count_documents({"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}, "priority": "critical"})
+    crit = await db.tickets.count_documents({"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}, "priority": "critical"})
     if crit >= 5: earned.append("five_alarm")
 
     rb = await db.runbooks.count_documents({"created_by": name})
@@ -115,14 +118,14 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     drills = await db.backup_drills.count_documents({"completed_by": name, "status": "completed"})
     if drills >= 5: earned.append("drill_sergeant")
 
-    bp_done = await db.tickets.count_documents({"$or": [{"assignee_id": uid}, {"assignee_name": name}],
+    bp_done = await db.tickets.count_documents({"$or": [{"assigned_to": uid}, {"assigned_name": name}],
                                                 "status": {"$in": ["resolved", "closed"]},
                                                 "blueprint_id": {"$exists": True, "$ne": None}})
     if bp_done >= 10: earned.append("blueprint_master")
 
     # Polyglot â€” XP across 5+ categories
     closed_tx = await db.tickets.find(
-        {"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "category": 1}
     ).limit(2000).to_list(2000)
     cats = {t.get("category") for t in closed_tx if t.get("category")}
@@ -130,7 +133,7 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
 
     # Night owl â€” any ticket resolved between 22:00 and 06:00
     night = await db.tickets.find(
-        {"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}},
+        {"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}},
         {"_id": 0, "resolved_at": 1}
     ).limit(50).to_list(50)
     for t in night:
@@ -142,23 +145,61 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     return earned
 
 
+async def _merged_badges(uid: str, name: str) -> tuple[list, list]:
+    """All badges for a tech: quirky fun badges + the badge/points system.
+
+    The badge system (``app.services.achievement_catalog`` + the
+    ``user_achievements`` award store) is the same set the achievements
+    workspace and points economy use, so badges earned there flow through to
+    the technician profile instead of a drifting hard-coded copy.
+    """
+    earned_keys = set(await _calc_user_achievements(uid, name))
+    quirky_views = [{**a, "earned": a["key"] in earned_keys} for a in ACHIEVEMENTS]
+
+    awards = await db.user_achievements.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    awarded_ids = {a.get("achievement_id") for a in awards}
+    system_views = [profile_badge_view(d, earned=d["id"] in awarded_ids) for d in ACHIEVEMENT_DEFINITIONS]
+
+    # Delight layer: hidden ("glitched") badges stay masked until earned, so
+    # the hunt survives the profile page.  Derived keys recompute from ticket
+    # history; event keys arrive through the shared award store.
+    hidden_earned = (await tech_fun.derived_badge_keys(db, uid, name)) | {
+        key for key in awarded_ids if key in tech_fun.HIDDEN_BADGE_TITLES
+    }
+    fun_views = []
+    for d in [*tech_fun.HIDDEN_BADGES, *tech_fun.DERIVED_BADGES]:
+        got = d["key"] in hidden_earned
+        masked = d["key"] in tech_fun.HIDDEN_KEYS and not got
+        fun_views.append({
+            "key": d["key"],
+            "title": "??? (hidden badge)" if masked else d["title"],
+            "icon": "❓" if masked else d["icon"],
+            "rarity": d["rarity"],
+            "description": "Hidden badge — keep hunting." if masked else d["description"],
+            "category": "special",
+            "earned": got,
+        })
+
+    earned = [v for v in quirky_views if v["earned"]] + [v for v in system_views if v["earned"]] + [v for v in fun_views if v["earned"]]
+    locked = [v for v in quirky_views if not v["earned"]] + [v for v in system_views if not v["earned"]] + [v for v in fun_views if not v["earned"]]
+    return earned, locked
+
+
 @router.get("/team/{tech_id}/achievements")
 async def user_achievements(tech_id: str, current_user: dict = Depends(get_current_user)):
     u = await db.users.find_one({"$or": [{"id": tech_id}, {"email": tech_id}]}, {"_id": 0})
     if not u:
         raise HTTPException(404, "user not found")
-    earned_keys = await _calc_user_achievements(u.get("id"), u.get("name") or "")
-    earned_set = set(earned_keys)
-    earned = [{**a, "earned": True} for a in ACHIEVEMENTS if a["key"] in earned_set]
-    locked = [{**a, "earned": False} for a in ACHIEVEMENTS if a["key"] not in earned_set]
+    earned, locked = await _merged_badges(u.get("id"), u.get("name") or "")
+    total = len(earned) + len(locked)
     return {
         "tech_id": u.get("id"),
         "name": u.get("name"),
         "earned": earned,
         "locked": locked,
         "total_unlocked": len(earned),
-        "total_available": len(ACHIEVEMENTS),
-        "completion_pct": round(len(earned) / len(ACHIEVEMENTS) * 100),
+        "total_available": total,
+        "completion_pct": round(len(earned) / total * 100) if total else 0,
     }
 
 
@@ -172,7 +213,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
     name = u.get("name") or ""
 
     closed_tx = await db.tickets.find(
-        {"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"$or": [{"assigned_to": u["id"]}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "category": 1, "tags": 1, "priority": 1, "resolved_at": 1, "created_at": 1}
     ).limit(2000).to_list(2000)
 
@@ -187,9 +228,23 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
     total_xp = sum(xp_by_skill.values())
     radar = sorted([{"skill": k, "xp": v} for k, v in xp_by_skill.items()], key=lambda x: -x["xp"])[:7]
 
-    open_tx = await db.tickets.count_documents({"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["open", "in_progress", "pending"]}})
+    open_tx = await db.tickets.count_documents({"$or": [{"assigned_to": u["id"]}, {"assigned_name": name}], "status": {"$in": ["open", "in_progress", "pending"]}})
 
-    earned = await _calc_user_achievements(u["id"], name)
+    earned, locked = await _merged_badges(u["id"], name)
+
+    # Points economy: balance + equipped cosmetics (pets, skins, titles).
+    ledger = await db.tech_points_ledger.find(
+        tenant_scoped_query(current_user, {"user_id": u["id"]}), {"_id": 0}
+    ).sort("created_at", -1).limit(500).to_list(500)
+    points = points_summary(ledger)
+    inventory = await db.tech_inventory.find(
+        tenant_scoped_query(current_user, {"user_id": u["id"]}), {"_id": 0}
+    ).sort("acquired_at", -1).to_list(200)
+    equipped = {
+        "pet": next((r for r in inventory if r.get("kind") == "pet" and r.get("equipped")), None),
+        "skin": next((r for r in inventory if r.get("kind") == "skin" and r.get("equipped")), None),
+        "title": next((r for r in inventory if r.get("kind") == "title" and r.get("equipped")), None),
+    }
 
     # Avg time to resolve (last 50)
     resolutions = []
@@ -216,7 +271,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
 
     # â”€â”€â”€ New: 5 most recent closed tickets â”€â”€â”€
     recent_closed = await db.tickets.find(
-        {"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"$or": [{"assigned_to": u["id"]}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "priority": 1, "resolved_at": 1, "created_at": 1}
     ).sort("resolved_at", -1).limit(5).to_list(5)
 
@@ -249,7 +304,12 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
         "avg_resolve_hours": avg_resolve_hrs,
         "skills_radar": radar,
         "achievements_earned": len(earned),
-        "achievements_total": len(ACHIEVEMENTS),
+        "achievements_total": len(earned) + len(locked),
+        "points": points,
+        "rewards_owned": len(inventory),
+        "equipped_pet": equipped["pet"],
+        "equipped_skin": equipped["skin"],
+        "equipped_title": equipped["title"],
         "csat_avg": csat_avg,
         "csat_count": csat_count,
         "recent_closed": recent_closed,
@@ -277,7 +337,7 @@ async def daily_quests(tech_id: str, current_user: dict = Depends(get_current_us
     if existing:
         return existing
 
-    open_tx = await db.tickets.count_documents({"$or": [{"assignee_id": u["id"]}, {"assignee_name": u.get("name")}], "status": {"$in": ["open", "in_progress", "pending"]}})
+    open_tx = await db.tickets.count_documents({"$or": [{"assigned_to": u["id"]}, {"assigned_name": u.get("name")}], "status": {"$in": ["open", "in_progress", "pending"]}})
 
     quest_pool = [
         {"key": "close_one_p3", "title": "Close 1 low/normal-priority ticket", "xp": 25, "icon": "ðŸŽ¯"},
@@ -319,8 +379,12 @@ async def friday_reel(current_user: dict = Depends(get_current_user)):
 
     top_tx = await db.tickets.find(
         {"resolved_at": {"$gte": week_iso}, "priority": "critical"},
-        {"_id": 0, "ticket_number": 1, "title": 1, "client_name": 1, "assignee_name": 1, "resolution_notes": 1}
+        {"_id": 0, "ticket_number": 1, "title": 1, "client_name": 1, "assigned_name": 1, "assignee_name": 1, "resolution_notes": 1}
     ).limit(3).to_list(3)
+    top_tx = [
+        {**t, "assignee_name": t.get("assignee_name") or t.get("assigned_name")}
+        for t in top_tx
+    ]
 
     funniest = await db.tickets.find(
         {"created_at": {"$gte": week_iso}},
@@ -439,51 +503,17 @@ async def client_mood_ring(client_id: str, current_user: dict = Depends(get_curr
 
 @router.post("/network/slow-internet/{client_id}")
 async def slow_internet_detective(client_id: str, current_user: dict = Depends(get_current_user)):
-    """Quick verdict: is the client's internet slow because of THEIR setup or the line?"""
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "name": 1, "device_type": 1, "errors_count": 1, "vpn_active": 1, "status": 1}).limit(200).to_list(200)
-    online = sum(1 for d in devices if d.get("status") == "online")
-    offline = sum(1 for d in devices if d.get("status") == "offline")
-    error_devices = [d for d in devices if (d.get("errors_count") or 0) > 50]
-    vpn_count = sum(1 for d in devices if d.get("vpn_active"))
+    """Fail closed until a client-scoped WAN telemetry collector is available.
 
-    # Fake-but-realistic ping/jitter results (real RMM/UniFi keys aren't seeded)
-    avg_ping_ms = random.randint(15, 95)
-    jitter_ms = random.randint(2, 30)
-    speed_down = random.randint(20, 850)
-
-    verdict = "Likely fine"
-    confidence = 0.5
-    reasons = []
-
-    if offline > online * 0.3:
-        verdict = "Wide outage â€” check the WAN link first"
-        confidence = 0.85
-        reasons.append(f"{offline} devices offline")
-    elif vpn_count > 5 and avg_ping_ms > 60:
-        verdict = "VPN bottleneck"
-        confidence = 0.75
-        reasons.append(f"{vpn_count} VPN sessions, {avg_ping_ms}ms ping")
-    elif jitter_ms > 20:
-        verdict = "Likely Wi-Fi or local switch issue"
-        confidence = 0.65
-        reasons.append(f"jitter {jitter_ms}ms is high")
-    elif error_devices:
-        verdict = "Device-specific â€” only some endpoints affected"
-        confidence = 0.7
-        reasons.append(f"{len(error_devices)} devices with high error counts")
-    else:
-        verdict = "Looks healthy â€” escalate to ISP"
-        reasons.append(f"ping {avg_ping_ms}ms, down {speed_down}Mbps, jitter {jitter_ms}ms")
-
-    return {
-        "client_id": client_id,
-        "verdict": verdict,
-        "confidence": confidence,
-        "metrics": {"avg_ping_ms": avg_ping_ms, "jitter_ms": jitter_ms, "speed_down_mbps": speed_down,
-                    "online": online, "offline": offline, "vpn_active": vpn_count},
-        "reasons": reasons,
-        "generated_at": _now_iso(),
-    }
+    This legacy endpoint previously invented latency, jitter and throughput
+    values. Network diagnosis must only present controller or Edge evidence.
+    """
+    await require_module_permission(current_user, "networking", "view")
+    await assert_client_scope(current_user, client_id, operation="network.slow_internet.diagnose")
+    raise HTTPException(
+        status_code=409,
+        detail="Live WAN diagnostics are not enabled for this client. Connect an authorised controller or Nexus Edge telemetry source before Nexus can produce a network verdict. No test was run.",
+    )
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• DEVICE GRAVEYARD â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

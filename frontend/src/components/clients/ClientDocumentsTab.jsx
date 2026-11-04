@@ -90,10 +90,6 @@ export default function ClientDocumentsTab({ client }) {
 
   const handleDownload = async (doc) => {
     if (!doc?.id) return;
-    if (!doc.artifact_storage?.object_path) {
-      window.open(`${API}${doc.url}`, "_blank", "noopener,noreferrer");
-      return;
-    }
     try {
       const response = await axios.get(`${API}/clients/${client.id}/documents/${doc.id}/download`, {
         headers,
@@ -226,7 +222,7 @@ export default function ClientDocumentsTab({ client }) {
                       <BookOpen className="w-3 h-3" />
                     </Button>
                   )}
-                  {doc.kind === "file" && doc.url && (
+                  {doc.kind === "file" && doc.id && (
                     <button type="button" onClick={() => handleDownload(doc)} className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-white/5" data-testid={`doc-download-${doc.id}`} aria-label={`Download ${doc.title}`}>
                       <Download className="w-3 h-3 text-zinc-400" />
                     </button>

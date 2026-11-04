@@ -9,6 +9,7 @@ import { Shield, Award, Crown, Gem, CheckCircle2, Clock, Sparkles, Pencil, Build
 import { toast } from "sonner";
 import { collectionFromResponse } from "@/lib/ticketWorkspaceHelpers";
 import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
+import "./ticketServiceTier.css";
 
 const ICON_MAP = { shield: Shield, award: Award, crown: Crown, gem: Gem, sparkles: Sparkles };
 
@@ -109,7 +110,7 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
   return (
     <Card
       data-testid="service-tier-widget"
-      className="overflow-hidden border-0"
+      className="ticket-service-tier relative isolate overflow-hidden border-0"
       style={{
         background: `linear-gradient(135deg, ${visual.color}1c, transparent 60%), hsl(var(--card))`,
         boxShadow: `inset 0 0 0 1px ${visual.color}40`,

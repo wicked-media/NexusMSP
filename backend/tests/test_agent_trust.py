@@ -95,6 +95,29 @@ def test_agent_policy_checksum_is_deterministic():
     assert first["commands"]["signature_algorithm"] == "ed25519"
 
 
+def test_native_backup_policy_is_capability_inventory_only():
+    policy = agent_trust.build_agent_policy(
+        {"heartbeat_secs": 60, "poll_secs": 10},
+        {"enabled": True, "mode": "visibility", "local_policy_cache": True},
+        nexus_backup={
+            "schema_version": 1,
+            "enabled": True,
+            "mode": "capability_inventory",
+            "execution_allowed": False,
+            "file_access_allowed": False,
+            "snapshot_allowed": False,
+            "upload_allowed": False,
+            "restore_allowed": False,
+        },
+    )
+    backup = policy["nexus_backup"]
+    assert policy["modules"]["nexus_backup"] is True
+    assert backup["mode"] == "capability_inventory"
+    assert all(backup[field] is False for field in (
+        "execution_allowed", "file_access_allowed", "snapshot_allowed", "upload_allowed", "restore_allowed",
+    ))
+
+
 def test_trust_state_distinguishes_issued_and_verified_transport():
     base = {
         "device_identity": {

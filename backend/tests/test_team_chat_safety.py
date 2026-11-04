@@ -21,7 +21,7 @@ os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "nexusops-tests")
 
 from app.routers import chat_presence, chat_pro  # noqa: E402
-from app.services import chat_access  # noqa: E402
+from app.services import chat_access, chat_live  # noqa: E402
 
 
 def test_channel_access_preserves_dm_privacy_even_for_admins():
@@ -34,6 +34,46 @@ def test_channel_access_preserves_dm_privacy_even_for_admins():
     assert chat_access.channel_is_accessible(private, {"id": "member-1"})
     assert not chat_access.channel_is_accessible(dm, {"id": "admin-1", "role": "admin"})
     assert chat_access.channel_is_accessible(dm, {"id": "member-2", "role": "admin"})
+
+
+class QueryCaptureChannels:
+    def __init__(self):
+        self.queries = []
+        self.inserted = []
+
+    async def find_one(self, query, *_args, **_kwargs):
+        self.queries.append(query)
+        return None
+
+    async def insert_one(self, document):
+        self.inserted.append(dict(document))
+
+    async def update_one(self, *_args, **_kwargs):
+        return SimpleNamespace(modified_count=0)
+
+
+def test_explicit_tenant_cannot_load_another_tenants_channel(monkeypatch):
+    channels = QueryCaptureChannels()
+    monkeypatch.setattr(chat_access, "db", SimpleNamespace(chat_channels=channels))
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(chat_access.require_channel_access(
+            "channel-from-tenant-b",
+            {"id": "admin-a", "role": "admin", "tenant_id": "tenant-a"},
+        ))
+
+    assert denied.value.status_code == 404
+    assert channels.queries == [{"$and": [{"id": "channel-from-tenant-b"}, {"tenant_id": "tenant-a"}]}]
+
+
+def test_explicit_tenant_gets_separate_default_channels(monkeypatch):
+    channels = QueryCaptureChannels()
+    monkeypatch.setattr(chat_access, "db", SimpleNamespace(chat_channels=channels))
+
+    asyncio.run(chat_access.ensure_default_channels({"tenant_id": "tenant-a"}))
+
+    assert len(channels.inserted) == len(chat_access.DEFAULT_CHAT_CHANNELS)
+    assert {row["tenant_id"] for row in channels.inserted} == {"tenant-a"}
 
 
 class ChannelCollection:
@@ -56,7 +96,8 @@ class UserCollection:
 
 def test_public_channel_creation_stays_company_wide(monkeypatch):
     channels = ChannelCollection()
-    fake_db = SimpleNamespace(chat_channels=channels, users=UserCollection())
+    events = ChannelEventCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, users=UserCollection(), chat_channel_events=events)
     monkeypatch.setattr(chat_presence, "db", fake_db)
     monkeypatch.setattr(chat_access, "db", fake_db)
 
@@ -70,6 +111,7 @@ def test_public_channel_creation_stays_company_wide(monkeypatch):
     assert result["member_ids"] == []
     assert result["member_count"] == 4
     assert channels.inserted[0]["created_by"] == "creator-1"
+    assert events.inserted[0]["event_type"] == "channel.created"
 
 
 class ReadStateCollection:
@@ -79,6 +121,34 @@ class ReadStateCollection:
     async def update_one(self, query, update, upsert=False):
         self.update = (query, update, upsert)
         return SimpleNamespace(modified_count=1)
+
+
+class MutableChannelCollection(ChannelCollection):
+    def __init__(self, existing=None):
+        super().__init__(existing)
+        self.update = None
+
+    async def update_one(self, query, update):
+        self.update = (query, update)
+        return SimpleNamespace(modified_count=1)
+
+    async def find_one(self, query, *_args, **_kwargs):
+        # The rename uniqueness lookup deliberately excludes this channel.
+        return None if "name" in str(query) else self.existing
+
+
+class ChannelEventCollection:
+    def __init__(self):
+        self.inserted = []
+
+    async def insert_one(self, document):
+        self.inserted.append(dict(document))
+        return SimpleNamespace(inserted_id=document.get("id"))
+
+
+class MessageCollection:
+    async def find_one(self, *_args, **_kwargs):
+        return {"ts": "2026-09-21T10:30:00+00:00"}
 
 
 def test_mark_read_uses_the_same_timestamp_field_as_previews(monkeypatch):
@@ -93,6 +163,20 @@ def test_mark_read_uses_the_same_timestamp_field_as_previews(monkeypatch):
 
     assert "last_read_at" in reads.update[1]["$set"]
     assert "last_read_ts" not in reads.update[1]["$set"]
+
+
+def test_mark_unread_rewinds_only_to_the_latest_received_message(monkeypatch):
+    channel = {"id": "channel-1", "kind": "team", "is_private": False, "member_ids": []}
+    channels = ChannelCollection(existing=channel)
+    reads = ReadStateCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, chat_read_state=reads, chat_messages=MessageCollection())
+    monkeypatch.setattr(chat_presence, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_presence.mark_unread("channel-1", current_user={"id": "user-1"}))
+
+    assert result["ok"] is True
+    assert reads.update[1]["$set"]["last_read_at"] == "2026-09-21T10:29:59.999999+00:00"
 
 
 class FileCollection:
@@ -132,8 +216,10 @@ class PresenceCursor:
 class PresenceCollection:
     def __init__(self, rows):
         self.rows = rows
+        self.query = None
 
-    def find(self, *_args, **_kwargs):
+    def find(self, query, *_args, **_kwargs):
+        self.query = query
         return PresenceCursor(self.rows)
 
 
@@ -143,10 +229,124 @@ def test_presence_moves_to_away_before_offline(monkeypatch):
         {"user_id": "away", "last_heartbeat": (now - timedelta(seconds=60)).isoformat()},
         {"user_id": "offline", "last_heartbeat": (now - timedelta(seconds=301)).isoformat()},
     ]
-    monkeypatch.setattr(chat_presence, "db", SimpleNamespace(presence_state=PresenceCollection(rows)))
+    presence = PresenceCollection(rows)
+    monkeypatch.setattr(chat_presence, "db", SimpleNamespace(presence_state=presence))
     monkeypatch.setattr(chat_presence, "_now", lambda: now)
 
-    result = asyncio.run(chat_presence.list_presence(current_user={"id": "viewer"}))
+    result = asyncio.run(chat_presence.list_presence(current_user={"id": "viewer", "tenant_id": "tenant-a"}))
     by_id = {row["user_id"]: row["led"] for row in result["users"]}
 
     assert by_id == {"away": "away", "offline": "offline"}
+    assert presence.query == {"tenant_id": "tenant-a"}
+
+
+def test_private_chat_live_updates_never_reach_non_members():
+    member_id, member_queue = chat_live.subscribe("member-1", "tenant-a")
+    outsider_id, outsider_queue = chat_live.subscribe("outsider", "tenant-a")
+    same_user_other_tenant_id, same_user_other_tenant_queue = chat_live.subscribe("member-1", "tenant-b")
+    try:
+        chat_live.publish_channel_update(
+            "private-channel",
+            "message.created",
+            ["member-1", "member-2"],
+            tenant_id="tenant-a",
+        )
+        event = asyncio.run(member_queue.get())
+        assert event == {"type": "chat.channel.updated", "channel_id": "private-channel", "kind": "message.created"}
+        assert outsider_queue.empty()
+        assert same_user_other_tenant_queue.empty()
+    finally:
+        chat_live.unsubscribe(member_id)
+        chat_live.unsubscribe(outsider_id)
+        chat_live.unsubscribe(same_user_other_tenant_id)
+
+
+def test_conversation_preferences_are_actor_and_tenant_bound(monkeypatch):
+    channel = {"id": "team-1", "kind": "team", "is_private": False, "member_ids": []}
+    channels = ChannelCollection(existing=channel)
+    preferences = ReadStateCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, chat_user_preferences=preferences)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_preference(
+        "team-1",
+        {"is_saved": True, "is_muted": True},
+        current_user={"id": "tech-1", "tenant_id": "tenant-1"},
+    ))
+
+    query, update, upsert = preferences.update
+    assert result == {"channel_id": "team-1", "is_saved": True, "is_muted": True}
+    assert query == {"tenant_id": "tenant-1", "user_id": "tech-1", "channel_id": "team-1"}
+    assert update["$set"]["is_saved"] is True
+    assert update["$setOnInsert"]["channel_id"] == "team-1"
+    assert upsert is True
+
+
+def test_notification_preference_uses_a_valid_delivery_level(monkeypatch):
+    channel = {"id": "team-1", "kind": "team", "is_private": False, "member_ids": []}
+    preferences = ReadStateCollection()
+    fake_db = SimpleNamespace(chat_channels=ChannelCollection(existing=channel), chat_user_preferences=preferences)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_preference(
+        "team-1", {"notify_level": "mentions"}, current_user={"id": "tech-1", "tenant_id": "tenant-1"},
+    ))
+
+    assert result["notify_level"] == "mentions"
+    assert preferences.update[1]["$set"]["is_muted"] is False
+
+
+def test_system_channel_ownership_cannot_be_transferred(monkeypatch):
+    channel = {"id": "team-1", "kind": "team", "created_by": "system", "is_private": False, "member_ids": []}
+    fake_db = SimpleNamespace(chat_channels=ChannelCollection(existing=channel))
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(chat_pro.transfer_channel_ownership(
+            "team-1", {"owner_id": "tech-2"}, current_user={"id": "admin-1", "role": "admin"},
+        ))
+    assert denied.value.status_code == 400
+
+
+def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
+    channel = {
+        "id": "team-1", "kind": "team", "name": "service-desk",
+        "description": "Old purpose", "created_by": "owner-1",
+        "is_private": False, "member_ids": [],
+    }
+    channels = MutableChannelCollection(existing=channel)
+    events = ChannelEventCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, chat_channel_events=events)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_details(
+        "team-1", {"description": "Coordinate service desk work"}, current_user={"id": "owner-1"},
+    ))
+
+    assert result["description"] == "Coordinate service desk work"
+    assert channels.update[0]["$and"][0] == {"id": "team-1"}
+    assert channels.update[1]["$set"]["description"] == "Coordinate service desk work"
+    assert events.inserted[0]["event_type"] == "details.updated"
+
+
+def test_admin_can_rename_a_default_team_channel(monkeypatch):
+    channel = {
+        "id": "team-1", "kind": "team", "name": "general",
+        "created_by": "system", "is_private": False, "member_ids": [],
+    }
+    channels = MutableChannelCollection(existing=channel)
+    fake_db = SimpleNamespace(chat_channels=channels, chat_channel_events=ChannelEventCollection())
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_details(
+        "team-1", {"name": "Company Announcements"}, current_user={"id": "admin-1", "role": "admin"},
+    ))
+
+    assert result["name"] == "company-announcements"
+    assert result["display_name"] == "Company Announcements"
+    assert channels.update[1]["$set"]["default_key"] == "general"

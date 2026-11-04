@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -232,15 +233,14 @@ export default function LicenseManagementPage() {
             <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} data-testid="refresh-services">
               <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")}>
-              <Receipt className="mr-1.5 h-4 w-4" />Recurring billing
-            </Button>
             <Button size="sm" onClick={openCreate} data-testid="add-confirmed-licence">
               <Plus className="mr-1.5 h-4 w-4" />Add confirmed licence
             </Button>
           </>
         )}
       />
+
+      <BillingWorkspaceNav />
 
       <MetricStrip columns={6}>
         <MetricTile label="Active records" value={summary.active_services ?? 0} accent="cyan" icon={<PackageCheck />} testid="services-active-tile" />
@@ -439,8 +439,8 @@ export default function LicenseManagementPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-3xl overflow-hidden p-0" aria-describedby="confirmed-licence-description">
-          <DialogHeader className="border-b border-border/60 bg-gradient-to-r from-cyan-500/[0.09] via-background to-violet-500/[0.08] px-6 py-5">
+        <DialogContent className="flex h-[min(800px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="confirmed-licence-description">
+          <DialogHeader className="shrink-0 border-b border-border/60 bg-gradient-to-r from-cyan-500/[0.09] via-background to-violet-500/[0.08] px-6 py-5">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/25 bg-cyan-500/10"><Layers3 className="h-5 w-5 text-cyan-300" /></div>
               <div>
@@ -449,7 +449,7 @@ export default function LicenseManagementPage() {
               </div>
             </div>
           </DialogHeader>
-          <div className="grid gap-5 px-6 py-5 md:grid-cols-2">
+          <div className="min-h-0 flex-1 overflow-y-auto"><div className="grid gap-5 px-6 py-5 md:grid-cols-2">
             <div className="space-y-2"><Label>Product name</Label><Input value={form.product_name} onChange={event => setForm({ ...form, product_name: event.target.value })} placeholder="Microsoft 365 Business Premium" data-testid="licence-product-name" /></div>
             <div className="space-y-2"><Label>Vendor</Label><Input value={form.vendor} onChange={event => setForm({ ...form, vendor: event.target.value })} placeholder="Microsoft" /></div>
             <div className="space-y-2 md:col-span-2">
@@ -490,8 +490,8 @@ export default function LicenseManagementPage() {
               <div><p className="text-sm font-medium">Auto renew</p><p className="text-xs text-muted-foreground">Record the provider renewal setting.</p></div>
               <Switch checked={form.auto_renew} onCheckedChange={value => setForm({ ...form, auto_renew: value })} />
             </div>
-          </div>
-          <DialogFooter className="border-t border-border/60 bg-muted/20 px-6 py-4">
+          </div></div>
+          <DialogFooter className="shrink-0 border-t border-border/60 bg-muted/20 px-6 py-4">
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={saveLicence} disabled={saving} data-testid="save-confirmed-licence">
               {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{editing ? "Save confirmed changes" : "Add to register"}

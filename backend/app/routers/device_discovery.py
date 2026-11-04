@@ -35,7 +35,10 @@ async def discover_devices(data: dict, current_user: dict = Depends(get_current_
     if not network.is_private or network.num_addresses > 1024:
         raise HTTPException(status_code=422, detail="Discovery is limited to approved private CIDRs of 1,024 addresses or fewer")
 
-    client = await db.clients.find_one(scoped_query(current_user, {"id": client_id}), {"_id": 0, "name": 1})
+    client = await db.clients.find_one(
+        scoped_query(current_user, {"id": client_id}, field="id", site_field=None),
+        {"_id": 0, "name": 1},
+    )
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
@@ -132,21 +135,54 @@ async def discover_devices(data: dict, current_user: dict = Depends(get_current_
 
 @router.post("/devices/import-discovered")
 async def import_discovered_devices(data: dict, current_user: dict = Depends(get_current_user)):
-    """Import selected discovered devices into the devices list"""
-    client_id = data.get("client_id")
-    devices_to_import = data.get("devices", [])
+    """Import selected, server-owned findings from one authorised scan.
 
-    if not client_id:
-        raise HTTPException(status_code=400, detail="client_id is required")
-    if not devices_to_import:
-        raise HTTPException(status_code=400, detail="No devices selected for import")
+    A browser must never be able to manufacture a discovery result or choose a
+    client by posting an arbitrary device object.  The scan record owns both
+    the client boundary and the original observation; the browser sends only
+    stable discovery IDs selected from that record.
+    """
+    scan_id = str(data.get("scan_id") or "").strip()
+    device_ids = data.get("device_ids")
+    if not scan_id:
+        raise HTTPException(status_code=422, detail="scan_id is required; import findings from a Nexus discovery record")
+    if not isinstance(device_ids, list) or not device_ids or not all(isinstance(item, str) and item.strip() for item in device_ids):
+        raise HTTPException(status_code=422, detail="device_ids must contain one or more discovery record IDs")
+    if len(device_ids) > 250:
+        raise HTTPException(status_code=422, detail="A discovery import may include at most 250 devices")
 
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    scan = await db.network_scans.find_one(
+        scoped_query(current_user, {"id": scan_id}),
+        {"_id": 0},
+    )
+    if not scan:
+        # Matching the behaviour of direct device reads avoids scan-ID probing.
+        raise HTTPException(status_code=404, detail="Discovery record not found")
+    client_id = str(scan.get("client_id") or "")
+    await assert_client_scope(current_user, client_id, operation="device.discovery.import", mask_not_found=True)
+
+    client = await db.clients.find_one(
+        scoped_query(current_user, {"id": client_id}, field="id", site_field=None),
+        {"_id": 0, "name": 1},
+    )
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
+    findings = {
+        str(item.get("id")): item
+        for item in (scan.get("devices") or [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    selected_ids = list(dict.fromkeys(item.strip() for item in device_ids))
+    unknown_ids = [item for item in selected_ids if item not in findings]
+    if unknown_ids:
+        raise HTTPException(status_code=422, detail="One or more selected findings do not belong to this discovery record")
+
     imported = 0
-    for dev in devices_to_import:
+    skipped = 0
+    imported_at = datetime.now(timezone.utc).isoformat()
+    for discovered_id in selected_ids:
+        dev = findings[discovered_id]
         # Check for duplicates
         existing = await db.devices.find_one({
             "client_id": client_id,
@@ -156,6 +192,7 @@ async def import_discovered_devices(data: dict, current_user: dict = Depends(get
             ]
         })
         if existing:
+            skipped += 1
             continue
 
         new_device = {
@@ -171,20 +208,32 @@ async def import_discovered_devices(data: dict, current_user: dict = Depends(get
             "manufacturer": dev.get("manufacturer", ""),
             "model": "",
             "serial_number": "",
-            "status": dev.get("status", "online"),
-            "cpu_usage": 0,
-            "memory_usage": 0,
-            "disk_usage": 0,
+            # A discovery observation proves reachability at scan time, not
+            # ongoing agent health.  Do not turn it into a fake online RMM
+            # record or fake 0% telemetry.
+            "status": "discovered",
+            "cpu_usage": None,
+            "memory_usage": None,
+            "disk_usage": None,
             "tags": ["discovered", "auto-imported"],
-            "notes": f"Auto-imported via network discovery on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+            "notes": f"Imported from Nexus discovery scan {scan_id} on {imported_at[:10]}",
             "source": "network_discovery",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "source_scan_id": scan_id,
+            "discovery_observed_at": scan.get("created_at"),
+            "discovery_imported_at": imported_at,
+            "discovery_imported_by": current_user.get("id"),
+            "created_at": imported_at,
+            "updated_at": imported_at,
         }
         await db.devices.insert_one(new_device)
         imported += 1
 
-    return {"message": f"Imported {imported} devices", "imported_count": imported}
+    return {
+        "message": f"Imported {imported} device{'s' if imported != 1 else ''} from the authorised discovery record",
+        "scan_id": scan_id,
+        "imported_count": imported,
+        "skipped_count": skipped,
+    }
 
 @router.get("/devices/scans")
 async def get_scan_history(
@@ -194,6 +243,10 @@ async def get_scan_history(
     """Get network scan history"""
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="device.discovery.history")
         query["client_id"] = client_id
-    scans = await db.network_scans.find(query, {"_id": 0, "devices": 0}).sort("created_at", -1).to_list(50)
+    scans = await db.network_scans.find(
+        scoped_query(current_user, query),
+        {"_id": 0, "devices": 0},
+    ).sort("created_at", -1).to_list(50)
     return scans

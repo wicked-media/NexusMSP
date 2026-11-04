@@ -1,13 +1,133 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional, Dict, Any
+from datetime import datetime, timezone
+import re
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
+from app.services.scope_permissions import (
+    assert_global_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.models import *
 
 router = APIRouter()
+
+
+# Documentation can be either client-owned operational knowledge or deliberately
+# shared MSP knowledge.  A missing/blank client ID was historically how the UI
+# represented the latter, so preserve that read compatibility while making all
+# writes prove a scope explicitly.
+_GLOBAL_DOCUMENT_CLAUSES = (
+    {"client_id": None},
+    {"client_id": ""},
+    {"client_id": {"$exists": False}},
+)
+_DOCUMENTATION_MUTABLE_FIELDS = frozenset({
+    "title", "content", "category", "parent_id", "is_template", "tags",
+})
+
+
+def _normalise_documentation_client_id(value: Any) -> Optional[str]:
+    candidate = str(value or "").strip()
+    return candidate or None
+
+
+def _documentation_identity_query(document: dict) -> dict:
+    """Pin a mutation to the ownership record that was just authorised."""
+    client_id = _normalise_documentation_client_id(document.get("client_id"))
+    if client_id:
+        return {"id": document["id"], "client_id": client_id}
+    return {"id": document["id"], "$or": list(_GLOBAL_DOCUMENT_CLAUSES)}
+
+
+def _documentation_list_query(current_user: dict, query: dict) -> dict:
+    """Keep shared procedures readable without exposing another client's docs."""
+    scope = effective_scope(current_user)
+    if scope["mode"] == "all":
+        return query
+    return {
+        "$and": [
+            query,
+            {
+                "$or": [
+                    {"client_id": {"$in": scope["client_ids"]}},
+                    *list(_GLOBAL_DOCUMENT_CLAUSES),
+                ]
+            },
+        ]
+    }
+
+
+async def _documentation_in_scope(doc_id: str, current_user: dict, operation: str) -> dict:
+    """Load a visible documentation record before reading or mutating it."""
+    document = await db.documentation.find_one({"id": doc_id}, {"_id": 0})
+    if not document:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if _normalise_documentation_client_id(document.get("client_id")):
+        return await assert_record_scope(
+            current_user,
+            db.documentation,
+            doc_id,
+            operation=operation,
+            resource_name="Documentation",
+        )
+    return document
+
+
+async def _documentation_target_scope(current_user: dict, client_id: Any, operation: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a client target from canonical data, or require global authority."""
+    normalised_client_id = _normalise_documentation_client_id(client_id)
+    if not normalised_client_id:
+        await assert_global_scope(current_user, operation=operation)
+        return None, None
+    client = await assert_record_scope(
+        current_user,
+        db.clients,
+        normalised_client_id,
+        client_field="id",
+        operation=operation,
+        resource_name="Client",
+    )
+    return normalised_client_id, client.get("name")
+
+
+async def _validate_documentation_parent(
+    parent_id: Any,
+    client_id: Optional[str],
+    current_user: dict,
+    operation: str,
+) -> Optional[str]:
+    """Retain only a parent that is visible and cannot bridge two clients."""
+    normalised_parent_id = str(parent_id or "").strip() or None
+    if not normalised_parent_id:
+        return None
+    parent = await _documentation_in_scope(normalised_parent_id, current_user, operation)
+    parent_client_id = _normalise_documentation_client_id(parent.get("client_id"))
+    if parent_client_id and parent_client_id != client_id:
+        raise HTTPException(status_code=422, detail="Parent documentation must belong to the same client scope")
+    return normalised_parent_id
+
+
+async def _write_documentation_activity(current_user: dict, action: str, document: dict) -> None:
+    await log_activity(
+        current_user,
+        action,
+        "documentation",
+        document["id"],
+        document.get("title") or "Documentation",
+        "Documentation record changed through the governed client scope.",
+        metadata={
+            "client_id": _normalise_documentation_client_id(document.get("client_id")),
+            "is_global": not bool(_normalise_documentation_client_id(document.get("client_id"))),
+            "is_template": bool(document.get("is_template", False)),
+        },
+    )
 
 # ============== IT DOCUMENTATION ENDPOINTS ==============
 
@@ -104,37 +224,54 @@ async def get_documentation_pages(
     current_user: dict = Depends(get_current_user)
 ):
     query = {"is_template": is_template}
-    if client_id:
-        query["client_id"] = client_id
+    requested_client_id = _normalise_documentation_client_id(client_id)
+    if requested_client_id:
+        # A client-filtered list is still an object-scope operation. Resolve the
+        # canonical client instead of trusting the query parameter.
+        await assert_record_scope(
+            current_user,
+            db.clients,
+            requested_client_id,
+            client_field="id",
+            operation="documentation.list.client",
+            resource_name="Client",
+        )
+        query["client_id"] = requested_client_id
     if category:
         query["category"] = category
-    
-    pages = await db.documentation.find(query, {"_id": 0}).sort("title", 1).to_list(1000)
+
+    pages = await db.documentation.find(
+        _documentation_list_query(current_user, query),
+        {"_id": 0},
+    ).sort("title", 1).to_list(1000)
     return pages
 
 @router.get("/documentation/{doc_id}")
 async def get_documentation_page(doc_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.documentation.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Documentation not found")
-    
-    await db.documentation.update_one({"id": doc_id}, {"$inc": {"view_count": 1}})
+    doc = await _documentation_in_scope(doc_id, current_user, "documentation.read")
+    await db.documentation.update_one(_documentation_identity_query(doc), {"$inc": {"view_count": 1}})
     return doc
 
 @router.post("/documentation")
 async def create_documentation_page(doc_data: dict, current_user: dict = Depends(get_current_user)):
-    client_name = None
-    if doc_data.get('client_id'):
-        client = await db.clients.find_one({"id": doc_data['client_id']}, {"_id": 0})
-        client_name = client['name'] if client else None
-    
+    client_id, client_name = await _documentation_target_scope(
+        current_user,
+        doc_data.get("client_id"),
+        "documentation.create",
+    )
+    parent_id = await _validate_documentation_parent(
+        doc_data.get("parent_id"),
+        client_id,
+        current_user,
+        "documentation.parent.create",
+    )
     doc = DocumentationPage(
-        client_id=doc_data.get('client_id'),
+        client_id=client_id,
         client_name=client_name,
         title=doc_data.get('title'),
         content=doc_data.get('content', ''),
         category=doc_data.get('category', 'general'),
-        parent_id=doc_data.get('parent_id'),
+        parent_id=parent_id,
         is_template=doc_data.get('is_template', False),
         tags=doc_data.get('tags', []),
         last_edited_by=current_user['id'],
@@ -144,109 +281,152 @@ async def create_documentation_page(doc_data: dict, current_user: dict = Depends
     doc_dict['created_at'] = doc_dict['created_at'].isoformat()
     doc_dict['updated_at'] = doc_dict['updated_at'].isoformat()
     await db.documentation.insert_one(doc_dict)
+    await _write_documentation_activity(current_user, "documentation_created", doc_dict)
     return doc
 
 @router.put("/documentation/{doc_id}")
 async def update_documentation_page(doc_id: str, doc_data: dict, current_user: dict = Depends(get_current_user)):
-    doc_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-    doc_data['last_edited_by'] = current_user['id']
-    doc_data['last_edited_by_name'] = current_user['name']
-    result = await db.documentation.update_one({"id": doc_id}, {"$set": doc_data})
+    existing = await _documentation_in_scope(doc_id, current_user, "documentation.update")
+    existing_client_id = _normalise_documentation_client_id(existing.get("client_id"))
+    if not existing_client_id:
+        # Shared docs are intentionally readable by technicians, but only a
+        # global operator may change or re-home shared MSP knowledge.
+        await assert_global_scope(current_user, operation="documentation.update.global")
+    target_client_id = existing_client_id
+    target_client_name = existing.get("client_name")
+    if "client_id" in doc_data:
+        target_client_id, target_client_name = await _documentation_target_scope(
+            current_user,
+            doc_data.get("client_id"),
+            "documentation.move",
+        )
+
+    update = {
+        key: value
+        for key, value in doc_data.items()
+        if key in _DOCUMENTATION_MUTABLE_FIELDS
+    }
+    parent_to_validate = update.get("parent_id", existing.get("parent_id"))
+    if "parent_id" in update or target_client_id != existing_client_id:
+        update["parent_id"] = await _validate_documentation_parent(
+            parent_to_validate,
+            target_client_id,
+            current_user,
+            "documentation.parent.update",
+        )
+    if "client_id" in doc_data:
+        update["client_id"] = target_client_id
+        update["client_name"] = target_client_name
+    update['updated_at'] = datetime.now(timezone.utc).isoformat()
+    update['last_edited_by'] = current_user['id']
+    update['last_edited_by_name'] = current_user['name']
+    result = await db.documentation.update_one(_documentation_identity_query(existing), {"$set": update})
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Documentation not found")
+        raise HTTPException(status_code=404, detail="Resource not found")
+    await _write_documentation_activity(
+        current_user,
+        "documentation_updated",
+        {**existing, **update},
+    )
     return {"message": "Documentation updated"}
 
 @router.delete("/documentation/{doc_id}")
 async def delete_documentation_page(doc_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.documentation.delete_one({"id": doc_id})
+    document = await _documentation_in_scope(doc_id, current_user, "documentation.delete")
+    if not _normalise_documentation_client_id(document.get("client_id")):
+        await assert_global_scope(current_user, operation="documentation.delete.global")
+    result = await db.documentation.delete_one(_documentation_identity_query(document))
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Documentation not found")
+        raise HTTPException(status_code=404, detail="Resource not found")
+    await _write_documentation_activity(current_user, "documentation_deleted", document)
     return {"message": "Documentation deleted"}
 
 # ============== RUNBOOK ENDPOINTS ==============
 
+# ``runbooks`` historically mixed unrelated automation definitions, generated
+# knowledge procedures and generic documents. The only public compatibility
+# read is now the ticket-derived knowledge library; automation execution has a
+# single owner in ``workflow_automation``. New knowledge records carry a
+# stable client_id. Older records without that binding stay available only to a
+# global operator, which is safer than silently exposing them to every
+# restricted technician.
+_LEGACY_RUNBOOK_DETAIL = (
+    "Legacy runbook execution is retired. Use the governed Workflow Automation "
+    "workspace and /api/workflows instead."
+)
+
+
+def _retire_legacy_runbook_execution() -> None:
+    raise HTTPException(status_code=410, detail=_LEGACY_RUNBOOK_DETAIL)
+
+
+async def _knowledge_runbook_in_scope(runbook_id: str, current_user: dict, operation: str) -> dict:
+    candidate = await db.runbooks.find_one(
+        tenant_scoped_query(current_user, {"id": runbook_id, "source_ticket_id": {"$exists": True}}),
+        {"_id": 0},
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return await assert_tenant_record_scope(
+        current_user,
+        db.runbooks,
+        runbook_id,
+        operation=operation,
+        resource_name="Knowledge runbook",
+    )
+
+
 @router.get("/runbooks")
-async def get_runbooks(category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    query = {}
+async def get_runbooks(
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """List published, ticket-derived knowledge runbooks inside caller scope."""
+    query: dict[str, Any] = {"published": True, "source_ticket_id": {"$exists": True}}
     if category:
         query["category"] = category
-    
-    runbooks = await db.runbooks.find(query, {"_id": 0}).sort("name", 1).to_list(100)
-    return runbooks
+    search = str(q or "").strip()
+    if search:
+        # Search is an operator convenience, never a raw Mongo expression.
+        pattern = re.escape(search[:80])
+        query["$or"] = [
+            {"title": {"$regex": pattern, "$options": "i"}},
+            {"tags": {"$regex": pattern, "$options": "i"}},
+            {"category": {"$regex": pattern, "$options": "i"}},
+        ]
+    return await db.runbooks.find(
+        scoped_query(current_user, tenant_scoped_query(current_user, query), site_field=None),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(100)
+
 
 @router.get("/runbooks/{runbook_id}")
 async def get_runbook(runbook_id: str, current_user: dict = Depends(get_current_user)):
-    runbook = await db.runbooks.find_one({"id": runbook_id}, {"_id": 0})
-    if not runbook:
-        raise HTTPException(status_code=404, detail="Runbook not found")
-    return runbook
+    return await _knowledge_runbook_in_scope(runbook_id, current_user, "knowledge_runbook.read")
+
 
 @router.post("/runbooks")
 async def create_runbook(runbook_data: dict, current_user: dict = Depends(get_current_user)):
-    runbook = Runbook(
-        name=runbook_data.get('name'),
-        description=runbook_data.get('description'),
-        category=runbook_data.get('category', 'remediation'),
-        trigger_type=runbook_data.get('trigger_type', 'manual'),
-        trigger_conditions=runbook_data.get('trigger_conditions', {}),
-        steps=runbook_data.get('steps', []),
-        enabled=runbook_data.get('enabled', True),
-        created_by=current_user['id']
-    )
-    doc = runbook.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    await db.runbooks.insert_one(doc)
-    return runbook
+    _retire_legacy_runbook_execution()
+
 
 @router.put("/runbooks/{runbook_id}")
 async def update_runbook(runbook_id: str, runbook_data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.runbooks.update_one({"id": runbook_id}, {"$set": runbook_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Runbook not found")
-    return {"message": "Runbook updated"}
+    _retire_legacy_runbook_execution()
+
 
 @router.delete("/runbooks/{runbook_id}")
 async def delete_runbook(runbook_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.runbooks.delete_one({"id": runbook_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Runbook not found")
-    return {"message": "Runbook deleted"}
+    _retire_legacy_runbook_execution()
+
 
 @router.post("/runbooks/{runbook_id}/execute")
 async def execute_runbook(runbook_id: str, context: Dict[str, Any] = {}, current_user: dict = Depends(get_current_user)):
-    """Execute a runbook manually"""
-    runbook = await db.runbooks.find_one({"id": runbook_id}, {"_id": 0})
-    if not runbook:
-        raise HTTPException(status_code=404, detail="Runbook not found")
-    
-    execution = RunbookExecution(
-        runbook_id=runbook_id,
-        runbook_name=runbook['name'],
-        triggered_by="manual",
-        trigger_context=context,
-        device_id=context.get('device_id'),
-        client_id=context.get('client_id'),
-        user_id=current_user['id'],
-        status="running"
-    )
-    doc = execution.model_dump()
-    doc['started_at'] = doc['started_at'].isoformat()
-    await db.runbook_executions.insert_one(doc)
-    
-    # Update runbook stats
-    await db.runbooks.update_one(
-        {"id": runbook_id},
-        {"$inc": {"run_count": 1}, "$set": {"last_run": datetime.now(timezone.utc).isoformat()}}
-    )
-    
-    return execution
+    _retire_legacy_runbook_execution()
+
 
 @router.get("/runbook-executions")
 async def get_runbook_executions(runbook_id: Optional[str] = None, limit: int = 50, current_user: dict = Depends(get_current_user)):
-    query = {}
-    if runbook_id:
-        query["runbook_id"] = runbook_id
-    
-    executions = await db.runbook_executions.find(query, {"_id": 0}).sort("started_at", -1).to_list(limit)
-    return executions
+    _retire_legacy_runbook_execution()
 

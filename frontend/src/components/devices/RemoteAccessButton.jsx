@@ -8,30 +8,18 @@ import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuLabel, DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
-  Play, RefreshCw, ChevronDown, Monitor, Settings, ExternalLink,
-  XCircle, MonitorSmartphone, Wrench,
+  Play, RefreshCw, Settings, XCircle, MonitorUp, Wrench,
 } from "lucide-react";
 import { API, useAuth } from "@/App";
 
 const PROVIDER_LABEL = {
-  rustdesk: "RustDesk",
-  meshcentral: "MeshCentral",
-  splashtop: "Splashtop",
-  screenconnect: "ScreenConnect",
-  teamviewer: "TeamViewer",
-  anydesk: "AnyDesk",
-  guacamole: "Apache Guacamole",
+  nexus: "Nexus Native",
 };
 
 const PROVIDER_ICON = {
-  rustdesk: MonitorSmartphone,
-  meshcentral: Monitor,
+  nexus: MonitorUp,
 };
 
 function remoteErrorMessage(error, fallback) {
@@ -48,20 +36,21 @@ function remoteErrorMessage(error, fallback) {
 /**
  * Unified Remote Access button.
  *
- * Picks a primary action based on what's configured and what's available on
- * this device. When multiple providers are available, opens a dropdown so the
- * tech can choose. Falls back to a "Configure" CTA when nothing is set up.
+ * Starts only the Nexus Native workflow for an enrolled endpoint and fails
+ * closed when the signed Remote Companion is not ready.
  */
-export default function RemoteAccessButton({ device, status, ticketId = null, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
+export default function RemoteAccessButton({ device, status, ticketId = null, workSessionId = null, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [providers, setProviders] = useState(providersOverride || []);
+  const [remotePolicy, setRemotePolicy] = useState(null);
   const [loading, setLoading] = useState(providersOverride === null);
   const [pendingProvider, setPendingProvider] = useState(null);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [session, setSession] = useState(null);
   const [starting, setStarting] = useState(false);
+
   const [purpose, setPurpose] = useState("");
   const [sessionType, setSessionType] = useState("remote_desktop");
   const [consentMethod, setConsentMethod] = useState("attended_prompt");
@@ -70,6 +59,34 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
   const [remoteHealth, setRemoteHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  const workSessionOwnsTime = Boolean(workSessionId);
+
+  // Native transport state is owned by the endpoint agent, not the browser.
+  // Refresh the scoped session record while its consent/transport transition is
+  // pending so the technician never sees a stale "waiting" prompt after the
+  // companion has accepted and connected.
+  useEffect(() => {
+    const sessionId = session?.session?.id;
+    if (!sessionId || !device?.id) return undefined;
+    let cancelled = false;
+    const refreshSession = async () => {
+      try {
+        const { data } = await axios.get(`${API}/devices/${device.id}/remote-sessions?limit=20`, { headers });
+        const current = (data?.sessions || []).find(item => item?.id === sessionId);
+        if (!cancelled && current) {
+          setSession(previous => previous?.session?.id === sessionId
+            ? { ...previous, session: { ...previous.session, ...current } }
+            : previous);
+        }
+      } catch {
+        // The existing modal remains usable; a failed poll must not invent a
+        // transport state or close an active operator workflow.
+      }
+    };
+    refreshSession();
+    const timer = window.setInterval(refreshSession, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [device?.id, headers, session?.session?.id]);
 
   useEffect(() => {
     if (providersOverride !== null) {
@@ -80,32 +97,33 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
     let cancelled = false;
     (async () => {
       try {
-        const res = await axios.get(`${API}/remote-providers/active`, { headers });
-        if (!cancelled) setProviders(res.data || []);
+        if (!device?.id) return;
+        const res = await axios.get(`${API}/devices/${device.id}/remote-options`, { headers });
+        if (!cancelled) {
+          setProviders(res.data?.providers || []);
+          setRemotePolicy(res.data?.policy || null);
+        }
       } catch {
         if (!cancelled) setProviders([]);
       } finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [headers, providersOverride]);
+  }, [device?.id, headers, providersOverride]);
 
-  const isOffline = status === "offline";
+  const isOffline = status === "offline" || status === "stale";
 
   // Determine which providers actually apply to THIS device right now.
-  const rdCfg = providers.find(p => p.id === "rustdesk");
-  const splashtopCfg = providers.find(p => p.id === "splashtop");
-  const otherCfg = providers.filter(p => !["trmm", "rustdesk", "splashtop"].includes(p.id));
-
-  const rdReady = !!rdCfg && !!device?.rustdesk_id;
-  const splashtopId = device?.remote_provider_ids?.splashtop || device?.splashtop_id || device?.splashtop_uuid;
-  const splashtopReady = !!splashtopCfg && !!splashtopId;
+  const nexusCfg = providers.find(p => p.id === "nexus");
+  const standingAuthorisationAvailable = Boolean(
+    nexusCfg?.unattended_enabled && nexusCfg?.unattended_ready && remotePolicy?.allow_standing_authorisation,
+  );
 
   const requestProvider = async (provider) => {
     setConsentConfirmed(false);
     setPurpose("");
     setSessionType("remote_desktop");
     setConsentMethod("attended_prompt");
-    setCreateTimeEntry(true);
+    setCreateTimeEntry(!workSessionOwnsTime);
     setEndNotes("");
     setRemoteHealth(null);
     setPendingProvider(provider);
@@ -159,18 +177,17 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         consent_method: consentMethod,
         purpose: purpose.trim() || "Technician support session",
         session_type: sessionType,
-        create_time_entry: createTimeEntry,
+        create_time_entry: workSessionOwnsTime ? false : createTimeEntry,
         ticket_id: ticketId,
+        work_session_id: workSessionId,
         idempotency_key: idempotencyKey,
       }, { headers });
       let nextSession = res.data;
       if (res.data.connection_url) {
         launchNative(res.data.connection_url);
-        const opened = await axios.post(`${API}/remote/sessions/${res.data.session.id}/opened`, {}, { headers });
-        nextSession = { ...res.data, session: opened.data };
-        toast.success(`Launching ${PROVIDER_LABEL[pendingProvider] || pendingProvider} for ${device?.name}`);
+        toast.info(`Launch requested for ${PROVIDER_LABEL[pendingProvider] || pendingProvider}. Confirm once the remote desktop opens.`);
       } else {
-        toast.info(typeof res.data.message === "string" ? res.data.message : "Remote provider handoff is ready");
+        toast.info(typeof res.data.message === "string" ? res.data.message : "Nexus Native handoff is ready");
       }
       setSession(nextSession);
       setPendingProvider(null);
@@ -185,21 +202,29 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
       const { data } = await axios.put(`${API}/remote/sessions/${session.session.id}/end`, {
         lock_action_on_disconnect: "no_change",
         notes: endNotes.trim(),
-        create_time_entry: createTimeEntry,
+        create_time_entry: workSessionOwnsTime ? false : createTimeEntry,
         billable: true,
       }, { headers });
-      toast.success(data.time_entry_id ? "Session ended, ticket updated and time recorded" : "Remote session ended and logged");
+      if (data.time_entry_id) {
+        toast.success("Session ended, ticket updated and time recorded");
+      } else if (data.time_entry_suppressed_by === "nexus_work_session") {
+        toast.success("Session ended; time remains in Nexus Work Session");
+      } else if (data.time_entry_suppressed_by === "launch_not_confirmed") {
+        toast.info("Remote authorisation cancelled; no time was recorded");
+      } else {
+        toast.success("Remote session ended and logged");
+      }
       setSession(null);
       setEndNotes("");
     } catch { toast.error("Unable to close the remote session record"); }
   };
 
-  // Use only configured, supported remote providers. The old TRMM path was
-  // retired with the legacy agent and must never appear as a working option.
+
+
+  // Nexus Native is the only active launch path. Provider records may remain
+  // as historical evidence, but must never become a browser launch option.
   let primary = null;
-  if (rdReady) primary = { id: "rustdesk", label: compact ? "Remote" : "Remote (RustDesk)", action: () => requestProvider("rustdesk") };
-  else if (splashtopReady) primary = { id: "splashtop", label: compact ? "Remote" : "Remote (Splashtop)", action: () => requestProvider("splashtop") };
-  else if (otherCfg.length === 1) primary = { id: otherCfg[0].id, label: compact ? "Remote" : `Remote (${otherCfg[0].name})`, action: () => toast.info(`${otherCfg[0].name} provider — open from Settings → Remote Providers`) };
+  if (nexusCfg && device?.nexus_agent_id) primary = { id: "nexus", label: compact ? "Remote" : "Nexus Remote", action: () => requestProvider("nexus") };
 
   const sizeCls = compact ? "h-7 text-[11px] px-2" : "";
 
@@ -216,8 +241,8 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
   if (!primary && providers.length === 0) {
     return (
       <Button size="sm" variant="outline" asChild className={sizeCls} data-testid={`${testid}-configure`}>
-        <Link to="/settings?tab=integrations">
-          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {compact ? "Setup" : "Configure Remote"}
+        <Link to="/nexus-agent">
+          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {compact ? "Setup" : "Install Nexus Agent"}
         </Link>
       </Button>
     );
@@ -235,8 +260,8 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         className={`border-amber-500/30 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 ${sizeCls}`}
         data-testid={`${testid}-link`}
       >
-        <Link to={`/remote-access?assignDevice=${encodeURIComponent(device.id)}`}>
-          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {compact ? "Link" : "Link remote"}
+        <Link to="/nexus-agent">
+          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {compact ? "Agent" : "Link Nexus Agent"}
         </Link>
       </Button>
     );
@@ -246,17 +271,13 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
   if (isOffline) {
     return (
       <Button size="sm" variant="outline" disabled className={sizeCls} data-testid={`${testid}-offline`}>
-        <XCircle className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> Offline
+        <XCircle className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {status === "stale" ? "Agent stale" : "Offline"}
       </Button>
     );
   }
 
   // Render: primary button + dropdown if multiple options or fallback choices exist
-  const hasAlternatives = (
-    (rdReady && (otherCfg.length > 0 || splashtopReady)) ||
-    splashtopReady ||
-    otherCfg.length > 0
-  );
+  const hasAlternatives = false;
 
   const PrimaryIcon = PROVIDER_ICON[primary?.id] || Play;
 
@@ -274,71 +295,13 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         {busy ? <RefreshCw className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1 animate-spin`} /> : <PrimaryIcon className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} />}
         {primary?.label || "Remote Access"}
       </Button>
-      {hasAlternatives && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className={`rounded-l-none border-emerald-500/30 px-2 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400 ${sizeCls}`}
-              data-testid={`${testid}-menu-trigger`}
-            >
-              <ChevronDown className={compact ? "w-3 h-3" : "w-4 h-4"} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-muted-foreground">Remote providers</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {rdCfg && (
-              <DropdownMenuItem
-                onClick={() => requestProvider("rustdesk")}
-                disabled={busy}
-                data-testid={`${testid}-opt-rustdesk`}
-              >
-                <MonitorSmartphone className="w-4 h-4 mr-2 text-cyan-500" />
-                <div className="flex-1">
-                  <div className="text-sm">RustDesk</div>
-                  <div className="text-[10px] text-muted-foreground">{device?.rustdesk_id ? `ID ${device.rustdesk_id}` : "No RustDesk ID assigned"}</div>
-                </div>
-              </DropdownMenuItem>
-            )}
-            {splashtopCfg && (
-              <DropdownMenuItem onClick={() => splashtopReady ? requestProvider("splashtop") : toast.warning("Link this device to its Splashtop Streamer from the device record first")} data-testid={`${testid}-opt-splashtop`}>
-                <Monitor className="w-4 h-4 mr-2 text-violet-500" />
-                <div className="flex-1"><div className="text-sm">Splashtop</div><div className="text-[10px] text-muted-foreground">{splashtopReady ? `Streamer ${splashtopId}` : "No Streamer assigned"}</div></div>
-              </DropdownMenuItem>
-            )}
-            {otherCfg.filter(p => p.id !== "splashtop").map(p => (
-              <DropdownMenuItem
-                key={p.id}
-                onClick={() => toast.info(`${p.name} launches from Settings → Remote Providers (per-device handoff coming soon)`)}
-                data-testid={`${testid}-opt-${p.id}`}
-              >
-                <Monitor className="w-4 h-4 mr-2 text-violet-500" />
-                <div className="flex-1">
-                  <div className="text-sm">{PROVIDER_LABEL[p.id] || p.name}</div>
-                  <div className="text-[10px] text-muted-foreground capitalize">{p.type}</div>
-                </div>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild data-testid={`${testid}-opt-configure`}>
-              <Link to="/settings?tab=integrations">
-                <Settings className="w-4 h-4 mr-2" />
-                <span className="text-sm">Configure providers…</span>
-                <ExternalLink className="w-3 h-3 ml-auto opacity-50" />
-              </Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
     </div>
     <Dialog open={!!pendingProvider} onOpenChange={v => !v && setPendingProvider(null)}>
       <NexusWorkflowDialog
         eyebrow="Nexus Remote"
         title="Authorise remote support"
         description="One governed session captures the client, endpoint, technician, consent, purpose and service evidence."
-        icon={MonitorSmartphone}
+        icon={MonitorUp}
         tone="cyan"
         className="max-w-xl"
         footer={<><Button variant="outline" onClick={() => setPendingProvider(null)}>Cancel</Button><Button onClick={startSession} disabled={!consentConfirmed || starting}>{starting ? "Starting…" : "Start remote session"}</Button></>}
@@ -376,34 +339,62 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
             <label className="text-xs font-medium text-foreground">Session mode</label>
             <Select value={sessionType} onValueChange={setSessionType}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="remote_desktop">Remote desktop</SelectItem><SelectItem value="terminal">Terminal</SelectItem><SelectItem value="file_transfer">File transfer</SelectItem></SelectContent>
+              <SelectContent><SelectItem value="remote_desktop">Remote desktop</SelectItem></SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-foreground">Consent evidence</label>
             <Select value={consentMethod} onValueChange={setConsentMethod}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="attended_prompt">Client prompt</SelectItem><SelectItem value="verbal">Verbal approval</SelectItem><SelectItem value="standing_authorisation">Standing authorisation</SelectItem><SelectItem value="emergency_override">Emergency override</SelectItem></SelectContent>
+              <SelectContent>
+                <SelectItem value="attended_prompt">Local client prompt required</SelectItem>
+                {standingAuthorisationAvailable && <SelectItem value="standing_authorisation">Standing authorisation · endpoint notice</SelectItem>}
+              </SelectContent>
             </Select>
           </div>
         </div>
         <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">Purpose</label><Input value={purpose} onChange={event => setPurpose(event.target.value)} placeholder="For example: investigate Outlook sign-in failure" maxLength={500} /></div>
-        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm"><Checkbox checked={consentConfirmed} onCheckedChange={v => setConsentConfirmed(v === true)} /><span>I confirm the client is aware of and has approved this remote session using the method selected above.</span></label>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={createTimeEntry} onCheckedChange={v => setCreateTimeEntry(v === true)} /><span>Create a billable time entry when this session closes if it is linked to a ticket.</span></label>
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm"><Checkbox checked={consentConfirmed} onCheckedChange={v => setConsentConfirmed(v === true)} /><span>{consentMethod === "standing_authorisation" ? "I confirm this endpoint has a current standing authorisation for unattended, view-only support." : "I confirm the client is aware of and has approved this remote session using the method selected above."}</span></label>
+        {workSessionOwnsTime ? (
+          <div className="rounded-lg border border-violet-400/20 bg-violet-400/[0.05] p-3 text-xs leading-5 text-violet-100" data-testid={`${testid}-work-session-time-owner`}>
+            This session is linked to an active Nexus Work Session. Remote evidence is retained here; time is reviewed and recorded once in the Work Session completion pack.
+          </div>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={createTimeEntry} onCheckedChange={v => setCreateTimeEntry(v === true)} /><span>Create a billable time entry when this session closes if it is linked to a ticket.</span></label>
+        )}
       </NexusWorkflowDialog>
     </Dialog>
-    <Dialog open={!!session} onOpenChange={v => !v && setSession(null)}>
+    <Dialog open={!!session} onOpenChange={v => {
+      // Keep the pending confirmation in view. Closing a connection request
+      // should be an explicit cancel action so it cannot leave an untracked,
+      // time-eligible authorisation behind.
+      if (!v && session?.session?.status === "active") setSession(null);
+    }}>
       <NexusWorkflowDialog
         eyebrow="Nexus Remote"
-        title={session?.provider === "splashtop" ? "Provider handoff ready" : "Remote session active"}
-        description={session?.message}
-        icon={MonitorSmartphone}
+        title={session?.session?.status === "active" ? "Remote session active" : "Waiting for native connection"}
+        description={session?.session?.status === "active"
+          ? "Connection confirmation, technician identity and linked work evidence are retained."
+          : "Authorisation is recorded. Billing cannot start without verified native transport evidence."}
+        icon={MonitorUp}
         tone="emerald"
         className="max-w-lg"
-        footer={<><Button variant="outline" onClick={() => setSession(null)}>Keep running</Button><Button variant="destructive" onClick={endSession}>End & save evidence</Button></>}
+        footer={session?.session?.status === "active"
+          ? <><Button variant="outline" onClick={() => setSession(null)}>Keep running</Button><Button variant="destructive" onClick={endSession}>End & save evidence</Button></>
+          : <Button variant="outline" onClick={endSession} data-testid={`${testid}-cancel-authorisation`}>Cancel authorisation</Button>}
       >
-        <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3"><p className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Evidence live</p><p className="mt-1 text-sm text-foreground/90">{device?.name} · {session?.session?.session_type?.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[10px] text-muted-foreground">{session?.session?.id}</p></div>
-        <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">Outcome for the ticket and time entry</label><Textarea value={endNotes} onChange={event => setEndNotes(event.target.value)} placeholder="Record what was checked, changed and verified…" rows={4} /></div>
+        <div className={`rounded-xl border p-3 ${session?.session?.status === "active" ? "border-emerald-400/15 bg-emerald-400/[0.04]" : "border-amber-400/20 bg-amber-400/[0.05]"}`}>
+          <p className={`text-xs font-semibold uppercase tracking-wider ${session?.session?.status === "active" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-200"}`}>{session?.session?.status === "active" ? "Evidence live" : "Launch request recorded"}</p>
+          <p className="mt-1 text-sm text-foreground/90">{device?.name} · {session?.session?.session_type?.replaceAll("_", " ")}</p>
+          <p className="mt-1 font-mono text-[10px] text-muted-foreground">{session?.session?.id}</p>
+        </div>
+        {session?.session?.status !== "active" && (
+          <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.04] p-3 text-xs leading-5 text-amber-900 dark:text-amber-100">
+            The endpoint must approve locally and establish a verified native connection. Cancelling preserves the authorisation audit without adding ticket time.
+            {session?.connection_url && <Button type="button" variant="link" className="ml-1 h-auto p-0 text-amber-800 dark:text-amber-200" onClick={() => launchNative(session.connection_url)}>Launch again</Button>}
+          </div>
+        )}
+        <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">{workSessionOwnsTime ? "Outcome for the linked Work Session" : "Outcome for the ticket and time entry"}</label><Textarea value={endNotes} onChange={event => setEndNotes(event.target.value)} placeholder="Record what was checked, changed and verified…" rows={4} /></div>
       </NexusWorkflowDialog>
     </Dialog>
     </>

@@ -1,10 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import PlainTextResponse
-from typing import Optional
-from datetime import datetime, timezone
-import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope
 
 router = APIRouter()
 
@@ -14,6 +11,13 @@ router = APIRouter()
 @router.get("/devices/{device_id}/disks")
 async def get_device_disks(device_id: str, current_user: dict = Depends(get_current_user)):
     """Get disk/drive health information for a device"""
+    await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="device.disks.read",
+        resource_name="Managed asset",
+    )
     disks = await db.device_disks.find({"device_id": device_id}, {"_id": 0}).to_list(50)
     return disks
 
@@ -26,28 +30,16 @@ async def generate_agent_script(
     os_type: str = "windows",
     current_user: dict = Depends(get_current_user)
 ):
-    """Generate a downloadable agent script for a specific device.
-    The script collects system info, disk health, and reports back to NexusOps."""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    """Retired legacy bootstrap endpoint.
 
-    # Get the API URL from settings or use a default
-    settings = await db.settings.find_one({"type": "agent_config"}, {"_id": 0})
-    api_url = settings.get("api_url", "") if settings else ""
-    if not api_url:
-        api_url = "https://your-nexusops-server.com/api"
-
-    agent_key = settings.get("agent_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
-
-    if os_type == "windows":
-        script = _generate_windows_script(device_id, api_url, agent_key)
-        return PlainTextResponse(content=script, media_type="text/plain",
-                                 headers={"Content-Disposition": f"attachment; filename=nexusops-agent-{device_id}.ps1"})
-    else:
-        script = _generate_linux_script(device_id, api_url, agent_key)
-        return PlainTextResponse(content=script, media_type="text/plain",
-                                 headers={"Content-Disposition": f"attachment; filename=nexusops-agent-{device_id}.sh"})
+    The historical script embedded a shared credential and posted unsigned
+    telemetry to a device ID supplied by the caller.  Nexus Agent installers
+    now enrol with a device-bound identity and submit authenticated heartbeats.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy agent scripts are retired. Use the Nexus Agent deployment workspace.",
+    )
 
 
 @router.get("/devices/agent/script-template")
@@ -55,131 +47,25 @@ async def get_agent_script_template(
     os_type: str = "windows",
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a generic agent script template (no device ID baked in).
-    The agent will auto-register on first run."""
-    settings = await db.settings.find_one({"type": "agent_config"}, {"_id": 0})
-    api_url = settings.get("api_url", "") if settings else ""
-    if not api_url:
-        api_url = "https://your-nexusops-server.com/api"
-    agent_key = settings.get("agent_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
-
-    if os_type == "windows":
-        script = _generate_windows_script("AUTO_REGISTER", api_url, agent_key)
-        return PlainTextResponse(content=script, media_type="text/plain",
-                                 headers={"Content-Disposition": "attachment; filename=nexusops-agent.ps1"})
-    else:
-        script = _generate_linux_script("AUTO_REGISTER", api_url, agent_key)
-        return PlainTextResponse(content=script, media_type="text/plain",
-                                 headers={"Content-Disposition": "attachment; filename=nexusops-agent.sh"})
+    """Retired legacy bootstrap endpoint; see ``generate_agent_script``."""
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy agent scripts are retired. Use the Nexus Agent deployment workspace.",
+    )
 
 
 @router.post("/devices/agent/report")
 async def agent_report(data: dict):
-    """Endpoint for the NexusOps agent to submit full system reports including disk health.
-    This is an enriched version of the heartbeat with disk SMART data."""
-    device_id = data.get("device_id")
-    agent_key = data.get("agent_key", "")
-    if not device_id:
-        raise HTTPException(status_code=400, detail="device_id required")
+    """Retired unsigned telemetry ingestion endpoint.
 
-    device = await db.devices.find_one({"id": device_id})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    # Update core device fields
-    update = {"last_seen": now, "status": "online", "last_heartbeat": now, "agent_version": data.get("agent_version", "1.0.0")}
-
-    field_map = {
-        "hostname": "name", "os_name": "os", "os_version": "os_version",
-        "os_build": "os_build", "architecture": "architecture",
-        "serial_number": "serial_number", "manufacturer": "manufacturer",
-        "model": "model", "bios_version": "bios_version",
-        "cpu_name": "processor", "domain": "domain",
-        "ip_address": "ip_address", "mac_address": "mac_address",
-        "public_ip": "public_ip", "logged_in_user": "last_logged_in_user",
-        "antivirus_name": "antivirus", "antivirus_status": "antivirus_status",
-    }
-    for src, dst in field_map.items():
-        if src in data:
-            update[dst] = data[src]
-
-    numeric_map = {
-        "cpu_usage": "cpu_usage", "memory_usage": "memory_usage",
-        "disk_usage": "disk_usage", "cpu_temp": "cpu_temp",
-        "total_ram_gb": "ram_gb", "total_disk_gb": "storage_total_gb",
-    }
-    for src, dst in numeric_map.items():
-        if src in data:
-            update[dst] = float(data[src])
-
-    if "cpu_cores" in data:
-        update["processor_cores"] = int(data["cpu_cores"])
-    if "free_disk_gb" in data and "total_disk_gb" in data:
-        update["storage_used_gb"] = round(float(data["total_disk_gb"]) - float(data["free_disk_gb"]), 1)
-    if "uptime_seconds" in data:
-        secs = int(data["uptime_seconds"])
-        update["uptime_hours"] = round(secs / 3600, 1)
-        update["uptime_display"] = f"{secs // 86400}d {(secs % 86400) // 3600}h"
-    if "firewall_enabled" in data:
-        update["firewall_enabled"] = data["firewall_enabled"]
-    if "bitlocker_enabled" in data:
-        update["bitlocker_enabled"] = data["bitlocker_enabled"]
-    if "pending_patches" in data:
-        update["pending_patches"] = int(data["pending_patches"])
-    if "installed_software_count" in data:
-        update["installed_software_count"] = int(data["installed_software_count"])
-
-    await db.devices.update_one({"id": device_id}, {"$set": update})
-
-    # Store performance snapshot
-    await db.device_performance.insert_one({
-        "id": str(uuid.uuid4()), "device_id": device_id,
-        "cpu_usage": data.get("cpu_usage", 0),
-        "memory_usage": data.get("memory_usage", 0),
-        "disk_usage": data.get("disk_usage", 0),
-        "timestamp": now,
-    })
-
-    # Process disk health data
-    disks = data.get("disks", [])
-    if disks:
-        # Remove old disk entries for this device and insert fresh
-        await db.device_disks.delete_many({"device_id": device_id})
-        for disk in disks:
-            disk_doc = {
-                "id": str(uuid.uuid4()),
-                "device_id": device_id,
-                "drive_letter": disk.get("drive_letter", ""),
-                "mount_point": disk.get("mount_point", ""),
-                "label": disk.get("label", ""),
-                "file_system": disk.get("file_system", ""),
-                "total_gb": float(disk.get("total_gb", 0)),
-                "used_gb": float(disk.get("used_gb", 0)),
-                "free_gb": float(disk.get("free_gb", 0)),
-                "usage_percent": float(disk.get("usage_percent", 0)),
-                "disk_type": disk.get("disk_type", "Unknown"),  # SSD, HDD, NVMe
-                "smart_status": disk.get("smart_status", "Unknown"),  # OK, Warning, Critical
-                "smart_temperature": disk.get("smart_temperature"),
-                "smart_hours": disk.get("smart_hours"),
-                "smart_reallocated_sectors": disk.get("smart_reallocated_sectors", 0),
-                "smart_pending_sectors": disk.get("smart_pending_sectors", 0),
-                "model": disk.get("model", ""),
-                "serial": disk.get("serial", ""),
-                "firmware": disk.get("firmware", ""),
-                "interface": disk.get("interface", ""),  # SATA, NVMe, USB
-                "last_updated": now,
-            }
-            await db.device_disks.insert_one(disk_doc)
-
-    # Check thresholds
-    status = "online"
-    if float(data.get("cpu_usage", 0)) > 90 or float(data.get("memory_usage", 0)) > 90 or float(data.get("disk_usage", 0)) > 95:
-        status = "warning"
-        await db.devices.update_one({"id": device_id}, {"$set": {"status": "warning"}})
-
-    return {"status": "ok", "device_status": status, "next_report_seconds": 300}
+    Device telemetry must arrive through the authenticated, device-bound Nexus
+    Agent heartbeat route.  This endpoint intentionally performs no parsing or
+    database access so legacy payloads cannot alter device evidence.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy agent reporting is retired. Enrol the Nexus Agent and use its authenticated heartbeat.",
+    )
 
 
 # ============== SCRIPT GENERATORS ==============

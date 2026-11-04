@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import { Bot, CheckCircle, XCircle, Clock, Zap, Play, AlertTriangle, ArrowUpRight, Terminal, Shield, RotateCcw, Activity, ChevronDown, ChevronRight } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const StatusIcon = ({ status }) => {
   const map = { healed: <CheckCircle className="w-5 h-5 text-green-500" />, executing: <Activity className="w-5 h-5 text-blue-500 animate-pulse" />, detected: <AlertTriangle className="w-5 h-5 text-yellow-500" />, matched: <Bot className="w-5 h-5 text-purple-500" />, failed: <XCircle className="w-5 h-5 text-red-500" />, escalated: <ArrowUpRight className="w-5 h-5 text-orange-500" /> };
@@ -122,16 +123,10 @@ export default function SelfHealingPage({ embedded = false }) {
 
   return (
     <div className="space-y-6" data-testid="self-healing-page">
-      {!embedded && <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Bot className="w-7 h-7 text-green-500" />Self-Healing AI Engine</h1>
-          <p className="text-muted-foreground text-sm">Autonomous issue detection, runbook matching, and execution — zero human intervention</p>
-        </div>
-        <div className="flex gap-2">
+      {!embedded && <OperationalPageHeader eyebrow="Autonomous operations · governed remediation" title="Self-Healing AI Engine" description="Review issue detection, runbook matching, execution and post-change verification from one auditable workflow." icon={Bot} tone="emerald" signal={s.failed > 0 ? "critical" : s.executing > 0 ? "working" : "ready"} actions={<>
           <Button variant="outline" onClick={fetchData}><RotateCcw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={simulateIssue} data-testid="simulate-btn"><Zap className="w-4 h-4 mr-1" />Simulate Issue</Button>
-        </div>
-      </div>}
+          <Button onClick={simulateIssue} data-testid="simulate-btn"><Zap className="w-4 h-4 mr-1" />Simulate issue</Button>
+        </>} />}
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -286,12 +281,12 @@ export default function SelfHealingPage({ embedded = false }) {
       </Tabs>
 
       <Dialog open={showSimulator} onOpenChange={setShowSimulator}>
-        <DialogContent className="max-w-lg" aria-describedby="simulate-description">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(720px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="simulate-description" data-testid="self-healing-simulation-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><Zap className="h-5 w-5 text-violet-300" />Self-healing simulation</DialogTitle>
             <DialogDescription id="simulate-description">Create a clearly marked test event to validate matching, approvals and technician escalation without touching a production endpoint.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5"><Label htmlFor="simulation-type">Issue type</Label>
                 <Select value={simulation.issue_type} onValueChange={issue_type => setSimulation(current => ({ ...current, issue_type }))}>
@@ -309,7 +304,7 @@ export default function SelfHealingPage({ embedded = false }) {
             <div className="space-y-1.5"><Label htmlFor="simulation-description">Test description</Label><Input id="simulation-description" value={simulation.description} onChange={event => setSimulation(current => ({ ...current, description: event.target.value }))} /></div>
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-200">Simulation records are labelled and may auto-run only against the selected test event.</div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowSimulator(false)}>Cancel</Button><Button onClick={simulateIssue} data-testid="run-simulation-btn"><Zap className="mr-1.5 h-4 w-4" />Run simulation</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4"><Button variant="outline" onClick={() => setShowSimulator(false)}>Cancel</Button><Button onClick={simulateIssue} data-testid="run-simulation-btn"><Zap className="mr-1.5 h-4 w-4" />Run simulation</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

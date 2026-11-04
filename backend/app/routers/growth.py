@@ -15,7 +15,7 @@ Opportunities are stored in db.growth_opportunities with status lifecycle:
   new Ã¢â€ â€™ quoted Ã¢â€ â€™ won | lost | dismissed
 """
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 import os
 from app.database import db

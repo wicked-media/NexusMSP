@@ -1,14 +1,34 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
 import uuid
-import asyncio
 import logging
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import ticket_audit
+from app.services.scope_permissions import assert_tenant_record_scope, tenant_scoped_query
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _ticket_in_scope(ticket_id: str, user: dict, operation: str) -> dict:
+    return await assert_tenant_record_scope(
+        user, db.tickets, ticket_id, operation=operation, resource_name="Ticket"
+    )
+
+
+def _background_ticket_query(ticket: dict) -> dict:
+    """Retain the ticket's observed tenant partition during unattended updates."""
+    ticket_id = str(ticket.get("id") or "")
+    tenant_id = str(ticket.get("tenant_id") or "nexus-local").strip() or "nexus-local"
+    if tenant_id != "nexus-local":
+        return {"id": ticket_id, "tenant_id": tenant_id}
+    return {
+        "$and": [
+            {"id": ticket_id},
+            {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}, {"tenant_id": ""}]},
+        ]
+    }
 
 # ============== TICKET AUTO-PING & ESCALATION ==============
 
@@ -76,6 +96,7 @@ async def send_ping_notification(user_ids: list, ticket: dict, ping_type: str = 
     """Send ping notifications to specified users"""
     now = datetime.now(timezone.utc).isoformat()
     ticket_number = ticket.get("ticket_number", "")
+    tenant_id = str(ticket.get("tenant_id") or "nexus-local")
     title = ticket.get("title", "")
     priority = ticket.get("priority", "medium")
     category = ticket.get("category", "")
@@ -93,6 +114,7 @@ async def send_ping_notification(user_ids: list, ticket: dict, ping_type: str = 
     for user_id in user_ids:
         notif = {
             "id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,
             "user_id": user_id,
             "message": message,
             "type": f"ticket_ping_{ping_type}",
@@ -107,6 +129,7 @@ async def send_ping_notification(user_ids: list, ticket: dict, ping_type: str = 
     # Log ping
     await db.ticket_pings.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": tenant_id,
         "ticket_id": ticket.get("id", ""),
         "ticket_number": ticket_number,
         "ping_type": ping_type,
@@ -145,9 +168,7 @@ async def get_team_for_ticket(ticket: dict) -> list:
 @router.post("/tickets/trigger-ping/{ticket_id}")
 async def manually_trigger_ping(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Manually trigger a ping for a specific ticket"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.ping.trigger")
     
     team = await get_team_for_ticket(ticket)
     if team:
@@ -158,20 +179,21 @@ async def manually_trigger_ping(ticket_id: str, current_user: dict = Depends(get
 
 @router.get("/tickets/{ticket_id}/ping-history")
 async def get_ticket_ping_history(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    pings = await db.ticket_pings.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    await _ticket_in_scope(ticket_id, current_user, "ticket.ping.read")
+    pings = await db.ticket_pings.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
     return pings
 
 @router.post("/tickets/{ticket_id}/pick-up")
 async def pick_up_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """A technician picks up (claims) an unassigned ticket"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.pick_up")
     
     if ticket.get("assigned_to") and ticket["assigned_to"] != current_user["id"]:
         raise HTTPException(status_code=400, detail="Ticket already assigned to another technician")
     
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {
         "assigned_to": current_user["id"],
         "assigned_name": current_user["name"],
         "status": "in_progress" if ticket.get("status") == "open" else ticket.get("status"),
@@ -244,7 +266,7 @@ async def check_unassigned_tickets():
                 if escalation_contacts:
                     await send_ping_notification(escalation_contacts, ticket, "escalation")
                     # Also update ticket priority
-                    await db.tickets.update_one({"id": ticket_id}, {"$set": {
+                    await db.tickets.update_one(_background_ticket_query(ticket), {"$set": {
                         "priority": "critical" if ticket.get("priority") != "critical" else "critical",
                         "escalated": True,
                         "escalated_at": now.isoformat(),

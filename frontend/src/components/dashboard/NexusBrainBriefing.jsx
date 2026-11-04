@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/design-system";
 
 const OUTCOMES = {
   reduce_effort: { label: "Reduces effort", className: "border-cyan-300/15 bg-cyan-400/[0.05] text-cyan-200" },
@@ -43,15 +44,15 @@ function Metric({ icon: Icon, label, value, detail, tone = "cyan", state = "evid
   );
 }
 
-function EmptyState({ title, detail }) {
-  return (
-    <div className="rounded-xl border border-emerald-400/12 bg-emerald-400/[0.025] px-3 py-5 text-center">
-      <CheckCircle2 className="mx-auto h-5 w-5 text-emerald-300" />
-      <p className="mt-1.5 text-xs font-medium text-emerald-100">{title}</p>
-      <p className="mt-0.5 text-[10px] text-zinc-500">{detail}</p>
-    </div>
-  );
-}
+/**
+ * The shared EmptyState, dressed for this panel. `className` is merged over the
+ * primitive's own padding, so the compact emerald framing is preserved without a
+ * local copy of the component — see docs/NEXUS_EXPERIENCE_STANDARD.md.
+ */
+const emptyStateProps = {
+  icon: <CheckCircle2 className="h-5 w-5 text-emerald-300" />,
+  className: "rounded-xl border border-emerald-400/12 bg-emerald-400/[0.025] px-3 py-5",
+};
 
 export default function NexusBrainBriefing({ data, navigate }) {
   if (!data) return null;
@@ -150,7 +151,7 @@ export default function NexusBrainBriefing({ data, navigate }) {
                 </button>
               );
             })}
-            {!improvements.length && <div className="xl:col-span-2"><EmptyState title="No improvement lead is ready" detail="Nexus needs repeated, retained operational evidence before it proposes a change." /></div>}
+            {!improvements.length && <div className="xl:col-span-2"><EmptyState {...emptyStateProps} title="No improvement lead is ready" description="Nexus needs repeated, retained operational evidence before it proposes a change." /></div>}
           </div>
         </div>
 
@@ -165,7 +166,7 @@ export default function NexusBrainBriefing({ data, navigate }) {
           <p className="mt-1 max-w-3xl text-[9px] leading-relaxed text-zinc-500">{diagnosticWorkspace.detail || "Nexus creates diagnostic starting points from retained evidence; a technician controls every check and remediation."}</p>
           <div className="mt-3 grid gap-2 xl:grid-cols-3">
             {diagnosticPlans.map((plan) => <button key={plan.id} type="button" onClick={() => navigate(plan.route)} className="group rounded-xl border border-white/[0.06] bg-black/15 p-3 text-left transition hover:border-cyan-300/20 hover:bg-cyan-400/[0.04]"><div className="flex items-start justify-between gap-2"><p className="text-[11px] font-semibold text-zinc-100">{plan.title}</p><ArrowRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-cyan-200" /></div><p className="mt-1 text-[9px] leading-relaxed text-zinc-500">{plan.detail}</p><ol className="mt-2 space-y-1 border-l border-cyan-300/15 pl-2 text-[9px] leading-relaxed text-zinc-400">{(plan.steps || []).map((step, index) => <li key={step}><span className="mr-1 text-cyan-300">{index + 1}.</span>{step}</li>)}</ol><p className="mt-2 text-[8px] text-zinc-600">Evidence: {plan.evidence}</p></button>)}
-            {!diagnosticPlans.length && <div className="xl:col-span-3"><EmptyState title="No diagnostic plan is ready" detail="Nexus needs multiple retained signals before it proposes a coordinated investigation." /></div>}
+            {!diagnosticPlans.length && <div className="xl:col-span-3"><EmptyState {...emptyStateProps} title="No diagnostic plan is ready" description="Nexus needs multiple retained signals before it proposes a coordinated investigation." /></div>}
           </div>
         </div>
 
@@ -191,7 +192,7 @@ export default function NexusBrainBriefing({ data, navigate }) {
                   <span className="text-xs font-semibold text-emerald-200">{item.value}</span>
                 </button>
               ))}
-              {!completed.length && <EmptyState title="No overnight automation claims" detail="Nexus will only show actions backed by completed execution records." />}
+              {!completed.length && <EmptyState {...emptyStateProps} title="No overnight automation claims" description="Nexus will only show actions backed by completed execution records." />}
             </div>
           </div>
 
@@ -214,7 +215,7 @@ export default function NexusBrainBriefing({ data, navigate }) {
                   <ArrowRight className="h-3.5 w-3.5 text-zinc-600" />
                 </button>
               ))}
-              {!approvals.length && <EmptyState title="No decision is waiting" detail="Protected changes remain paused until a matching approval is required." />}
+              {!approvals.length && <EmptyState {...emptyStateProps} title="No decision is waiting" description="Protected changes remain paused until a matching approval is required." />}
             </div>
           </div>
         </div>
@@ -278,7 +279,7 @@ export default function NexusBrainBriefing({ data, navigate }) {
             ))}
             {!insights.length && (
               <div className="xl:col-span-2">
-                <EmptyState title="No multi-signal correlation found" detail="Current records do not support combining separate alerts into one client insight." />
+                <EmptyState {...emptyStateProps} title="No multi-signal correlation found" description="Current records do not support combining separate alerts into one client insight." />
               </div>
             )}
           </div>

@@ -16,8 +16,7 @@ SKILL_CATEGORIES = ["networking", "security", "cloud", "hardware", "software", "
 _DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _routing_availability(working_hours: dict) -> tuple[bool, bool]:
@@ -220,6 +219,7 @@ def _validate_rule(data: dict) -> dict:
 async def create_routing_rule(data: dict, current_user: dict = Depends(get_current_user)):
     rule = {"id": str(uuid.uuid4()), **_validate_rule(data), "source": "manual", "created_at": _now(), "confirmed_at": _now(), "created_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
     await db.routing_rules.insert_one(rule)
+    rule.pop("_id", None)
     return {**rule, "matches": 0}
 
 

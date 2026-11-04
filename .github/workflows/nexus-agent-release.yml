@@ -1,0 +1,134 @@
+name: Nexus Agent release
+
+# Builds the Windows Agent release components and, when an Authenticode
+# certificate secret is configured, signs and verifies them. Releases must be
+# signed; use sign=false only for clearly-labelled unsigned lab builds.
+# Evidence (signing record + SHA256 sums) is uploaded for the release record.
+
+on:
+  push:
+    tags: ["agent-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Agent version stamped into the binaries (for example 0.1.12)"
+        required: true
+        type: string
+      sign:
+        description: "Require Authenticode signing (a release without the certificate secret fails)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexus-agent-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-agent:
+    runs-on: windows-latest
+    env:
+      NEXUS_AGENT_SIGNING_CERTIFICATE: ${{ secrets.NEXUS_AGENT_SIGNING_CERTIFICATE }}
+      NEXUS_AGENT_SIGNING_PASSWORD: ${{ secrets.NEXUS_AGENT_SIGNING_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache-dependency-path: agent/go.sum
+
+      - name: Resolve agent version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#agent-v}"
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
+            echo "Agent version '$VERSION' is not a valid semantic version." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Agent tests and vet
+        working-directory: agent
+        shell: bash
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Build Windows Agent release components
+        working-directory: agent
+        shell: bash
+        run: |
+          mkdir -p dist
+          VERSION="${{ steps.version.outputs.version }}"
+          LDFLAGS="-s -w -X main.Version=${VERSION}"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-agent.exe ./cmd/nexus-agent
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-client-chat.exe ./cmd/nexus-chat
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS -H=windowsgui" -o dist/nexus-agent-tray.exe ./cmd/nexus-tray
+
+      - name: Enforce signing for releases
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign) || github.event_name == 'push' }}
+        shell: bash
+        run: |
+          if [ -z "$NEXUS_AGENT_SIGNING_CERTIFICATE" ]; then
+            echo "::error::This is a release run, but the NEXUS_AGENT_SIGNING_CERTIFICATE secret is not configured. Add the base64-encoded PFX and its password as repository secrets, or dispatch with sign=false for an explicitly unsigned lab build."
+            exit 1
+          fi
+
+      - name: Sign and verify release components
+        if: ${{ env.NEXUS_AGENT_SIGNING_CERTIFICATE != '' }}
+        shell: pwsh
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'nexus-agent-signing.pfx'
+          try {
+            [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:NEXUS_AGENT_SIGNING_CERTIFICATE))
+            $securePassword = ConvertTo-SecureString $env:NEXUS_AGENT_SIGNING_PASSWORD -AsPlainText -Force
+            ./scripts/Sign-NexusAgent.ps1 -DistDirectory agent/dist -CertificatePath $pfxPath -CertificatePassword $securePassword
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          finally {
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+          }
+
+      - name: Label unsigned lab build
+        if: ${{ env.NEXUS_AGENT_SIGNING_CERTIFICATE == '' }}
+        shell: bash
+        run: |
+          echo "## Unsigned lab build" >> "$GITHUB_STEP_SUMMARY"
+          echo "These binaries are NOT Authenticode signed and must not ship to managed endpoints." >> "$GITHUB_STEP_SUMMARY"
+          echo "UNSIGNED" > agent/dist/UNSIGNED.txt
+
+      - name: Upload release components and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-agent-windows-${{ steps.version.outputs.version }}
+          path: |
+            agent/dist/nexus-agent.exe
+            agent/dist/nexus-client-chat.exe
+            agent/dist/nexus-agent-tray.exe
+            agent/dist/UNSIGNED.txt
+            artifacts/agent-signing/agent-signing-evidence-*.json
+            artifacts/agent-signing/SHA256SUMS.txt
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Release summary
+        shell: bash
+        run: |
+          {
+            echo "## Nexus Agent ${{ steps.version.outputs.version }}"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            if [ -n "$NEXUS_AGENT_SIGNING_CERTIFICATE" ]; then
+              echo "- Authenticode: signed and verified (evidence uploaded)"
+            else
+              echo "- Authenticode: UNSIGNED lab build"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

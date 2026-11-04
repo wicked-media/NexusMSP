@@ -1,18 +1,21 @@
 export const TICKET_MODULES = [
-  { id: "queue", label: "Queue", path: "/tickets" },
-  { id: "triage", label: "Triage", path: "/triage-queue" },
-  { id: "sla", label: "SLA", path: "/sla-timer" },
-  { id: "dispatch", label: "Dispatch", path: "/dispatch-board" },
+  { id: "queue", label: "Queue", description: "Prioritise and resolve", path: "/tickets" },
+  { id: "triage", label: "Triage", description: "Classify incoming work", path: "/triage-queue" },
+  { id: "sla", label: "SLA", description: "Protect commitments", path: "/sla-timer" },
+  { id: "dispatch", label: "Dispatch", description: "Plan field capacity", path: "/dispatch-board" },
 ];
 
 // These are ticket-delivery tools, not separate top-level workspaces. They
 // intentionally live in the Tickets header so the sidebar remains focused.
 export const TICKET_WORKSPACE_TOOLS = [
-  { id: "workshop", label: "Workshop Bench", path: "/workshop-bench" },
-  { id: "escalations", label: "Escalation Matrix", path: "/escalation-matrix" },
-  { id: "routing", label: "Smart Routing", path: "/intelligent-routing" },
-  { id: "blueprints", label: "Blueprints", path: "/blueprints" },
-  { id: "catalog", label: "Service Catalog", path: "/service-catalog" },
+  // This is a retained record board only. New repair work begins as a Service
+  // Desk ticket with a Workshop Repair Kit so technicians do not mistake it
+  // for a second active ticket queue.
+  { id: "workshop", label: "Historical workshop records", path: "/workshop-bench", group: "Historical records", description: "Find earlier repair records; start new repairs with a ticket kit." },
+  { id: "escalations", label: "Escalation Matrix", path: "/escalation-matrix", group: "Assignment & escalation", description: "Define who takes over when a ticket needs specialist help." },
+  { id: "routing", label: "Smart Routing", path: "/intelligent-routing", group: "Assignment & escalation", description: "Review how incoming work reaches the right technician." },
+  { id: "blueprints", label: "Blueprints", path: "/blueprints", group: "Repeatable work", description: "Reuse proven ticket plans and task checklists." },
+  { id: "catalog", label: "Service Catalog", path: "/service-catalog", group: "Repeatable work", description: "Browse standard services and request workflows." },
 ];
 
 export const TICKET_PRIORITY_STYLES = {
@@ -51,6 +54,92 @@ export function ticketToolAvailability(ticket = {}, scripts = []) {
   };
 }
 
+const TERMINAL_TICKET_STATUSES = new Set(["closed", "resolved"]);
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+
+function timestampFor(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function ticketIsTerminal(ticket = {}) {
+  return TERMINAL_TICKET_STATUSES.has(String(ticket.status || "").toLowerCase());
+}
+
+export function ticketSlaDueAt(ticket = {}) {
+  return ticket.sla_due || ticket.sla_due_at || null;
+}
+
+export function ticketLastActivityAt(ticket = {}) {
+  return ticket.last_activity_at || ticket.updated_at || ticket.created_at || null;
+}
+
+export function ticketHasBreachedSla(ticket = {}, now = new Date()) {
+  if (ticketIsTerminal(ticket)) return false;
+  const dueAt = timestampFor(ticketSlaDueAt(ticket));
+  return dueAt !== null && dueAt < now.getTime();
+}
+
+export function ticketHasStaleActivity(ticket = {}, now = new Date(), staleAfterMs = FOUR_HOURS_MS) {
+  if (ticketIsTerminal(ticket)) return false;
+  const lastActivity = timestampFor(ticketLastActivityAt(ticket));
+  return lastActivity !== null && now.getTime() - lastActivity > staleAfterMs;
+}
+
+function sortByOldestSignal(tickets, timestamp) {
+  return [...tickets].sort((left, right) => {
+    const leftTime = timestamp(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightTime = timestamp(right) ?? Number.MAX_SAFE_INTEGER;
+    return leftTime - rightTime;
+  });
+}
+
+/**
+ * Builds a technician-facing recovery view from ticket facts already present
+ * in the queue. It deliberately avoids inferring a customer reply from a
+ * missing field: no activity is shown as no activity, not as customer silence.
+ */
+export function buildTicketQueueSignals(tickets = [], now = new Date()) {
+  const active = tickets.filter(ticket => !ticketIsTerminal(ticket));
+  const breached = active.filter(ticket => ticketHasBreachedSla(ticket, now));
+  const criticalHigh = active.filter(ticket => ["critical", "high"].includes(String(ticket.priority || "").toLowerCase()));
+  const unassigned = active.filter(ticket => !ticket.assigned_to && !ticket.assignee_id);
+  const stale = active.filter(ticket => ticketHasStaleActivity(ticket, now));
+
+  return [
+    {
+      attention: "sla_breach",
+      label: "SLA breached",
+      description: "The documented SLA due time has passed.",
+      tickets: sortByOldestSignal(breached, ticket => timestampFor(ticketSlaDueAt(ticket))),
+    },
+    {
+      attention: "critical_high",
+      label: "Critical & high",
+      description: "Priority requires an explicit technician decision.",
+      tickets: [...criticalHigh].sort((left, right) => {
+        const rank = { critical: 0, high: 1 };
+        return (rank[String(left.priority || "").toLowerCase()] ?? 2) - (rank[String(right.priority || "").toLowerCase()] ?? 2);
+      }),
+    },
+    {
+      attention: "unassigned",
+      label: "Unassigned",
+      description: "No accountable technician is recorded yet.",
+      tickets: sortByOldestSignal(unassigned, ticket => timestampFor(ticket.created_at)),
+    },
+    {
+      // Keep the existing query value stable for saved links while presenting
+      // accurate wording in the UI.
+      attention: "no_response",
+      label: "No verified activity",
+      description: "No ticket activity has been recorded for four hours.",
+      tickets: sortByOldestSignal(stale, ticket => timestampFor(ticketLastActivityAt(ticket))),
+    },
+  ].map(signal => ({ ...signal, count: signal.tickets.length }));
+}
+
 export function matchTicketByReference(tickets = [], reference = "") {
   const wanted = decodeURIComponent(reference).replace(/^#/, "").trim().toUpperCase();
   if (!wanted) return null;
@@ -71,4 +160,30 @@ export function collectionFromResponse(data, keys = []) {
   if (Array.isArray(data.items)) return data.items;
   if (Array.isArray(data.data)) return data.data;
   return [];
+}
+
+export function uniqueByIdentity(items = []) {
+  const seen = new Set();
+  return items.filter((item, index) => {
+    const identity = String(item?.id || item?.email || item?.name || index).trim().toLowerCase();
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+export function resolutionMinutes(ticket) {
+  const explicit = Number(ticket?.resolution_time_minutes);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const completedAt = ticket?.closed_at || ticket?.resolved_at || ticket?.updated_at;
+  if (!ticket?.created_at || !completedAt) return null;
+  const elapsed = Math.round((new Date(completedAt).getTime() - new Date(ticket.created_at).getTime()) / 60_000);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
+}
+
+export function formatDuration(minutes) {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+  return `${(minutes / 1440).toFixed(minutes < 14_400 ? 1 : 0)}d`;
 }

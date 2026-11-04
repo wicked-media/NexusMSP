@@ -1,3 +1,44 @@
+/* Dashboard — a deliberately quiet command surface. */
+.nx-dashboard-shell {
+  max-width: 1680px;
+  margin-inline: auto;
+}
+.nx-dashboard-disclosure {
+  overflow: hidden;
+  border: 1px solid hsl(var(--border) / .78);
+  border-radius: 1rem;
+  background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--card) / .82) 68%, hsl(var(--primary) / .035) 100%);
+  box-shadow: 0 10px 30px rgb(15 23 42 / .035);
+}
+.dark .nx-dashboard-disclosure { box-shadow: 0 18px 40px rgb(0 0 0 / .16); }
+.nx-dashboard-disclosure__summary {
+  display: flex;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.125rem;
+  text-align: left;
+  outline: none;
+  transition: background-color 160ms ease;
+}
+.nx-dashboard-disclosure__summary::-webkit-details-marker { display: none; }
+.nx-dashboard-disclosure__summary:hover { background: hsl(var(--muted) / .28); }
+.nx-dashboard-disclosure__summary:focus-visible { box-shadow: inset 0 0 0 2px hsl(var(--ring)); }
+.nx-dashboard-disclosure__eyebrow { margin: 0; color: hsl(var(--primary)); font-size: .625rem; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+.nx-dashboard-disclosure__title { margin: .28rem 0 0; color: hsl(var(--foreground)); font-size: .875rem; font-weight: 650; }
+.nx-dashboard-disclosure__description { max-width: 52rem; margin: .25rem 0 0; color: hsl(var(--muted-foreground)); font-size: .72rem; line-height: 1.35; }
+.nx-dashboard-disclosure__action { display: inline-flex; flex: none; align-items: center; gap: .5rem; color: hsl(var(--primary)); font-size: .7rem; font-weight: 650; white-space: nowrap; }
+.nx-dashboard-workbench { padding-inline: 1.125rem; padding-bottom: 1.125rem; }
+.nx-dashboard-customise-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 2.65rem; padding: .35rem .5rem .35rem .7rem; border: 1px solid hsl(var(--border) / .72); border-radius: .75rem; background: hsl(var(--background) / .32); }
+@media (max-width: 640px) {
+  .nx-dashboard-disclosure__summary { align-items: flex-start; }
+  .nx-dashboard-disclosure__action { padding-top: .2rem; font-size: 0; }
+  .nx-dashboard-disclosure__action svg { width: 1rem; height: 1rem; }
+  .nx-dashboard-customise-bar { align-items: flex-start; flex-direction: column; }
+}
+
 /* Dashboard grid customisation — smooth snap & glow */
 .react-grid-layout {
   position: relative;

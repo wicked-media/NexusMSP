@@ -17,6 +17,7 @@ import { Clipboard, Plus, Trash2, Edit2, Loader2, ListChecks, Wand2, GripVertica
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import HeroTile from "@/components/HeroTile";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const FIELD_TYPES = [
   { value: "text", label: "Short text" },
@@ -171,7 +172,7 @@ export default function BlueprintsPage() {
 
   return (
     <div className="space-y-5" data-testid="blueprints-page">
-      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/[0.10] via-background to-background p-5 md:p-6"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300">Service design</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><Clipboard className="h-6 w-6 text-sky-300" />Ticket Blueprints</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Reusable ticket playbooks with intake fields, completion gates, and client-ready defaults.</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={installStarterLibrary} disabled={installing} data-testid="install-starter-blueprints">{installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Install MSP starters</Button><Button onClick={openCreate} data-testid="blueprints-new-btn"><Plus className="mr-2 h-4 w-4" />New blueprint</Button></div></div></div>
+      <OperationalPageHeader eyebrow="Service design · governed delivery" title="Ticket Blueprints" description="Build reusable parent-and-child ticket playbooks with structured intake, completion gates and client-ready defaults." icon={Clipboard} tone="sky" signal={bps.some(bp => bp.active !== false) ? "ready" : undefined} actions={<><Button variant="outline" onClick={installStarterLibrary} disabled={installing} data-testid="install-starter-blueprints">{installing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Install MSP starters</Button><Button onClick={openCreate} data-testid="blueprints-new-btn"><Plus className="mr-2 h-4 w-4" />New blueprint</Button></>} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <HeroTile label="Active blueprints" value={bps.filter(bp => bp.active !== false).length} icon={Clipboard} glow="sky" subtitle="Ready for ticket intake" testId="blueprints-stat-active" />
         <HeroTile label="Completion gates" value={bps.filter(bp => bp.require_completion && bp.active !== false).length} icon={ListChecks} glow="amber" subtitle="Require technician sign-off" testId="blueprints-stat-gates" />
@@ -258,9 +259,9 @@ export default function BlueprintsPage() {
       </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="blueprint-dialog">
-          <DialogHeader><DialogTitle>{editing ? `Edit · ${editing.name}` : "New Blueprint"}</DialogTitle></DialogHeader>
-          <div className="space-y-5">
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="blueprint-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>{editing ? `Edit · ${editing.name}` : "New Blueprint"}</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Name *</Label>
@@ -410,7 +411,7 @@ export default function BlueprintsPage() {
               ))}</div>}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
             <Button onClick={save} disabled={saving || !form.name.trim()} variant="outline" className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10" data-testid="blueprint-save-btn">
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
@@ -594,12 +595,13 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
       )}
 
       <Dialog open={suggestOpen} onOpenChange={(v) => { setSuggestOpen(v); if (!v) { setDraft(null); setPattern(null); } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="pattern-suggest-dialog">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="pattern-suggest-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-violet-400/15 via-violet-400/[0.04] to-transparent px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-violet-400" /> Cross-client Blueprint Draft
             </DialogTitle>
           </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {suggesting ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
@@ -687,7 +689,8 @@ function PatternsPanel({ onCreated, initialTokens, onConsumed }) {
               </div>
             </div>
           )}
-          <DialogFooter>
+          </div>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
             <Button variant="outline" onClick={() => setSuggestOpen(false)}>Cancel</Button>
             <Button onClick={saveDraft} disabled={!draft || savingDraft} variant="outline" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10" data-testid="pattern-save-btn">
               {savingDraft ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Sparkles className="w-4 h-4 mr-1" />}

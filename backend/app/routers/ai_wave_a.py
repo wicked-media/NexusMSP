@@ -13,6 +13,7 @@ import re
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -68,12 +69,13 @@ async def ticket_copilot(
     if action not in ("summarize", "next_step", "draft_reply"):
         raise HTTPException(400, "action must be summarize|next_step|draft_reply")
 
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.copilot.use", resource_name="Ticket",
+    )
 
     comments = await db.ticket_comments.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
     ).sort("created_at", 1).to_list(100)
 
     thread_lines = [
@@ -132,6 +134,7 @@ async def ticket_copilot(
     await db.ai_copilot_events.insert_one({
         "id": f"aic-{uuid.uuid4().hex[:8]}",
         "kind": "ticket_copilot",
+        "tenant_id": ticket.get("tenant_id") or platform_tenant_id(current_user),
         "ticket_id": ticket_id,
         "action": action,
         "user_id": current_user.get("id"),

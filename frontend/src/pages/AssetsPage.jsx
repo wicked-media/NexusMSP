@@ -173,9 +173,9 @@ export default function AssetsPage() {
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-      <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+      <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0 sm:rounded-2xl">
         <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Inventory register</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Boxes className="h-4 w-4 text-cyan-200" /></span>{editing ? "Refine inventory asset" : "Add inventory asset"}</DialogTitle><p className="mt-2 text-sm text-zinc-400">Record commercial and lifecycle evidence, then optionally link it to a live managed endpoint.</p></DialogHeader>
-        <div className="max-h-[68vh] space-y-3 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Dell OptiPlex 7090" data-testid="asset-name" /></div>
             <div><Label>Client *</Label><Select value={form.client_id} onValueChange={v => setForm({ ...form, client_id: v })}><SelectTrigger data-testid="asset-client"><SelectValue placeholder="Select client" /></SelectTrigger><SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
@@ -202,7 +202,7 @@ export default function AssetsPage() {
           </div>
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Additional notes..." rows={2} /></div>
         </div>
-        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-asset-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-asset-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -302,7 +302,7 @@ export default function AssetsPage() {
         tone="sky"
         actions={<>
           <Button variant="outline" size="sm" onClick={fetchAll} data-testid="assets-refresh-btn"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button size="sm" onClick={openCreate} data-testid="add-asset-btn"><Plus className="w-4 h-4 mr-1" />Add Asset</Button>
+          <Button size="sm" onClick={openCreate} data-testid="add-asset-btn"><Plus className="w-4 h-4 mr-1" />Add asset</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" data-testid="inventory-assets-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>

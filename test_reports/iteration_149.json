@@ -1,5 +1,5 @@
 {
-  "summary": "Iteration 149: Client 360° Full Profile - All features tested and working. Backend: 27/27 tests passed. Frontend: All new tabs (Subscriptions, Security) and enhanced tabs (Assets, Billing) verified with data loading correctly.",
+  "summary": "Iteration 149: Client 360Â° Full Profile - All features tested and working. Backend: 27/27 tests passed. Frontend: All new tabs (Subscriptions, Security) and enhanced tabs (Assets, Billing) verified with data loading correctly.",
   "backend_issues": {
     "critical": [],
     "minor": []
@@ -25,11 +25,11 @@
     "backend": "100% (27/27 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Used existing client-001 (Acme Corporation) with 4 subscriptions, 10 devices, $18k AR",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Client 360° features fully working: 1) 5 new backend endpoints (full-profile, subscriptions, security, billing-detail, assets-detail) all return expected data, 2) 12 tabs visible on client detail (overview/tickets/assets/subscriptions/security/contacts/billing/blueprints/ai/integrations/cipp/activity), 3) Subscriptions tab shows 4 MSP Contract items totaling $13,895/mo, 4) Security tab shows MFA/CIPP/Huntress stats with deep-links, 5) Assets tab shows 10 devices in 10 model families with online/offline counts, 6) Billing tab shows AR aging buckets + recent invoices table, 7) Help article 'clients-360' accessible at /help/clients-360",
+  "context_for_next_testing_agent": "Client 360Â° features fully working: 1) 5 new backend endpoints (full-profile, subscriptions, security, billing-detail, assets-detail) all return expected data, 2) 12 tabs visible on client detail (overview/tickets/assets/subscriptions/security/contacts/billing/blueprints/ai/integrations/cipp/activity), 3) Subscriptions tab shows 4 MSP Contract items totaling $13,895/mo, 4) Security tab shows MFA/CIPP/Huntress stats with deep-links, 5) Assets tab shows 10 devices in 10 model families with online/offline counts, 6) Billing tab shows AR aging buckets + recent invoices table, 7) Help article 'clients-360' accessible at /help/clients-360",
   "features_verified": {
     "backend_endpoints": {
       "full_profile": {
@@ -91,7 +91,7 @@
     "help_article": {
       "status": "PASS",
       "slug": "clients-360",
-      "title": "Clients 360° — Full Profile Tabs",
+      "title": "Clients 360Â° â€” Full Profile Tabs",
       "notes": "Article accessible at /help/clients-360, documents all 12 tabs with tinker instructions"
     }
   },

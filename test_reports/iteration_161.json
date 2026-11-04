@@ -26,7 +26,7 @@
     "backend": "100% (17/17 tests passed)",
     "frontend": "100% (Team Chat page verified, Service Catalog dropdown verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "TEST_ prefixed messages created in chat channels during testing, cleaned up automatically",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -89,14 +89,14 @@
         "new_channel_dialog": "Name input + Private checkbox + Create button"
       },
       "navigation": {
-        "team_chat_in_sidebar": "Team Chat 💬 visible under Live Support submenu",
+        "team_chat_in_sidebar": "Team Chat ðŸ’¬ visible under Live Support submenu",
         "route_works": "/team-chat loads TeamChatPage"
       },
       "create_ticket_dialog": {
         "service_catalog_section": "SERVICE CATALOG (AUTO-ATTACHES SLA & BILLING) visible",
         "service_dropdown": "Dropdown with services visible",
-        "ah_supp_option": "AH-SUPP · After Hours Support (SLA: 4h · $150/hour) visible",
-        "default_option": "— No service / manual — as default"
+        "ah_supp_option": "AH-SUPP Â· After Hours Support (SLA: 4h Â· $150/hour) visible",
+        "default_option": "â€” No service / manual â€” as default"
       }
     }
   }

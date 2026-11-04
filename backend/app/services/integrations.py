@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import httpx
 from app.database import db, PAX8_API_URL, PAX8_AUTH_URL
+from app.services.microsoft365_credentials import load_microsoft365_client_secret
 
 # ============== PAX8 SERVICE ==============
 
@@ -165,10 +166,15 @@ class Office365Service:
         settings = await db.settings.find_one({"type": "office365"}, {"_id": 0})
         if not settings:
             return None, None, None, None
+        client_secret = await load_microsoft365_client_secret(
+            settings,
+            collection=db.settings,
+            query={"type": "office365"},
+        )
         return (
             settings.get('tenant_id'),
             settings.get('client_id'),
-            settings.get('client_secret'),
+            client_secret,
             settings.get('redirect_uri')
         )
 

@@ -86,15 +86,35 @@ export function channelDisplayName(channel) {
   return String(channel.name || "Conversation").replace(/-/g, " ").replace(/\b\w/g, char => char.toUpperCase());
 }
 
+export function conversationPreview(channel, now = Date.now()) {
+  const message = channel?.last_message;
+  const text = repairDisplayText(message?.body || "");
+  const isSystemMessage = Boolean(message?.is_system || /^(nexus|nexusops)$/i.test(String(message?.user_name || "").trim()));
+  const isHistoricalFailure = Boolean(
+    isSystemMessage
+    && /unknown command|not found|could not|couldn't|invalid|failed|error/i.test(text)
+    && Number.isFinite(Date.parse(message?.ts || ""))
+    && now - Date.parse(message.ts) > 24 * 60 * 60 * 1000,
+  );
+  if (isHistoricalFailure) return channel?.description || "Historical system notice";
+  if (message) {
+    const author = message.user_name ? `${chatAuthorName(message.user_name, isSystemMessage).split(" ")[0]}: ` : "";
+    return `${author}${text || "Attachment"}`;
+  }
+  return channel?.kind === "team" ? channel.description || "Team channel" : "Start a conversation";
+}
+
 export function filterChatChannels(channels, mode, query = "") {
   const term = query.trim().toLowerCase();
   return channels.filter(channel => {
     if (mode === "activity" && !(channel.unread_count > 0)) return false;
+    if (mode === "saved" && !channel.is_saved) return false;
     if (mode === "chat" && !["dm", "group_dm"].includes(channel.kind)) return false;
+    if (mode === "customer" && channel.kind !== "client_direct") return false;
     if (mode === "teams" && channel.kind !== "team") return false;
     if (mode === "work" && channel.kind !== "object") return false;
     if (!term) return true;
-    const haystack = `${channelDisplayName(channel)} ${channel.last_message?.body || ""}`.toLowerCase();
+    const haystack = `${channelDisplayName(channel)} ${conversationPreview(channel)}`.toLowerCase();
     return haystack.includes(term);
   });
 }

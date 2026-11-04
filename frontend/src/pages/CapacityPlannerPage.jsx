@@ -62,8 +62,13 @@ export default function CapacityPlannerPage() {
         ].map((st, index) => <HeroTile key={st.label} label={st.label} value={st.value} icon={st.icon} glow={["sky", "amber", "cyan", "violet", "emerald"][index]} />)}
       </div>
 
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">Capacity outlook</p><p className="mt-1 text-sm text-muted-foreground">Use the trend and workload ratio to decide whether service quality needs more capacity before demand compounds.</p></div>
+        <Button variant="outline" size="sm" className="shrink-0 rounded-xl" onClick={fetchData} data-testid="refresh-capacity-toolbar"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh outlook</Button>
+      </div>
+
       {/* Utilization Gauge */}
-      <Card className={`${utilizationBg} border`}>
+      <Card className={`${utilizationBg} overflow-hidden rounded-2xl border shadow-[0_18px_45px_-36px_rgba(0,0,0,0.85)]`}>
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-3">

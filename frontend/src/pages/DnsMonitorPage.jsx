@@ -24,6 +24,7 @@ import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import NexusDnsAdvancedPanels from "@/components/nexus-dns/NexusDnsAdvancedPanels";
 import NexusDnsRolloutPanel from "@/components/nexus-dns/NexusDnsRolloutPanel";
+import { EmptyState } from "@/components/design-system";
 
 const tabValues = ["command", "activity", "policies", "coverage", "rollouts", "intelligence", "discovery", "incidents", "domains", "toolkit", "service", "safety"];
 const defaultCategories = {
@@ -71,17 +72,6 @@ function SectionTitle({ icon: Icon, eyebrow, title, description, action }) {
         {description && <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p>}
       </div>
       {action}
-    </div>
-  );
-}
-
-function EmptyState({ icon: Icon, title, body, action }) {
-  return (
-    <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-10 text-center">
-      <Icon className="mx-auto h-7 w-7 text-sky-300" />
-      <p className="mt-3 font-medium">{title}</p>
-      <p className="mx-auto mt-1 max-w-xl text-sm text-muted-foreground">{body}</p>
-      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
@@ -458,7 +448,7 @@ export default function DnsMonitorPage() {
                     <span className="flex-1 text-xs text-muted-foreground">{event.client_name || "Unlinked client"} · {event.device_name || "Unknown endpoint"}</span>
                     <span className="text-xs text-muted-foreground">{formatDate(event.observed_at)}</span>
                   </div>
-                )) : <EmptyState icon={Radar} title="No authenticated query events yet" body="This is expected before a resolver edge and endpoint policy are deployed. NexusMSP will not fabricate DNS blocks to make the dashboard look active." action={<Button variant="outline" onClick={() => switchTab("coverage")}>Review endpoint coverage</Button>} />}
+                )) : <EmptyState icon={<Radar className="h-7 w-7 text-sky-300" />} title="No authenticated query events yet" description="This is expected before a resolver edge and endpoint policy are deployed. NexusMSP will not fabricate DNS blocks to make the dashboard look active." action={<Button variant="outline" onClick={() => switchTab("coverage")}>Review endpoint coverage</Button>} className="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-10" />}
               </div>
             </CardContent>
           </Card>
@@ -481,7 +471,7 @@ export default function DnsMonitorPage() {
                 <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3"><span>Client: {event.client_name || "Unlinked"}</span><span>Endpoint: {event.device_name || "Unknown"}</span><span>User: {event.user_name || "Not reported"}</span></div>
                 <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => { setEventActionTarget(event); setEventActionMode("allow"); setEventActionReason(""); }}><Clock className="mr-1.5 h-3.5 w-3.5" />Temporary allow</Button><Button size="sm" variant="outline" onClick={() => { setEventActionTarget(event); setEventActionMode("ticket"); setEventActionReason(`Investigate the Nexus DNS ${event.action} decision for ${event.domain}.`); }}><TicketPlus className="mr-1.5 h-3.5 w-3.5" />Create incident ticket</Button></div>
               </div>
-            )) : <EmptyState icon={Filter} title="No events match this view" body={events.length ? "Clear the search or filters to see the authenticated evidence stream." : "Query activity will appear after a resolver edge and endpoint policy begin reporting signed evidence."} />}
+            )) : <EmptyState icon={<Filter className="h-7 w-7 text-sky-300" />} title="No events match this view" description={events.length ? "Clear the search or filters to see the authenticated evidence stream." : "Query activity will appear after a resolver edge and endpoint policy begin reporting signed evidence."} className="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-10" />}
           </CardContent></Card>
         </TabsContent>
 
@@ -518,7 +508,7 @@ export default function DnsMonitorPage() {
                 <tbody>{coverage.devices?.map(device => <tr key={device.device_id} className="border-b border-white/[0.05] last:border-0"><td className="p-4"><div className="flex items-center gap-2">{device.online ? <Activity className="h-4 w-4 text-emerald-300" /> : <WifiOff className="h-4 w-4 text-zinc-500" />}<div><p className="font-medium">{device.hostname}</p><p className="text-xs text-muted-foreground">{device.eligible ? "Eligible" : "Unsupported OS"}</p></div></div></td><td className="p-4 text-muted-foreground">{device.client_name || "Unlinked"}</td><td className="p-4 font-mono text-xs">{device.agent_version || "Unknown"}</td><td className="p-4"><Badge variant="outline" className={device.dns_enrolled ? statusClasses.audit : ""}>{device.mode.replaceAll("_", " ")}</Badge></td><td className="p-4 text-muted-foreground">{device.bypass_status.replaceAll("_", " ")}</td><td className="p-4 text-xs text-muted-foreground">{formatDate(device.last_seen)}</td></tr>)}</tbody>
               </table>
             </div>
-            {!coverage.devices?.length && <div className="p-4"><EmptyState icon={Laptop2} title="No Nexus Agent endpoints found" body="Generate a client-bound installer from Managed Assets, enrol a Windows endpoint, then return here to stage DNS visibility." /></div>}
+            {!coverage.devices?.length && <div className="p-4"><EmptyState icon={<Laptop2 className="h-7 w-7 text-sky-300" />} title="No Nexus Agent endpoints found" description="Generate a client-bound installer from Managed Assets, enrol a Windows endpoint, then return here to stage DNS visibility." className="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-10" /></div>}
           </CardContent></Card>
         </TabsContent>
 
@@ -572,14 +562,14 @@ export default function DnsMonitorPage() {
             </CardContent></Card>
             <Card className="border-rose-500/20"><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><ShieldAlert className="h-5 w-5 text-rose-300" />Break-glass control</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Move enrolled endpoints back to visibility mode and queue restoration of safe DNS. The reason and technician identity are immutable audit evidence.</p><Textarea value={emergencyReason} onChange={event => setEmergencyReason(event.target.value)} placeholder="Required reason for emergency disable" rows={3} /><Button variant="destructive" onClick={emergencyDisable}><ShieldAlert className="mr-2 h-4 w-4" />Emergency disable</Button></CardContent></Card>
           </div>
-          <Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><History className="h-5 w-5 text-sky-300" />Nexus DNS audit trail</CardTitle></CardHeader><CardContent>{audit.length ? audit.slice(0, 20).map(item => <div key={item.id} className="flex flex-col gap-1 border-b border-white/[0.06] py-3 last:border-0 sm:flex-row sm:items-center"><Badge variant="outline">{item.action.replaceAll("_", " ")}</Badge><span className="flex-1 text-sm">{item.actor}</span><span className="text-xs text-muted-foreground">{formatDate(item.occurred_at)}</span></div>) : <EmptyState icon={History} title="No DNS control changes yet" body="Settings, simulations, staged deployments, temporary allows and emergency actions will be recorded here." />}</CardContent></Card>
+          <Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><History className="h-5 w-5 text-sky-300" />Nexus DNS audit trail</CardTitle></CardHeader><CardContent>{audit.length ? audit.slice(0, 20).map(item => <div key={item.id} className="flex flex-col gap-1 border-b border-white/[0.06] py-3 last:border-0 sm:flex-row sm:items-center"><Badge variant="outline">{item.action.replaceAll("_", " ")}</Badge><span className="flex-1 text-sm">{item.actor}</span><span className="text-xs text-muted-foreground">{formatDate(item.occurred_at)}</span></div>) : <EmptyState icon={<History className="h-7 w-7 text-sky-300" />} title="No DNS control changes yet" description="Settings, simulations, staged deployments, temporary allows and emergency actions will be recorded here." className="rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-10" />}</CardContent></Card>
         </TabsContent>
       </Tabs>
 
       <Dialog open={policyOpen} onOpenChange={setPolicyOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-sky-300" />Create Nexus DNS policy</DialogTitle><DialogDescription>Build a clearly scoped draft. Simulation and staged rollout are separate steps so a saved rule cannot silently change client DNS.</DialogDescription></DialogHeader>
-          <div className="grid max-h-[65vh] gap-4 overflow-y-auto pr-1 sm:grid-cols-2">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-sky-300" />Create Nexus DNS policy</DialogTitle><DialogDescription>Build a clearly scoped draft. Simulation and staged rollout are separate steps so a saved rule cannot silently change client DNS.</DialogDescription></DialogHeader>
+          <div className="min-h-0 flex-1 grid gap-4 overflow-y-auto px-5 py-5 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2"><Label>Policy name</Label><Input value={policyForm.name} onChange={event => setPolicyForm(current => ({ ...current, name: event.target.value }))} placeholder="High-confidence client protection" /></div>
             <div className="space-y-2 sm:col-span-2"><Label>Purpose and technician guidance</Label><Textarea value={policyForm.description} onChange={event => setPolicyForm(current => ({ ...current, description: event.target.value }))} placeholder="What this policy protects and when to create an exception" /></div>
             <div className="space-y-2"><Label>Scope</Label><Select value={policyForm.scope_type} onValueChange={value => setPolicyForm(current => ({ ...current, scope_type: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{["global", "msp", "client", "site", "group", "user", "device"].map(value => <SelectItem key={value} value={value}>{value[0].toUpperCase() + value.slice(1)}</SelectItem>)}</SelectContent></Select></div>
@@ -596,7 +586,7 @@ export default function DnsMonitorPage() {
             {[["managed_device", "Require managed device", "Use endpoint-management evidence before granting access."], ["bitlocker_required", "Require BitLocker", "Use Nexus Agent posture evidence when available."]].map(([key, title, body]) => <div key={key} className="flex items-center justify-between gap-4 rounded-lg border border-white/[0.07] p-3 sm:col-span-2"><div><p className="text-sm font-medium">{title}</p><p className="text-xs text-muted-foreground">{body}</p></div><Switch checked={Boolean(policyForm.access_conditions?.[key])} onCheckedChange={checked => setPolicyForm(current => ({ ...current, access_conditions: { ...current.access_conditions, [key]: checked } }))} /></div>)}
             <div className="space-y-2 sm:col-span-2"><Label>Category decisions</Label><div className="grid gap-2 sm:grid-cols-2">{Object.entries(policyForm.categories).map(([category, action]) => <div key={category} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.07] p-2.5"><span className="text-sm capitalize">{category.replaceAll("_", " ")}</span><Select value={action} onValueChange={value => setPolicyForm(current => ({ ...current, categories: { ...current.categories, [category]: value } }))}><SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="allow">Allow</SelectItem><SelectItem value="audit">Audit</SelectItem><SelectItem value="block">Block</SelectItem></SelectContent></Select></div>)}</div></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setPolicyOpen(false)}>Cancel</Button><Button onClick={submitPolicy} disabled={saving}><FileCheck2 className="mr-2 h-4 w-4" />Save draft policy</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button variant="outline" onClick={() => setPolicyOpen(false)}>Cancel</Button><Button onClick={submitPolicy} disabled={saving}><FileCheck2 className="mr-2 h-4 w-4" />Save draft policy</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

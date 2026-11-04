@@ -5,19 +5,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
   Search, Building2, Users, HardDrive, Ticket, DollarSign, AlertTriangle,
-  Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles,
-  Activity, ChevronRight, RefreshCw, Filter, X,
-  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink, MoreHorizontal,
-  ChevronDown, BarChart3, Scale, Globe, FileText, ArrowRight, CheckCircle2, Rocket, Pencil, Trash2, Star, Save
+  Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield,
+  Activity, CalendarClock, ChevronRight, RefreshCw, Filter, X, ArrowLeft,
+  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink,
+  FileText, CheckCircle2, Pencil, Trash2, Star, Save
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
@@ -28,24 +28,45 @@ import { MetricStrip, MetricTile } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { ClientProfilePictureUploader, ClientCoverImage } from "@/components/clients/ClientProfileAssets";
 import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
+import ClientFollowUpsPanel from "@/components/clients/ClientFollowUpsPanel";
 import ClientNotesTab from "@/components/clients/ClientNotesTab";
 import ClientAccountAlerts from "@/components/clients/ClientAccountAlerts";
 import ClientActivityFeed from "@/components/clients/ClientActivityFeed";
 import ClientQuickActionsStrip from "@/components/clients/ClientQuickActionsStrip";
 import ClientServiceTierChip from "@/components/clients/ClientServiceTierChip";
-import ClientPulseWall from "@/components/clients/ClientPulseWall";
-import ClientUniverseMap from "@/components/clients/ClientUniverseMap";
+import ClientPortfolioAttentionPanel from "@/components/clients/ClientPortfolioAttentionPanel";
+import ClientPortfolioFollowUpsPanel from "@/components/clients/ClientPortfolioFollowUpsPanel";
+import ClientPriorityPanel from "@/components/clients/ClientPriorityPanel";
 import ClientFabricPanel from "@/components/clients/ClientFabricPanel";
 import {
   AccountBriefingDialog, ExpansionEngineTile, RenewalForecastTile, ChurnRadarCard,
   LifecycleTimelineCard, ActivityHeatmapCard, HoursBurndownCard, AchievementsCard,
   ContractWatchCard, ScorecardCard, ComplianceCard, AccountPlanCanvas, StakeholderMapCard,
-  RenewalWatchTable, MyAccountsTable
+  RenewalWatchTable
 } from "@/components/clients/ClientStudioWidgets";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import ConfidenceLens from "@/components/confidence/ConfidenceLens";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import WorkspaceControlBar from "@/components/WorkspaceControlBar";
+import WorkspaceToolsMenu from "@/components/WorkspaceToolsMenu";
+import {
+  CLIENT_HEALTH_BANDS,
+  CLIENT_HEALTH_FILTER_OPTIONS,
+  healthBand,
+  resolveClientHealthBand,
+} from "@/lib/clientHealthBands";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { LEARNING_WORKSPACES, LEARNING_VIEW, preferredTarget } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+
+const EMPTY_CREATE_FORM = { name: "", industry: "", email: "", phone: "", website: "", tier: "", lifecycle: "active" };
+
+/** Optional account fields are cleared by omission, not by an empty string: the
+ * API validates email, and `""` is not an address. */
+const blankToNull = (value) => {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+};
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -57,35 +78,32 @@ const LIFECYCLE_COLORS = {
 
 const CLIENT_WORKSPACE_GROUPS = [
   {
-    id: "command",
-    label: "Command",
-    description: "Health, priorities, strategy and AI guidance.",
+    id: "overview",
+    label: "Overview",
+    description: "Account health, priorities and the latest evidence.",
     icon: Building2,
     tabs: [
-      { value: "overview", label: "Digital twin" },
-      { value: "fabric", label: "Nexus Fabric" },
-      { value: "studio", label: "Growth studio" },
-      { value: "plan", label: "Strategic plan" },
-      { value: "ai", label: "AI insights" },
+      { value: "overview", label: "Client home" },
     ],
   },
   {
-    id: "service",
+    id: "people",
+    label: "People",
+    description: "Contacts, decision makers and relationship context.",
+    icon: Users,
+    tabs: [
+      { value: "contacts", label: "Contacts" },
+      { value: "fabric", label: "Relationship map" },
+    ],
+  },
+  {
+    id: "services",
     label: "Service",
-    description: "Support history, collaboration and account notes.",
-    icon: Ticket,
+    description: "Support work, assets and connected services.",
+    icon: HardDrive,
     tabs: [
       { value: "tickets", label: "Tickets & jobs" },
       { value: "warroom", label: "War room" },
-      { value: "notes", label: "Notes" },
-    ],
-  },
-  {
-    id: "technology",
-    label: "Technology",
-    description: "Assets, security posture and connected services.",
-    icon: HardDrive,
-    tabs: [
       { value: "assets", label: "Managed assets" },
       { value: "security", label: "Security" },
       { value: "integrations", label: "Integrations" },
@@ -94,51 +112,62 @@ const CLIENT_WORKSPACE_GROUPS = [
   },
   {
     id: "commercial",
-    label: "Commercial",
-    description: "People, services, contracts and account billing.",
+    label: "Billing",
+    description: "Recorded billing and recurring services.",
     icon: DollarSign,
     tabs: [
-      { value: "contacts", label: "Contacts" },
-      { value: "subscriptions", label: "Subscriptions" },
       { value: "billing", label: "Billing" },
+      { value: "subscriptions", label: "Subscriptions" },
     ],
   },
   {
-    id: "knowledge",
-    label: "Knowledge",
-    description: "Client documents and service blueprints.",
+    id: "plans",
+    label: "Sales & success",
+    description: "Account goals, growth opportunities and relationship reviews.",
     icon: FileText,
     tabs: [
+      { value: "followups", label: "Follow-ups" },
+      { value: "plan", label: "Account plan" },
+      { value: "studio", label: "Account growth" },
+      { value: "ai", label: "AI briefing" },
+    ],
+  },
+  {
+    id: "records",
+    label: "History",
+    description: "Documents, blueprints and attributable activity.",
+    icon: Activity,
+    tabs: [
+      { value: "activity", label: "Activity" },
+      { value: "notes", label: "Account notes" },
       { value: "documents", label: "Documents" },
       { value: "blueprints", label: "Blueprints" },
     ],
-  },
-  {
-    id: "audit",
-    label: "Audit",
-    description: "One attributable operational timeline.",
-    icon: Activity,
-    tabs: [{ value: "activity", label: "Operational timeline" }],
   },
 ];
 
 const CLIENT_TAB_VALUES = new Set(CLIENT_WORKSPACE_GROUPS.flatMap((group) => group.tabs.map((tab) => tab.value)));
 
 function HealthDial({ score, size = 44 }) {
-  const s = Math.max(0, Math.min(100, score || 0));
-  const color = s >= 85 ? "#34d399" : s >= 70 ? "#fbbf24" : s >= 50 ? "#fb923c" : "#fb7185";
+  // The ring reports the band Nexus served, so an account the engine calls
+  // healthy is never drawn amber. An unscored account is an empty ring, not a
+  // score of zero.
+  const band = healthBand(score);
+  const s = band ? Math.max(0, Math.min(100, Number(score))) : 0;
+  const color = band?.dial || "#71717a";
   const stroke = 4, r = (size / 2) - stroke;
   const c = 2 * Math.PI * r;
   const offset = c * (1 - s / 100);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" role="img"
+      aria-label={band ? `Service health ${s} out of 100 — ${band.label}` : "Service health is not scored yet"}>
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={c} strokeDashoffset={offset}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
         style={{ transition: "stroke-dashoffset 600ms ease-out" }}
       />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fontSize={size * 0.32} fontWeight="600" fill={color} fontFamily="monospace">{s}</text>
+      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fontSize={size * 0.32} fontWeight="600" fill={color} fontFamily="monospace">{band ? s : "—"}</text>
     </svg>
   );
 }
@@ -169,39 +198,91 @@ function IntegrationChip({ type, active }) {
   );
 }
 
+const SIGNAL_TONES = {
+  rose: "border-rose-400/30 bg-rose-500/[0.09] text-rose-200",
+  amber: "border-amber-400/30 bg-amber-500/[0.09] text-amber-200",
+  sky: "border-sky-400/30 bg-sky-500/[0.09] text-sky-200",
+  emerald: "border-emerald-400/30 bg-emerald-500/[0.09] text-emerald-200",
+};
+
+function ClientSignalChip({ icon: Icon, label, tone = "sky" }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${SIGNAL_TONES[tone] || SIGNAL_TONES.sky}`}>
+      {Icon ? <Icon className="h-3 w-3" /> : null}
+      {label}
+    </span>
+  );
+}
+
+/**
+ * One account in the client directory.
+ *
+ * The card answers three questions in reading order: which account is this,
+ * what is its Nexus identity, and what does it need from a technician. Risk
+ * signals are shown only when they exist, so a clean account stays quiet
+ * instead of rendering a row of zeros.
+ */
 function ClientListItem({ client, selected, onClick }) {
-  const agentReporting = client.assets_assessed > 0;
+  const band = resolveClientHealthBand(client);
+  const assets = Number(client.asset_count) || 0;
+  const assessed = Number(client.assets_assessed) || 0;
+  const openTickets = Number(client.open_tickets) || 0;
+  const patches = Number(client.patch_pending) || 0;
+  const overdue = Number(client.overdue_count) || 0;
+  const agentReporting = assessed > 0;
+  const name = client.name || "Unnamed client";
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "?";
+  const hasSignals = openTickets > 0 || patches > 0 || overdue > 0;
 
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-current={selected ? "true" : undefined}
       data-testid={`client-list-item-${client.id}`}
-      className={`w-full text-left flex items-center gap-3 border-b border-zinc-800/80 px-4 py-3.5 transition-colors
-        ${selected ? "bg-zinc-900 border-l-2 border-l-indigo-500 pl-[14px]" : "hover:bg-zinc-900/50 border-l-2 border-l-transparent pl-[14px]"}`}
+      className={`group relative w-full overflow-hidden rounded-2xl border p-3.5 pl-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40
+        ${selected
+          ? "border-primary/45 bg-primary/[0.06] shadow-[0_16px_34px_-24px_rgba(0,0,0,0.95)]"
+          : "border-border/55 bg-card/35 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/70 hover:shadow-[0_16px_30px_-24px_rgba(0,0,0,0.95)]"}`}
     >
-      <HealthDial score={client.health_score} size={36} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-zinc-100 truncate">{client.name}</span>
-          {client.lifecycle && client.lifecycle !== "active" && (
-            <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{client.lifecycle.replace("_", " ")}</span>
-          )}
+      <span aria-hidden="true" className={`absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`} />
+      <div className="flex items-start gap-3">
+        <div className="relative shrink-0">
+          <span className={`flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold ${band ? band.badge : "border-border/60 bg-muted/[0.15] text-muted-foreground"}`}>
+            {initials}
+          </span>
+          <span
+            aria-hidden="true"
+            className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background ${agentReporting ? "bg-emerald-400" : "bg-zinc-600"}`}
+          />
         </div>
-        <div className="mt-1 flex items-center gap-2.5 text-[11px] text-zinc-500">
-          {client.industry && <span className="truncate max-w-[108px]">{client.industry}</span>}
-          <span className={client.open_tickets > 10 ? "text-amber-400" : ""}><Ticket className="mr-0.5 inline h-3 w-3" />{client.open_tickets || 0}</span>
-          <span><HardDrive className="mr-0.5 inline h-3 w-3" />{client.asset_count || 0}</span>
-          {client.patch_pending > 0 && <span className="text-amber-400"><Shield className="mr-0.5 inline h-3 w-3" />{client.patch_pending}</span>}
-          {client.overdue_count > 0 && <span className="text-rose-400"><AlertTriangle className="mr-0.5 inline h-3 w-3" />{client.overdue_count}</span>}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-foreground">{name}</span>
+            {client.lifecycle && client.lifecycle !== "active" && (
+              <span className={`rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{client.lifecycle.replace("_", " ")}</span>
+            )}
+          </div>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">
+            {client.industry ? `${client.industry} · ` : ""}{assets} managed {assets === 1 ? "endpoint" : "endpoints"}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {overdue > 0 && <ClientSignalChip icon={AlertTriangle} label={`${overdue} overdue`} tone="rose" />}
+            {patches > 0 && <ClientSignalChip icon={Shield} label={`${patches} patches`} tone="amber" />}
+            {openTickets > 0 && <ClientSignalChip icon={Ticket} label={`${openTickets} open`} tone={openTickets > 10 ? "amber" : "sky"} />}
+            <ClientSignalChip
+              label={agentReporting ? `Agent reporting ${assessed}/${assets}` : "No agent evidence"}
+              tone={agentReporting ? "emerald" : "sky"}
+            />
+            {!hasSignals && agentReporting && <ClientSignalChip label="No open risk signals" tone="emerald" />}
+          </div>
         </div>
-        <div className={`mt-1.5 flex items-center gap-1.5 text-[10px] font-medium ${agentReporting ? "text-emerald-400" : "text-zinc-500"}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${agentReporting ? "bg-emerald-400 shadow-[0_0_7px_rgba(52,211,153,0.65)]" : "bg-zinc-600"}`} />
-          {agentReporting ? `Agent reporting ${client.assets_assessed}/${client.asset_count || 0}` : "Agent not reporting"}
+
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <HealthDial score={client.health_score} size={38} />
+          <p className="font-mono text-[11px] font-medium text-foreground/90">${(Number(client.mrr) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}<span className="ml-1 text-[9px] font-normal uppercase tracking-wide text-muted-foreground">MRR</span></p>
         </div>
-      </div>
-      <div className="shrink-0 text-right">
-        <p className="text-[10px] uppercase tracking-wide text-zinc-500">MRR</p>
-        <p className="mt-0.5 font-mono text-xs font-medium text-zinc-200">${(client.mrr || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
       </div>
     </button>
   );
@@ -213,78 +294,6 @@ function TopMetric({ label, value, trend, color = "indigo" }) {
   return <MetricTile label={label} value={value} trend={trend} accent={accentMap[color] || "violet"} testid={`clients-metric-${label.toLowerCase().replace(/\s+/g, "-")}`} />;
 }
 
-function ClientQuickSearch({ clients = [], activeClientId, onSelect, onBrowsePortfolio }) {
-  const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState(false);
-  const activeClient = useMemo(() => clients.find((client) => client.id === activeClientId), [clients, activeClientId]);
-
-  const matches = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return clients
-      .filter((client) => !needle || `${client.name || ""} ${client.industry || ""} ${client.email || ""}`.toLowerCase().includes(needle))
-      .slice(0, 8);
-  }, [clients, query]);
-
-  const chooseClient = (client) => {
-    onSelect(client.id);
-    setQuery("");
-    setExpanded(false);
-  };
-
-  return (
-    <section className="mx-6 mb-5 overflow-visible rounded-2xl border border-primary/15 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.14),transparent_32%),linear-gradient(135deg,hsl(var(--nx-surface-raised)/0.92),hsl(var(--nx-surface)/0.94))] px-5 py-4 shadow-[0_18px_46px_rgba(0,0,0,0.16)]" aria-label="Client finder">
-      <div className="mx-auto flex max-w-6xl flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 shadow-sm"><Search className="h-4 w-4 text-primary" /></span>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Client command</p>
-            <p className="mt-0.5 text-sm font-semibold text-foreground">{activeClient ? "Client switcher" : "Open a client"}</p>
-            <p className="text-xs text-muted-foreground">{activeClient ? `Viewing ${activeClient.name}` : "Find any account without leaving this workspace."}</p>
-          </div>
-        </div>
-        <div className="relative min-w-0 flex-1 lg:max-w-3xl">
-          <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onFocus={() => setExpanded(true)}
-            onBlur={() => window.setTimeout(() => setExpanded(false), 120)}
-            onChange={(event) => { setQuery(event.target.value); setExpanded(true); }}
-            placeholder="Search clients by name, industry, or primary email..."
-            className="h-12 rounded-xl border-primary/20 bg-background/85 pl-10 pr-24 shadow-sm focus-visible:ring-primary/30"
-            data-testid="client-quick-search-input"
-          />
-          <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:block">{clients.length} clients</span>
-          {expanded && (
-            <div className="absolute z-50 mt-2 max-h-[360px] w-full overflow-y-auto rounded-2xl border border-primary/20 bg-popover p-1.5 shadow-2xl" data-testid="client-quick-search-results">
-              {matches.length ? matches.map((client) => {
-                const active = client.id === activeClientId;
-                return (
-                  <button key={client.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseClient(client)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${active ? "bg-primary/10 ring-1 ring-primary/20" : "hover:bg-muted/55"}`} data-testid={`client-quick-search-result-${client.id}`}>
-                    <HealthDial score={client.health_score} size={34} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">{client.name}</span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">{[client.industry, client.email].filter(Boolean).join(" - ") || "Client profile"}</span>
-                      <span className="mt-1.5 flex flex-wrap gap-1.5">
-                        <span className="rounded border border-border/70 bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{client.open_tickets || 0} open ticket{client.open_tickets === 1 ? "" : "s"}</span>
-                        <span className={`rounded border px-1.5 py-0.5 text-[10px] ${client.assets_assessed > 0 ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300" : "border-border/70 bg-background text-muted-foreground"}`}>{client.assets_assessed > 0 ? "Agent reporting" : "Agent not linked"}</span>
-                      </span>
-                    </span>
-                    <span className={`shrink-0 text-[10px] uppercase tracking-wide ${active ? "text-primary" : "text-muted-foreground"}`}>{active ? "Open" : "View"}</span>
-                  </button>
-                );
-              }) : <div className="px-4 py-9 text-center text-sm text-muted-foreground">No client matches "{query}".</div>}
-            </div>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {activeClient && <Button variant="outline" size="sm" onClick={onBrowsePortfolio} data-testid="browse-client-portfolio">Browse portfolio</Button>}
-          <p className="text-xs text-muted-foreground lg:max-w-48">Start typing, then select an account to open its live profile.</p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function ClientsPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -293,6 +302,9 @@ export default function ClientsPage() {
   const tabFromUrl = searchParams.get("view");
   const onboardingPrompt = searchParams.get("onboarding") === "prompt";
   const headers = { Authorization: `Bearer ${token}` };
+  // What Nexus has learned about this technician's client-workspace habits. It
+  // is presentation only: a failed read leaves the designed order untouched.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.CLIENT);
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -310,7 +322,7 @@ export default function ClientsPage() {
   const [detailTab, setDetailTab] = useState(CLIENT_TAB_VALUES.has(tabFromUrl) ? tabFromUrl : "overview");
   const [detailLoading, setDetailLoading] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", industry: "", email: "", phone: "", tier: "standard", lifecycle: "active" });
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
   const searchRef = useRef(null);
 
   const openClient = useCallback((id, { preserveView = false } = {}) => {
@@ -327,6 +339,9 @@ export default function ClientsPage() {
 
   const changeDetailTab = useCallback((nextTab) => {
     const safeTab = CLIENT_TAB_VALUES.has(nextTab) ? nextTab : "overview";
+    // Opening a view is the evidence the workspace ranks itself from. It is
+    // recorded after the tab is validated, so only real Nexus views are counted.
+    learning.record(LEARNING_VIEW, safeTab);
     setDetailTab(safeTab);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -335,7 +350,21 @@ export default function ClientsPage() {
       else next.set("view", safeTab);
       return next;
     }, { replace: true });
-  }, [selectedId, setSearchParams]);
+  }, [selectedId, setSearchParams, learning]);
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setLifecycleFilter("all");
+    setRiskFilter("all");
+    setIntegrationFilter("all");
+    setTierFilter("all");
+  }, []);
+
+  const hasActiveFilters = Boolean(search)
+    || lifecycleFilter !== "all"
+    || riskFilter !== "all"
+    || integrationFilter !== "all"
+    || tierFilter !== "all";
 
   const fetchData = async () => {
     setLoading(true);
@@ -388,12 +417,39 @@ export default function ClientsPage() {
 
   useEffect(() => { if (selectedId) fetchDetail(selectedId); /* eslint-disable-line */ }, [selectedId]);
 
-  // Keyboard shortcut: / focuses search; j/k navigate; Esc clears selection
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return (data.clients || []).filter(c => {
+      if (q && !(`${c.name} ${c.industry || ""} ${c.email || ""}`.toLowerCase().includes(q))) return false;
+      if (lifecycleFilter !== "all" && c.lifecycle !== lifecycleFilter) return false;
+      if (riskFilter !== "all" && resolveClientHealthBand(c)?.key !== riskFilter) return false;
+      if (integrationFilter !== "all" && !c.integrations?.[integrationFilter]) return false;
+      if (tierFilter === "untiered" && c.service_tier_id) return false;
+      if (tierFilter !== "all" && tierFilter !== "untiered" && c.service_tier_id !== tierFilter) return false;
+      return true;
+    }).sort((left, right) => {
+      const attention = (client) => {
+        const bandKey = resolveClientHealthBand(client)?.key;
+        return (bandKey === "critical" ? 400 : bandKey === "at_risk" ? 300 : 0)
+          + Math.min(Number(client.patch_pending) || 0, 99) * 2
+          + Math.max(0, 70 - (Number(client.health_score) || 0))
+          + Math.min(Number(client.open_tickets) || 0, 50);
+      };
+      const delta = attention(right) - attention(left);
+      return delta || String(left.name || "").localeCompare(String(right.name || ""));
+    });
+  }, [data, search, lifecycleFilter, riskFilter, integrationFilter, tierFilter]);
+
+  // Keyboard shortcut: / focuses search, j/k walk the visible directory, and
+  // Cmd/Ctrl+N creates a client. This depends on the filtered list, so a search
+  // or filter narrows the walk instead of navigating clients the technician
+  // cannot see.
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "/") { e.preventDefault(); searchRef.current?.focus(); }
       else if (e.key === "j" || e.key === "k") {
+        if (!filtered.length) return;
         const idx = filtered.findIndex(c => c.id === selectedId);
         const next = e.key === "j" ? Math.min(idx + 1, filtered.length - 1) : Math.max(idx - 1, 0);
         if (filtered[next]) openClient(filtered[next].id);
@@ -404,21 +460,7 @@ export default function ClientsPage() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-    // eslint-disable-next-line
-  }, [selectedId, data, openClient]);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return (data.clients || []).filter(c => {
-      if (q && !(`${c.name} ${c.industry || ""} ${c.email || ""}`.toLowerCase().includes(q))) return false;
-      if (lifecycleFilter !== "all" && c.lifecycle !== lifecycleFilter) return false;
-      if (riskFilter !== "all" && c.risk_level !== riskFilter) return false;
-      if (integrationFilter !== "all" && !c.integrations[integrationFilter]) return false;
-      if (tierFilter === "untiered" && c.service_tier_id) return false;
-      if (tierFilter !== "all" && tierFilter !== "untiered" && c.service_tier_id !== tierFilter) return false;
-      return true;
-    });
-  }, [data, search, lifecycleFilter, riskFilter, integrationFilter, tierFilter]);
+  }, [filtered, selectedId, openClient]);
 
   const selectedClient = useMemo(() => data.clients?.find(c => c.id === selectedId), [data, selectedId]);
   const onboardingProgress = onboardingSession
@@ -427,11 +469,24 @@ export default function ClientsPage() {
 
   const createClient = async () => {
     if (!createForm.name) { toast.error("Name required"); return; }
+    // A catalogue tier is a real Nexus service tier: it carries the response and
+    // resolution targets, it is what the directory's tier filter matches, and it
+    // is what active tickets inherit. Choosing one here has to assign it, not
+    // write a label the catalogue never sees.
+    const chosenTier = tierOptions.find(t => t.id === createForm.tier) || null;
     try {
-      const response = await axios.post(`${API}/clients`, createForm, { headers });
+      const response = await axios.post(`${API}/clients`, {
+        name: createForm.name.trim(),
+        industry: blankToNull(createForm.industry),
+        email: blankToNull(createForm.email),
+        phone: blankToNull(createForm.phone),
+        website: blankToNull(createForm.website),
+        tier: chosenTier?.slug || "standard",
+        lifecycle: createForm.lifecycle,
+      }, { headers });
       const createdClient = response.data;
       setCreateDialog(false);
-      setCreateForm({ name: "", industry: "", email: "", phone: "", tier: "standard", lifecycle: "active" });
+      setCreateForm(EMPTY_CREATE_FORM);
       setSelectedId(createdClient.id);
       setSearchParams((current) => {
         const next = new URLSearchParams(current);
@@ -440,8 +495,18 @@ export default function ClientsPage() {
         return next;
       });
       await fetchData();
-      toast.success(`${createdClient.name} created — ready for onboarding`);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+      if (chosenTier) {
+        try {
+          await axios.patch(`${API}/clients/${createdClient.id}/service-tier`, { service_tier_id: chosenTier.id }, { headers });
+          toast.success(`${createdClient.name} created on ${chosenTier.name} — ready for onboarding`);
+        } catch {
+          // The account exists and must not be lost because of the tier call.
+          toast.error(`${createdClient.name} was created, but ${chosenTier.name} was not assigned. Set the service tier from the client header.`);
+        }
+      } else {
+        toast.success(`${createdClient.name} created — ready for onboarding`);
+      }
+    } catch (e) { toast.error(apiErrorMessage(e, "The client could not be created. Nothing has been changed.")); }
   };
 
   const dismissOnboardingPrompt = () => {
@@ -473,9 +538,9 @@ export default function ClientsPage() {
 
   const s = data.summary || {};
   const attentionClients = (data.clients || [])
-    .filter(client => client.patch_pending > 0 || client.risk_level === "critical" || client.risk_level === "at_risk")
+    .filter(client => client.patch_pending > 0 || ["critical", "at_risk"].includes(resolveClientHealthBand(client)?.key))
     .sort((a, b) => (b.patch_pending || 0) - (a.patch_pending || 0) || (a.health_score || 0) - (b.health_score || 0));
-  const clientWorkspaceSignal = attentionClients.some(client => client.risk_level === "critical" || (client.health_score || 100) < 60)
+  const clientWorkspaceSignal = attentionClients.some(client => resolveClientHealthBand(client)?.signal === "critical")
     ? "critical"
     : attentionClients.length > 0 || (s.patch_pending || 0) > 0
       ? "attention"
@@ -488,56 +553,56 @@ export default function ClientsPage() {
       <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100 flex flex-col" data-testid="clients-page">
         <div className="px-6 pt-6">
           <OperationalPageHeader
-            eyebrow="Client operations"
-            title="Clients"
-            description="Manage account health, service tiers, subscriptions, risks, documents, and client communications from one operational workspace."
+            eyebrow={selectedClient ? "Client home" : "Client operations"}
+            title={selectedClient ? selectedClient.name : "Clients"}
+            description={selectedClient
+              ? "The clearest next action, account coverage and live operational evidence for this customer."
+              : "Prioritise the client portfolio, open an account, then act from one focused Client Home."}
             icon={Building2}
             tone="violet"
             signal={clientWorkspaceSignal}
             actions={<>
+              {selectedClient && <Button variant="outline" size="sm" onClick={() => openClient(null)} data-testid="clients-header-back"><ArrowLeft className="mr-1 h-4 w-4" />All clients</Button>}
               <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-clients-btn"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1.5" data-testid="clients-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />Workspace<ChevronDown className="h-3 w-3 opacity-60" /></Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => navigate("/client-insights")} className="gap-2.5"><BarChart3 className="h-4 w-4 text-violet-300" />Client insights</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/client-compare")} className="gap-2.5"><Scale className="h-4 w-4 text-sky-300" />Compare clients</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/client-portal")} className="gap-2.5"><Globe className="h-4 w-4 text-cyan-300" />Client portal</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button size="sm" onClick={() => setCreateDialog(true)} data-testid="new-client-btn"><Plus className="w-4 h-4 mr-1" />New client</Button>
+              <WorkspaceToolsMenu workspace="clients" testId="clients-workspace-tools" />
+              {!selectedClient && <Button size="sm" onClick={() => setCreateDialog(true)} data-testid="new-client-btn"><Plus className="w-4 h-4 mr-1" />New client</Button>}
             </>}
           />
         </div>
-        <div className="px-6 py-5 border-b border-zinc-900/60">
+        {!selectedClient && <div className="px-6 py-5 border-b border-zinc-900/60">
           <MetricStrip columns={4}>
             <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : "managed portfolio"} color="indigo" />
             <TopMetric label="Assessed Endpoints" value={s.assessed_endpoints || 0} trend="Nexus Agent evidence" color="sky" />
             <TopMetric label="Patch Exposure" value={s.patch_pending || 0} trend={(s.patch_pending || 0) > 0 ? "updates need review" : "no agent-reported updates"} color={(s.patch_pending || 0) > 0 ? "amber" : "emerald"} />
             <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : "all clear"} color={attentionClients.length ? "rose" : "emerald"} />
           </MetricStrip>
-        </div>
-        <ClientQuickSearch clients={data.clients || []} activeClientId={selectedId} onSelect={openClient} onBrowsePortfolio={() => openClient(null)} />
+        </div>}
 
         <div className="flex min-h-0 flex-1">
           {/* Master list */}
-          {!selectedClient && <aside className="flex w-full flex-col border-r border-zinc-800 bg-zinc-950 md:w-[42%] lg:w-[420px] lg:max-w-[44%]">
-            <WorkspaceControlBar className="block space-y-2 rounded-none border-x-0 border-t-0 border-zinc-800 px-3 py-2 shadow-none" data-testid="clients-directory-controls">
-              <div className="flex items-center gap-2">
-                <Search className="w-4 h-4 text-zinc-500 shrink-0" />
+          {!selectedClient && <aside className="flex w-full flex-col border-r border-border/60 bg-background md:w-[42%] lg:w-[440px] lg:max-w-[44%]">
+            <WorkspaceControlBar className="block space-y-3 rounded-none border-x-0 border-t-0 px-4 py-4 shadow-none" data-testid="clients-directory-controls">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Client directory</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Search, then use the smallest useful filter.</p>
+                </div>
+                <Badge variant="outline" className="border-border/70 bg-background/30 text-[10px] text-muted-foreground">{filtered.length} shown</Badge>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/35 px-3 shadow-sm">
+                <Search className="w-4 h-4 text-muted-foreground shrink-0" />
                 <Input
                   ref={searchRef}
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Search clients (press /)..."
-                  className="h-8 bg-transparent border-0 focus-visible:ring-0 focus-visible:border-0 px-1 text-sm"
+                  placeholder="Search a client, industry, or email…"
+                  className="h-10 bg-transparent border-0 focus-visible:ring-0 focus-visible:border-0 px-0 text-sm"
                   data-testid="clients-search-input"
                 />
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Select value={lifecycleFilter} onValueChange={setLifecycleFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-lifecycle"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-lifecycle"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All stages</SelectItem>
                     <SelectItem value="prospect">Prospect</SelectItem>
@@ -548,17 +613,15 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={riskFilter} onValueChange={setRiskFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-risk"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-risk"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All health</SelectItem>
-                    <SelectItem value="healthy">Healthy 85+</SelectItem>
-                    <SelectItem value="attention">Needs attention</SelectItem>
-                    <SelectItem value="at_risk">At risk</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
+                    {CLIENT_HEALTH_FILTER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value} data-testid={`filter-health-${option.value}`}>{option.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={integrationFilter} onValueChange={setIntegrationFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-integration"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-integration"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All integrations</SelectItem>
                     <SelectItem value="acronis">Acronis linked</SelectItem>
@@ -569,7 +632,7 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={tierFilter} onValueChange={setTierFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-tier"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-tier"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All tiers</SelectItem>
                     <SelectItem value="untiered">Untiered</SelectItem>
@@ -583,31 +646,37 @@ export default function ClientsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {(search || lifecycleFilter !== "all" || riskFilter !== "all" || integrationFilter !== "all" || tierFilter !== "all") && (
-                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={() => { setSearch(""); setLifecycleFilter("all"); setRiskFilter("all"); setIntegrationFilter("all"); setTierFilter("all"); }}>
-                    <X className="w-2.5 h-2.5 mr-1" />Clear
+                {hasActiveFilters && (
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground" onClick={clearFilters} data-testid="clients-clear-filters-inline">
+                    <X className="mr-1 h-2.5 w-2.5" />Clear
                   </Button>
                 )}
               </div>
-              <div className="text-[10px] text-zinc-500 font-mono flex justify-between px-1">
-                <span>{filtered.length} of {data.clients?.length || 0}</span>
-                <span>press j/k to navigate · / search · ⌘N new</span>
+              <div className="text-[10px] text-muted-foreground flex justify-between gap-2 px-1">
+                <span>{filtered.length} of {data.clients?.length || 0} · most urgent first</span>
+                <span className="hidden lg:inline">/ search · J/K walk · ⌘N new</span>
               </div>
             </WorkspaceControlBar>
-            <div className="flex-1 overflow-y-auto">
-              {!search && lifecycleFilter === "all" && riskFilter === "all" && integrationFilter === "all" && tierFilter === "all" && attentionClients.length > 0 && (
-                <div className="p-3 border-b border-amber-500/20 bg-amber-500/[0.04]">
-                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-amber-300 font-semibold mb-2"><AlertTriangle className="w-3 h-3" />Needs attention</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {attentionClients.slice(0, 4).map(client => <button key={client.id} onClick={() => openClient(client.id)} className="text-[10px] px-2 py-1 rounded border border-amber-500/20 text-amber-200 hover:bg-amber-500/10">{client.name}{client.patch_pending ? ` · ${client.patch_pending} patches` : ""}</button>)}
-                  </div>
-                </div>
-              )}
+            <div className="flex-1 space-y-2 overflow-y-auto p-3">
               {filtered.length === 0 ? (
-                <div className="p-8 text-center text-sm text-zinc-500">
-                  <Filter className="w-8 h-8 mx-auto mb-3 opacity-40" />
-                  No clients match these filters.
-                </div>
+                (data.clients?.length || 0) === 0 ? (
+                  <div className="p-8 text-center" data-testid="clients-empty-portfolio">
+                    <Building2 className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                    <p className="text-sm text-zinc-400">No clients are in this workspace yet.</p>
+                    <p className="mt-1.5 mx-auto max-w-xs text-xs leading-5 text-zinc-500">Create the first client record so tickets, assets, agreements and billing have an account to belong to.</p>
+                    <Button size="sm" className="mt-4" onClick={() => setCreateDialog(true)} data-testid="clients-empty-create">
+                      <Plus className="mr-1 h-4 w-4" />New client
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-sm text-zinc-500" data-testid="clients-no-matches">
+                    <Filter className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                    No clients match these filters.
+                    <div className="mt-4">
+                      <Button size="sm" variant="outline" onClick={clearFilters} data-testid="clients-clear-filters">Clear filters</Button>
+                    </div>
+                  </div>
+                )
               ) : (
                 filtered.map(c => (
                   <ClientListItem key={c.id} client={c} selected={selectedId === c.id} onClick={() => openClient(c.id)} />
@@ -619,72 +688,58 @@ export default function ClientsPage() {
           {/* Detail pane */}
           <main className={`relative overflow-y-auto bg-zinc-900/30 ${selectedClient ? "w-full" : "flex-1"}`}>
             {!selectedClient ? (
-              <div className="p-4 space-y-4" data-testid="client-studio-home">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-violet-300" />Client Studio
-                    </h2>
-                    <p className="text-xs text-muted-foreground">Pick a client from the sidebar, or explore the universe below.</p>
+              <div className="space-y-4 p-4 sm:p-5" data-testid="client-portfolio-home">
+                <section className="overflow-hidden rounded-2xl border border-border/70 bg-[radial-gradient(circle_at_94%_6%,hsl(var(--primary)/0.16),transparent_34%),linear-gradient(140deg,hsl(var(--card)/0.72),hsl(var(--background)/0.5))] p-5 shadow-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Portfolio focus</p>
+                  <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">Work from the account that needs you next.</h2>
+                  <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">The directory is ordered by recorded operational pressure. Open an account to see its clear next step, coverage gaps and complete evidence trail.</p>
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {CLIENT_HEALTH_BANDS.map((band) => {
+                      const count = (data.clients || []).filter((client) => resolveClientHealthBand(client)?.key === band.key).length;
+                      return (
+                        <div key={band.key} className={`rounded-xl border p-3 ${band.badge}`}>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] opacity-75">{band.label}</p>
+                          <p className="mt-1 text-xl font-semibold">{count}</p>
+                        </div>
+                      );
+                    })}
                   </div>
-                </div>
-                <RenewalWatchTable onOpen={openClient} />
-                <MyAccountsTable onOpen={openClient} />
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2 px-1">Universe Map</p>
-                  <ClientUniverseMap />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2 px-1">Pulse Wall</p>
-                  <ClientPulseWall search={search} tierFilter={tierFilter} />
-                </div>
+                  {(data.clients || []).some((client) => !resolveClientHealthBand(client)) && (
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      {(data.clients || []).filter((client) => !resolveClientHealthBand(client)).length} account(s) have no service health score yet and are excluded from these bands.
+                    </p>
+                  )}
+                </section>
+                <ClientPortfolioAttentionPanel
+                  attentionClients={attentionClients}
+                  onOpenClient={openClient}
+                  maxItems={5}
+                />
+                <section className="grid gap-4 xl:grid-cols-2" aria-label="Portfolio follow-up">
+                  <RenewalWatchTable onOpen={openClient} />
+                  <ClientPortfolioFollowUpsPanel
+                    token={token}
+                    onOpenClient={openClient}
+                    maxItems={4}
+                  />
+                </section>
               </div>
             ) : (
-              <>
-                {onboardingPrompt && (
-                  <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-cyan-400/25 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_42%),linear-gradient(135deg,rgba(8,28,36,0.96),rgba(12,14,20,0.98))] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.18)]" data-testid="client-onboarding-prompt">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="flex items-start gap-3">
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><Rocket className="h-5 w-5 text-emerald-300" /></span>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300">Recommended next mission</p>
-                          <h2 className="mt-1 text-base font-semibold text-foreground">Set up {selectedClient.name} with Client Onboarding</h2>
-                          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Create one linked, auditable delivery plan for contacts, assets, security, services, billing, documentation and go-live checks.</p>
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={dismissOnboardingPrompt}>I’ll do this later</Button>
-                        <Button size="sm" onClick={startClientOnboarding} data-testid="start-client-onboarding"><Rocket className="mr-1.5 h-4 w-4" />Start Client Onboarding</Button>
-                      </div>
-                    </div>
-                  </section>
-                )}
-                {onboardingSession && !onboardingPrompt && (
-                  <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-sky-400/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.13),transparent_42%),linear-gradient(135deg,rgba(10,25,34,0.96),rgba(12,14,20,0.98))] p-4 shadow-sm" data-testid="client-active-onboarding">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="flex items-start gap-3">
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Rocket className="h-5 w-5 text-cyan-200" /></span>
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300">Active client onboarding</p>
-                          <h2 className="mt-1 text-base font-semibold text-foreground">{onboardingProgress}% ready · Step {onboardingSession.current_step || 1} of {onboardingSession.total_steps || 8}</h2>
-                          <p className="mt-1 text-xs leading-5 text-muted-foreground">Owner: <span className="font-medium text-foreground">{onboardingSession.owner_name || onboardingSession.created_by || "Unassigned"}</span> · Last activity by {onboardingSession.last_activity_by || onboardingSession.created_by || "Nexus"} {onboardingSession.last_activity_at ? formatDistanceToNow(new Date(onboardingSession.last_activity_at), { addSuffix: true }) : "recently"}.</p>
-                        </div>
-                      </div>
-                      <Button size="sm" onClick={() => navigate(`/onboarding?session=${encodeURIComponent(onboardingSession.id)}`)} data-testid="continue-client-onboarding"><Rocket className="mr-1.5 h-4 w-4" />Continue onboarding</Button>
-                    </div>
-                  </section>
-                )}
-                <ClientDetailPane
-                  client={selectedClient}
-                  detail={detail}
-                  activity={activity}
-                  healthDetail={healthDetail}
-                  tab={detailTab}
-                  setTab={changeDetailTab}
-                  loading={detailLoading}
-                  onClose={() => openClient(null)}
-                />
-              </>
+              <ClientDetailPane
+                client={selectedClient}
+                detail={detail}
+                activity={activity}
+                healthDetail={healthDetail}
+                tab={detailTab}
+                setTab={changeDetailTab}
+                loading={detailLoading}
+                onboardingSession={onboardingSession}
+                onboardingPrompt={onboardingPrompt}
+                onboardingProgress={onboardingProgress}
+                onStartOnboarding={startClientOnboarding}
+                onContinueOnboarding={() => onboardingSession && navigate(`/onboarding?session=${encodeURIComponent(onboardingSession.id)}`)}
+                learning={learning}
+              />
             )}
           </main>
         </div>
@@ -735,21 +790,35 @@ export default function ClientsPage() {
                     <span className="text-xs font-medium text-foreground">Phone</span>
                     <Input placeholder="+61 …" value={createForm.phone} onChange={e => setCreateForm({ ...createForm, phone: e.target.value })} />
                   </label>
+                  <label className="space-y-1.5 md:col-span-2">
+                    <span className="text-xs font-medium text-foreground">Website</span>
+                    <Input type="url" placeholder="https://client.example" value={createForm.website} onChange={e => setCreateForm({ ...createForm, website: e.target.value })} />
+                    <span className="block text-[11px] leading-4 text-muted-foreground">Shows on the Client Home and gives the account team immediate business context.</span>
+                  </label>
                 </div>
               </section>
 
               <section className="flex flex-col gap-3 rounded-xl border border-primary/15 bg-primary/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs font-medium text-foreground">Initial service tier</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">This can be refined later through the managed service-tier catalogue.</p>
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                    {tierOptions.length
+                      ? "Chosen from the managed service-tier catalogue and assigned immediately, so its response and resolution targets apply from the first ticket."
+                      : "The service-tier catalogue is not available right now, so this account starts untiered. Assign the tier from the client header once the catalogue loads."}
+                  </p>
                 </div>
-                <Select value={createForm.tier} onValueChange={v => setCreateForm({ ...createForm, tier: v })}>
-                  <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+                <Select value={createForm.tier || "none"} onValueChange={v => setCreateForm({ ...createForm, tier: v === "none" ? "" : v })}>
+                  <SelectTrigger className="w-full sm:w-56" data-testid="new-client-tier"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Standard</SelectItem>
-                    <SelectItem value="silver">Silver</SelectItem>
-                    <SelectItem value="gold">Gold</SelectItem>
-                    <SelectItem value="platinum">Platinum</SelectItem>
+                    <SelectItem value="none">No service tier yet</SelectItem>
+                    {tierOptions.map(t => (
+                      <SelectItem key={t.id} value={t.id} data-testid={`new-client-tier-${t.slug}`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full" style={{ background: t.color }} />
+                          {t.name}
+                        </span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </section>
@@ -761,7 +830,7 @@ export default function ClientsPage() {
   );
 }
 
-function ClientWorkspaceNavigation({ value, onChange }) {
+function ClientWorkspaceNavigation({ value, onChange, resolveEntry }) {
   const activeGroup = CLIENT_WORKSPACE_GROUPS.find((group) => group.tabs.some((tab) => tab.value === value)) || CLIENT_WORKSPACE_GROUPS[0];
   const ActiveIcon = activeGroup.icon;
 
@@ -771,11 +840,15 @@ function ClientWorkspaceNavigation({ value, onChange }) {
         {CLIENT_WORKSPACE_GROUPS.map((group) => {
           const Icon = group.icon;
           const active = group.id === activeGroup.id;
+          // A group opens the view this technician actually uses inside it; with
+          // no evidence it opens the declared first view, exactly as before.
+          const entry = resolveEntry?.(group);
           return (
             <button
               key={group.id}
               type="button"
-              onClick={() => onChange(group.tabs[0].value)}
+              onClick={() => onChange(entry?.value || group.tabs[0].value)}
+              aria-pressed={active}
               className={`group flex min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition ${
                 active
                   ? "border-primary/30 bg-primary/[0.11] text-foreground shadow-[0_8px_24px_rgba(45,212,191,0.06)]"
@@ -788,7 +861,7 @@ function ClientWorkspaceNavigation({ value, onChange }) {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-xs font-semibold">{group.label}</span>
-                <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.12em] opacity-60">{group.tabs.length} view{group.tabs.length === 1 ? "" : "s"}</span>
+                <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.12em] opacity-60">{entry ? `Learned · ${entry.label}` : `${group.tabs.length} view${group.tabs.length === 1 ? "" : "s"}`}</span>
               </span>
             </button>
           );
@@ -802,14 +875,11 @@ function ClientWorkspaceNavigation({ value, onChange }) {
             <p className="truncate text-xs text-muted-foreground">{activeGroup.description}</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={`${activeGroup.label} views`}>
+        <TabsList className="h-auto flex-wrap justify-start gap-1.5 bg-transparent p-0" aria-label={`${activeGroup.label} views`}>
           {activeGroup.tabs.map((item) => (
-            <button
+            <TabsTrigger
               key={item.value}
-              type="button"
-              role="tab"
-              aria-selected={value === item.value}
-              onClick={() => onChange(item.value)}
+              value={item.value}
               className={`h-8 rounded-lg border px-3 text-[11px] font-medium transition ${
                 value === item.value
                   ? "border-primary/30 bg-primary/10 text-primary"
@@ -818,77 +888,15 @@ function ClientWorkspaceNavigation({ value, onChange }) {
               data-testid={`tab-${item.value}`}
             >
               {item.label}
-            </button>
+            </TabsTrigger>
           ))}
-        </div>
+        </TabsList>
       </div>
     </div>
   );
 }
 
-function ClientDigitalTwinOverview({ client, activity, healthDetail, onNavigate }) {
-  const integrations = client.integrations || {};
-  const nextAction = client.overdue_count > 0
-    ? {
-        eyebrow: "Commercial exception",
-        title: `Reconcile $${(client.overdue_amount || 0).toLocaleString()} overdue`,
-        body: "Review the affected invoices, record correspondence, and keep the collection trail attributable.",
-        action: "Open billing",
-        tab: "billing",
-        tone: "rose",
-      }
-    : client.open_tickets > 10
-      ? {
-          eyebrow: "Service pressure",
-          title: `${client.open_tickets} open tickets need review`,
-          body: "Inspect repeat demand, ownership, SLA exposure, and whether a coordinated response is required.",
-          action: "Review service work",
-          tab: "tickets",
-          tone: "amber",
-        }
-      : client.health_score < 70
-        ? {
-            eyebrow: "Health intervention",
-            title: `Restore the client health score from ${client.health_score}`,
-            body: "Use the evidence breakdown to identify the weakest operational relationship before taking action.",
-            action: "Open security posture",
-            tab: "security",
-            tone: "amber",
-          }
-        : !integrations.rmm || !integrations.m365 || !integrations.acronis
-          ? {
-              eyebrow: "Coverage gap",
-              title: "Complete the client service map",
-              body: "One or more core management, Microsoft, or backup relationships are not yet linked to this account.",
-              action: "Review integrations",
-              tab: "integrations",
-              tone: "cyan",
-            }
-          : {
-              eyebrow: "Account opportunity",
-              title: "Prepare the next client review",
-              body: "The account is stable. Review outcomes, renewal readiness, and the next evidence-backed improvement.",
-              action: "Open growth studio",
-              tab: "studio",
-              tone: "emerald",
-            };
-
-  const toneClasses = {
-    rose: "border-rose-500/25 from-rose-500/[0.11]",
-    amber: "border-amber-500/25 from-amber-500/[0.11]",
-    cyan: "border-cyan-500/25 from-cyan-500/[0.11]",
-    emerald: "border-emerald-500/25 from-emerald-500/[0.11]",
-  };
-
-  const relationships = [
-    { label: "People", value: client.contact_count || 0, detail: "contacts", healthy: (client.contact_count || 0) > 0, tab: "contacts" },
-    { label: "Managed estate", value: client.asset_count || 0, detail: `${client.assets_online || 0} online`, healthy: (client.asset_count || 0) > 0, tab: "assets" },
-    { label: "Agreements", value: client.active_contracts || 0, detail: "active", healthy: (client.active_contracts || 0) > 0, tab: "subscriptions" },
-    { label: "Microsoft 365", value: integrations.m365 ? "Linked" : "Missing", detail: "tenant relationship", healthy: !!integrations.m365, tab: "cipp" },
-    { label: "Voice", value: integrations.yeastar ? "Linked" : "Missing", detail: "PBX relationship", healthy: !!integrations.yeastar, tab: "integrations" },
-    { label: "Backups", value: integrations.acronis ? "Linked" : "Missing", detail: "protection source", healthy: !!integrations.acronis, tab: "integrations" },
-  ];
-
+function ClientDigitalTwinOverview({ client, activity, healthDetail }) {
   const breakdown = healthDetail?.breakdown;
   const dimensions = breakdown ? [
     { key: "tickets", label: "Tickets", max: 30 },
@@ -901,56 +909,12 @@ function ClientDigitalTwinOverview({ client, activity, healthDetail, onNavigate 
 
   return (
     <div className="space-y-4" data-testid="client-digital-twin-overview">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)]">
-        <section className={`rounded-2xl border bg-gradient-to-br ${toneClasses[nextAction.tone]} to-card/45 p-5 shadow-sm`}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">{nextAction.eyebrow}</p>
-              <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">{nextAction.title}</h3>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{nextAction.body}</p>
-            </div>
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-              <Sparkles className="h-4.5 w-4.5" />
-            </span>
-          </div>
-          <Button type="button" size="sm" className="mt-5 gap-1.5" onClick={() => onNavigate(nextAction.tab)} data-testid="client-next-best-action">
-            {nextAction.action}<ArrowRight className="h-3.5 w-3.5" />
-          </Button>
-        </section>
-
-        <section className="rounded-2xl border border-border/70 bg-card/35 p-5 shadow-sm">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Relationship coverage</p>
-              <h3 className="mt-1 text-base font-semibold text-foreground">Client digital twin</h3>
-            </div>
-            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><CheckCircle2 className="h-3 w-3 text-emerald-400" />Live Nexus relationships</span>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3">
-            {relationships.map((relationship) => (
-              <button
-                key={relationship.label}
-                type="button"
-                onClick={() => onNavigate(relationship.tab)}
-                className="group rounded-xl border border-border/70 bg-background/35 p-3 text-left transition hover:border-primary/25 hover:bg-primary/[0.05]"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">{relationship.label}</span>
-                  <span className={`h-1.5 w-1.5 rounded-full ${relationship.healthy ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.65)]" : "bg-amber-400"}`} />
-                </div>
-                <p className={`mt-2 text-sm font-semibold ${relationship.healthy ? "text-foreground" : "text-amber-300"}`}>{relationship.value}</p>
-                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{relationship.detail}</p>
-              </button>
-            ))}
-          </div>
-        </section>
-      </div>
-
       <section className="rounded-2xl border border-border/70 bg-card/35 p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Evidence-backed health</p>
-            <p className="mt-1 text-sm text-muted-foreground">A transparent score derived from operational records, never an unexplained estimate.</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Health evidence</p>
+            <h3 className="mt-1 text-base font-semibold text-foreground">Understand the account score</h3>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">The score is calculated from recorded service, SLA, device, payment, agreement and Microsoft evidence. It is a guide for review, not an unexplained prediction.</p>
           </div>
           <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/45 px-3 py-2">
             <span className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">Current score</span>
@@ -1001,66 +965,188 @@ function ClientContactsPanel({ clientId, token, onCountChange }) {
   const [form, setForm] = useState(empty);
   const [deleting, setDeleting] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const pending = useRef(false);
+  const loadVersion = useRef(0);
+  const countCallback = useRef(onCountChange);
+  countCallback.current = onCountChange;
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
+    setLoadError(false);
     try {
-      const response = await axios.get(`${API}/clients/${clientId}/contacts`, { headers });
+      const response = await axios.get(`${API}/clients/${clientId}/contacts`, { headers, timeout: 15000 });
+      if (version !== loadVersion.current) return;
       const rows = Array.isArray(response.data) ? response.data : [];
       setContacts(rows);
-      onCountChange?.(rows.length);
+      countCallback.current?.(rows.length);
     } catch (error) {
+      if (version !== loadVersion.current) return;
+      setLoadError(true);
       toast.error(error.response?.data?.detail || "Could not load client contacts");
-    } finally { setLoading(false); }
-  }, [clientId, headers, onCountChange]);
+    } finally { if (version === loadVersion.current) setLoading(false); }
+  }, [clientId, headers]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); return () => { loadVersion.current += 1; }; }, [load]);
   const openCreate = () => { setEditor("create"); setForm({ ...empty, is_primary: contacts.length === 0 }); };
   const openEdit = (contact) => { setEditor(contact); setForm({ ...empty, ...contact }); };
   const save = async () => {
+    if (pending.current || !editor || loading || loadError) return;
     if (!form.name.trim()) return toast.error("Contact name is required");
+    pending.current = true;
     setSaving(true);
     try {
       if (editor === "create") await axios.post(`${API}/clients/${clientId}/contacts`, form, { headers });
       else await axios.put(`${API}/clients/${clientId}/contacts/${editor.id}`, form, { headers });
       toast.success(editor === "create" ? "Contact added" : "Contact updated");
       setEditor(null); await load();
-    } catch (error) { toast.error(error.response?.data?.detail || "Could not save contact"); }
-    finally { setSaving(false); }
+    } catch (error) { toast.error(apiErrorMessage(error, "Could not save contact")); }
+    finally { pending.current = false; setSaving(false); }
   };
   const remove = async () => {
-    if (!deleting) return;
+    if (!deleting || pending.current || loading || loadError) return;
+    pending.current = true;
     setSaving(true);
     try {
       await axios.delete(`${API}/clients/${clientId}/contacts/${deleting.id}`, { headers });
       toast.success(`${deleting.name} removed from this client`);
       setDeleting(null); await load();
-    } catch (error) { toast.error(error.response?.data?.detail || "Could not remove contact"); }
-    finally { setSaving(false); }
+    } catch (error) { toast.error(apiErrorMessage(error, "Could not remove contact")); }
+    finally { pending.current = false; setSaving(false); }
   };
+  const makePrimary = async (contact) => {
+    if (!contact?.id || contact.is_primary || pending.current || loading || loadError) return;
+    pending.current = true;
+    setSaving(true);
+    try {
+      await axios.put(`${API}/clients/${clientId}/contacts/${contact.id}`, { is_primary: true }, { headers });
+      toast.success(`${contact.name || "Contact"} is now the primary contact`);
+      await load();
+    } catch (error) { toast.error(apiErrorMessage(error, "Could not update the primary contact")); }
+    finally { pending.current = false; setSaving(false); }
+  };
+  const contactRole = (role) => ({
+    technical: {
+      label: "Technical lead",
+      description: "Technical approvals, incident context and service coordination.",
+      Icon: HardDrive,
+    },
+    billing: {
+      label: "Billing contact",
+      description: "Invoices, purchase orders and commercial service queries.",
+      Icon: DollarSign,
+    },
+    authorised: {
+      label: "Approval authority",
+      description: "Authorised changes, approvals and account decisions.",
+      Icon: KeyRound,
+    },
+    general: {
+      label: "Service contact",
+      description: "Day-to-day coordination and customer service updates.",
+      Icon: Users,
+    },
+  }[role] || {
+    label: "Service contact",
+    description: "Day-to-day coordination and customer service updates.",
+    Icon: Users,
+  });
+  const initials = (name) => String(name || "?")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "?";
+
+  if (loadError) return <section role="alert" className="rounded-2xl border border-amber-500/25 bg-card p-5 space-y-3"><h2 className="font-semibold">Contacts could not be loaded</h2><p className="text-sm text-muted-foreground">Your existing contacts have not been changed. Reload the directory before adding or editing people.</p><Button variant="outline" onClick={load}><RefreshCw className="mr-2 h-4 w-4" />Retry loading contacts</Button></section>;
 
   return <section className="space-y-4" data-testid="client-contacts-panel">
-    <div className="flex flex-col gap-3 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/[0.08] via-card to-card p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">People & contact channels</p><h2 className="mt-1 text-base font-semibold">Contacts are part of the client record</h2><p className="mt-1 text-xs text-muted-foreground">Keep the primary person, email and phone details accurate for tickets, approvals and service updates.</p></div>
-      <Button size="sm" onClick={openCreate} data-testid="client-contact-add"><Plus className="mr-1.5 h-4 w-4" />Add contact</Button>
+    <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_92%_12%,hsl(var(--primary)/0.17),transparent_31%),linear-gradient(135deg,hsl(var(--primary)/0.09),hsl(var(--card)/0.72)_58%,hsl(var(--background)/0.46))] p-4 shadow-sm sm:p-5">
+      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="max-w-2xl"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">People & contact routes</p><h2 className="mt-1.5 text-lg font-semibold tracking-tight text-foreground">Make every customer hand-off feel certain.</h2><p className="mt-1.5 text-sm leading-6 text-muted-foreground">Clear contacts reduce ticket bounce, approval delays and missed client updates. Keep the operational route here; use Relationship map for commercial influence.</p></div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2"><span className="rounded-full border border-primary/20 bg-background/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-primary">{contacts.length} recorded</span><Button size="sm" onClick={openCreate} disabled={loading || saving} data-testid="client-contact-add"><Plus className="mr-1.5 h-4 w-4" />Add contact</Button></div>
+      </div>
     </div>
-    {loading ? <div className="flex items-center justify-center rounded-2xl border border-border/70 py-12 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading contacts…</div> : contacts.length === 0 ? <div className="rounded-2xl border border-dashed border-border/70 px-5 py-10 text-center"><Users className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">No contacts yet</p><p className="mt-1 text-xs text-muted-foreground">Add the main person technicians should contact before working this account.</p><Button size="sm" className="mt-4" onClick={openCreate}><Plus className="mr-1.5 h-4 w-4" />Add first contact</Button></div> : <div className="grid gap-3 lg:grid-cols-2">{contacts.map((contact) => <article key={contact.id} className="group rounded-2xl border border-border/70 bg-card/55 p-4 transition hover:border-primary/30 hover:bg-primary/[0.025]">
-      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold">{contact.name || "Unnamed contact"}</p>{contact.is_primary && <Badge className="border-amber-400/30 bg-amber-400/10 text-amber-200"><Star className="mr-1 h-3 w-3" />Primary</Badge>}</div><p className="mt-1 text-xs capitalize text-muted-foreground">{String(contact.role || "general").replace(/_/g, " ")}</p></div><div className="flex gap-1"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(contact)} aria-label={`Edit ${contact.name}`}><Pencil className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" onClick={() => setDeleting(contact)} aria-label={`Delete ${contact.name}`}><Trash2 className="h-3.5 w-3.5" /></Button></div></div>
-      <div className="mt-4 grid gap-2 text-xs">{contact.email ? <a className="flex items-center gap-2 text-sky-300 hover:underline" href={`mailto:${contact.email}`}><Mail className="h-3.5 w-3.5" />{contact.email}</a> : <p className="flex items-center gap-2 text-muted-foreground"><Mail className="h-3.5 w-3.5" />No email recorded</p>}{contact.phone ? <a className="flex items-center gap-2 text-emerald-300 hover:underline" href={`tel:${contact.phone}`}><Phone className="h-3.5 w-3.5" />{contact.phone}</a> : <p className="flex items-center gap-2 text-muted-foreground"><Phone className="h-3.5 w-3.5" />No phone recorded</p>}</div>
-    </article>)}</div>}
+    {loading ? <div className="flex items-center justify-center rounded-2xl border border-border/70 py-12 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading contact routes…</div> : contacts.length === 0 ? <div className="nx-client-contact-card__empty"><div className="nx-client-contact-card__empty-icon"><Users className="h-5 w-5" /></div><p className="mt-4 text-base font-semibold text-foreground">Build the first trusted contact route</p><p className="mx-auto mt-1.5 max-w-md text-sm leading-6 text-muted-foreground">Start with the person a technician should reach when service work, an approval or a customer update needs an answer.</p><Button className="mt-5" size="sm" onClick={openCreate} disabled={saving}><Plus className="mr-1.5 h-4 w-4" />Add first contact</Button><p className="mt-3 text-[11px] text-muted-foreground">A first contact is automatically marked as the primary route.</p></div> : <div className="grid gap-4 lg:grid-cols-2">{contacts.map((contact) => {
+      const role = String(contact.role || "general");
+      const roleMeta = contactRole(role);
+      const RoleIcon = roleMeta.Icon;
+      const contactName = contact.name || "Unnamed contact";
+      const contactInitials = initials(contactName);
+      const completeChannels = [contact.email, contact.phone].filter(Boolean).length;
+      return <article
+        key={contact.id}
+        className="nx-client-contact-card group"
+        data-contact-role={role}
+        data-primary={contact.is_primary ? "true" : "false"}
+        data-testid={`client-contact-card-${contact.id}`}
+      >
+        <div className="nx-client-contact-card__header">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="nx-client-contact-card__avatar" aria-hidden="true"><span>{contactInitials}</span><RoleIcon className="nx-client-contact-card__avatar-icon h-3.5 w-3.5" /></span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-sm font-semibold tracking-[-0.01em] text-foreground">{contactName}</h3>
+                {contact.is_primary && <Badge className="nx-client-contact-card__primary-badge"><Star className="mr-1 h-3 w-3" />Primary</Badge>}
+              </div>
+              <p className="nx-client-contact-card__role-kicker">{roleMeta.label}</p>
+              <p className="mt-1 max-w-sm text-[11px] leading-4 text-muted-foreground">{roleMeta.description}</p>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1 rounded-lg border border-white/[0.07] bg-black/10 p-0.5">
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:bg-primary/10 hover:text-primary" onClick={() => openEdit(contact)} aria-label={`Edit ${contactName}`} title={`Edit ${contactName}`}><Pencil className="h-3.5 w-3.5" /></Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" onClick={() => setDeleting(contact)} aria-label={`Delete ${contactName}`} title={`Delete ${contactName}`}><Trash2 className="h-3.5 w-3.5" /></Button>
+          </div>
+        </div>
+        <div className="nx-client-contact-card__readiness" aria-label={`${completeChannels} of 2 direct contact channels recorded`}>
+          <div><p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Route readiness</p><p className="mt-0.5 text-xs font-medium text-foreground">{completeChannels}/2 direct channels ready</p></div>
+          <div className="nx-client-contact-card__readiness-steps" aria-hidden="true"><span data-ready={Boolean(contact.email)} /><span data-ready={Boolean(contact.phone)} /></div>
+          <span className="text-[10px] font-medium text-muted-foreground">{contact.is_primary ? "Preferred route" : "Service route"}</span>
+        </div>
+        <div className="nx-client-contact-card__channels">
+          {contact.email ? <a className="nx-client-contact-card__channel" href={`mailto:${contact.email}`} aria-label={`Email ${contactName}`}><span className="nx-client-contact-card__channel-label"><Mail className="h-3.5 w-3.5" />Email</span><span className="truncate">{contact.email}</span><span className="nx-client-contact-card__channel-action">Compose <ChevronRight className="h-3.5 w-3.5" /></span></a> : <div className="nx-client-contact-card__channel nx-client-contact-card__channel--missing"><span className="nx-client-contact-card__channel-label"><Mail className="h-3.5 w-3.5" />Email</span><span>Not recorded</span><span className="nx-client-contact-card__channel-action">Add in edit</span></div>}
+          {contact.phone ? <a className="nx-client-contact-card__channel" href={`tel:${contact.phone}`} aria-label={`Call ${contactName}`}><span className="nx-client-contact-card__channel-label"><Phone className="h-3.5 w-3.5" />Phone</span><span className="truncate">{contact.phone}</span><span className="nx-client-contact-card__channel-action">Call <ChevronRight className="h-3.5 w-3.5" /></span></a> : <div className="nx-client-contact-card__channel nx-client-contact-card__channel--missing"><span className="nx-client-contact-card__channel-label"><Phone className="h-3.5 w-3.5" />Phone</span><span>Not recorded</span><span className="nx-client-contact-card__channel-action">Add in edit</span></div>}
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/55 pt-3">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">{contact.is_primary ? "Primary route" : "Client contact"}</span>
+          {contact.is_primary ? <span className="nx-client-contact-card__route-ready"><CheckCircle2 className="h-3.5 w-3.5" />Primary set</span> : <Button variant="outline" size="sm" className="h-8 border-white/10 bg-background/35 px-2.5 text-xs hover:border-primary/35 hover:bg-primary/[0.08]" onClick={() => makePrimary(contact)} disabled={saving} data-testid={`client-contact-promote-${contact.id}`}><Star className="mr-1.5 h-3.5 w-3.5" />Make primary</Button>}
+        </div>
+      </article>;
+    })}</div>}
     <Dialog open={Boolean(editor)} onOpenChange={(open) => !open && setEditor(null)}><NexusWorkflowDialog eyebrow="Client contact workflow" title={editor === "create" ? "Add a client contact" : "Edit client contact"} description="Keep operational contact details correct before they are used for tickets, approvals or customer updates." icon={Users} tone="sky" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}{editor === "create" ? "Add contact" : "Save changes"}</Button></>}><div className="grid gap-4"><div className="grid gap-2"><Label htmlFor="client-contact-name">Full name</Label><Input id="client-contact-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Sarah Jones" autoFocus /></div><div className="grid gap-4 sm:grid-cols-2"><div className="grid gap-2"><Label htmlFor="client-contact-email">Email</Label><Input id="client-contact-email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="sarah@client.com" /></div><div className="grid gap-2"><Label htmlFor="client-contact-phone">Phone</Label><Input id="client-contact-phone" type="tel" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="0400 000 000" /></div></div><div className="grid gap-2"><Label>Contact role</Label><Select value={form.role} onValueChange={(role) => setForm((current) => ({ ...current, role }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="general">General contact</SelectItem><SelectItem value="technical">Technical contact</SelectItem><SelectItem value="billing">Billing contact</SelectItem><SelectItem value="authorised">Authorised approver</SelectItem></SelectContent></Select></div><label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-muted/[0.14] p-3"><input type="checkbox" className="mt-0.5" checked={Boolean(form.is_primary)} onChange={(event) => setForm((current) => ({ ...current, is_primary: event.target.checked }))} /><span><span className="text-sm font-medium">Primary contact</span><span className="mt-0.5 block text-xs text-muted-foreground">Use this person as the main contact for the account.</span></span></label></div></NexusWorkflowDialog></Dialog>
     <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}><NexusWorkflowDialog eyebrow="Client contact workflow" title="Remove client contact" description={`Remove ${deleting?.name || "this contact"} from this client record. Tickets and historical audit evidence are retained.`} icon={Trash2} tone="amber" className="max-w-lg" footer={<><Button variant="outline" onClick={() => setDeleting(null)} disabled={saving}>Keep contact</Button><Button variant="destructive" onClick={remove} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}Remove contact</Button></>}><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This changes the current client contact list only. Nexus retains related ticket, approval and audit history.</p></NexusWorkflowDialog></Dialog>
   </section>;
 }
 
-function ClientDetailPane({ client: clientProp, detail: _detail, activity, healthDetail, tab, setTab, loading: _loading, onClose }) {
+function ClientDetailPane({
+  client: clientProp,
+  detail: _detail,
+  activity,
+  healthDetail,
+  tab,
+  setTab,
+  loading: _loading,
+  onboardingSession,
+  onboardingPrompt,
+  onboardingProgress,
+  onStartOnboarding,
+  onContinueOnboarding,
+  learning,
+}) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
   const [briefingOpen, setBriefingOpen] = useState(false);
+  const [profileEditorOpen, setProfileEditorOpen] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: "", email: "", phone: "", address: "", industry: "", website: "" });
   const [ticketHistory, setTicketHistory] = useState([]);
   const [ticketHistoryLoading, setTicketHistoryLoading] = useState(false);
   const [serviceJobHistory, setServiceJobHistory] = useState({ workshop: [], field: [] });
   const [serviceJobHistoryLoading, setServiceJobHistoryLoading] = useState(false);
+  const [certificateLoading, setCertificateLoading] = useState(false);
   useEffect(() => { setClientLocal(clientProp); }, [clientProp]);
   useEffect(() => {
     if (!clientProp?.id) return;
@@ -1086,22 +1172,111 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
       .finally(() => setServiceJobHistoryLoading(false));
   }, [clientProp?.id, token]);
   const client = clientLocal || clientProp;
+  // A workspace group opens the view this technician actually uses inside it.
+  // `null` means "nothing learned" — the group keeps its declared first view.
+  const resolveGroupEntry = (group) => {
+    const preferred = preferredTarget(group.tabs, {
+      surface: LEARNING_VIEW,
+      personal: learning?.personal,
+      team: learning?.team,
+      idOf: (tab) => tab.value,
+    });
+    return preferred ? { value: preferred.value, label: preferred.label } : null;
+  };
+  const integrations = client.integrations || {};
+  const clientMrr = Number(client.mrr) || 0;
+  const clientOverdueAmount = Number(client.overdue_amount) || 0;
+  const clientOverdueCount = Number(client.overdue_count) || 0;
+  const clientOpenTickets = Number(client.open_tickets) || 0;
+  const clientAssetCount = Number(client.asset_count) || 0;
+  const clientAssetsOnline = Number(client.assets_online) || 0;
+  const clientContactCount = Number(client.contact_count) || 0;
+  const clientActiveContracts = Number(client.active_contracts) || 0;
   const mrrData = client.mrr_trend || [];
   const isAdmin = user?.role === "admin" || user?.is_admin;
   const applyClientPatch = (patch) => setClientLocal(c => ({ ...c, ...patch }));
+  const openProfileEditor = () => {
+    setProfileForm({
+      name: client.name || "",
+      email: client.email || "",
+      phone: client.phone || "",
+      address: client.address || "",
+      industry: client.industry || "",
+      website: client.website || "",
+    });
+    setProfileEditorOpen(true);
+  };
+  const saveClientProfile = async () => {
+    if (!profileForm.name.trim()) return toast.error("Client name is required");
+    setProfileSaving(true);
+    try {
+      await axios.put(`${API}/clients/${client.id}`, {
+        name: profileForm.name.trim(),
+        email: profileForm.email.trim() || null,
+        phone: profileForm.phone.trim() || null,
+        address: profileForm.address.trim() || null,
+        industry: profileForm.industry.trim() || null,
+        website: profileForm.website.trim() || null,
+        contract_type: client.contract_type || "monthly",
+        mrr: Number(client.mrr) || 0,
+        contacts: client.contacts || [],
+        tier: client.tier || "standard",
+        lifecycle: client.lifecycle || "active",
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      applyClientPatch({
+        name: profileForm.name.trim(),
+        email: profileForm.email.trim() || null,
+        phone: profileForm.phone.trim() || null,
+        address: profileForm.address.trim() || null,
+        industry: profileForm.industry.trim() || null,
+        website: profileForm.website.trim() || null,
+      });
+      setProfileEditorOpen(false);
+      toast.success("Client profile updated");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Could not update client profile"));
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+  const downloadHealthCertificate = async () => {
+    if (certificateLoading) return;
+    setCertificateLoading(true);
+    try {
+      const response = await axios.get(`${API}/clients/${client.id}/health-certificate.pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: "blob",
+      });
+      const contentType = response.headers?.["content-type"] || response.data?.type || "application/pdf";
+      if (!String(contentType).includes("pdf")) throw new Error("Health certificate PDF was not returned");
+      const objectUrl = window.URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
+      const download = document.createElement("a");
+      download.href = objectUrl;
+      download.download = `health-certificate-${client.id}.pdf`;
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+      toast.success("Health certificate downloaded");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not download health certificate");
+    } finally {
+      setCertificateLoading(false);
+    }
+  };
 
   return (
     <div className="flex min-h-full flex-col gap-4 p-4 sm:p-5" data-testid="client-detail-pane">
       {/* Cover banner */}
-      <section className="nx-ambient-surface overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-nx-signal={client.health_score < 60 ? "critical" : client.health_score < 85 ? "attention" : "healthy"}>
-        <ClientCoverImage client={client} onUpdated={applyClientPatch}>
+      <section className="nx-ambient-surface overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-nx-signal={resolveClientHealthBand(client)?.signal || "healthy"}>
+        {tab === "overview" && <ClientCoverImage client={client} onUpdated={applyClientPatch}>
           <ClientAccountAlerts client={client} />
-        </ClientCoverImage>
+        </ClientCoverImage>}
 
       {/* Header */}
-      <div className="relative -mt-12 grid grid-cols-1 gap-5 px-5 pb-5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-end">
+      <div className={`relative grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-end ${tab === "overview" ? "-mt-12" : "pt-5"}`}>
         <div className="shrink-0 self-start rounded-2xl bg-background/95 p-1.5 text-center shadow-xl ring-1 ring-white/10">
-          <ClientProfilePictureUploader client={client} onUpdated={applyClientPatch} size={88} />
+          <ClientProfilePictureUploader client={client} onUpdated={applyClientPatch} size={tab === "overview" ? 72 : 48} />
           <p className="mt-1.5 text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Business logo</p>
         </div>
         <div className="min-w-0 flex-1 pt-1">
@@ -1138,11 +1313,11 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
             )}
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
-            <IntegrationChip type="rmm" active={client.integrations.rmm} />
-            <IntegrationChip type="acronis" active={client.integrations.acronis} />
-            <IntegrationChip type="pax8" active={client.integrations.pax8} />
-            <IntegrationChip type="m365" active={client.integrations.m365} />
-            <IntegrationChip type="yeastar" active={client.integrations.yeastar} />
+            <IntegrationChip type="rmm" active={integrations.rmm} />
+            <IntegrationChip type="acronis" active={integrations.acronis} />
+            <IntegrationChip type="pax8" active={integrations.pax8} />
+            <IntegrationChip type="m365" active={integrations.m365} />
+            <IntegrationChip type="yeastar" active={integrations.yeastar} />
             {client.last_activity && <span className="ml-1 text-[10px] text-muted-foreground">Last activity {formatDistanceToNow(new Date(client.last_activity), { addSuffix: true })}</span>}
           </div>
         </div>
@@ -1152,54 +1327,61 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
             <HealthDial score={client.health_score} size={54} />
           </div>
           <ConfidenceLens entityType="client" entityId={client.id} token={token} API={API} variant="compact" />
-          {onClose && (
-            <button
-              type="button"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/45 px-3 text-xs text-muted-foreground hover:border-primary/35 hover:bg-muted/50 hover:text-foreground"
-              onClick={onClose}
-              data-testid="back-to-studio-home-btn"
-              title="Return to the client portfolio"
-            >
-              ← All clients
-            </button>
-          )}
-          <button
-            type="button"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/45 px-3 text-xs text-foreground hover:border-primary/35 hover:bg-muted/50"
-            onClick={() => setBriefingOpen(true)}
-            data-testid="ai-briefing-btn"
-          >
-            ✨ AI Brief
-          </button>
-          <button
-            type="button"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 text-xs text-amber-100 hover:bg-amber-500/20"
-            onClick={() => window.open(`${API}/clients/${client.id}/health-certificate.pdf?token=${encodeURIComponent(token)}`, "_blank")}
-            data-testid={`health-cert-btn-${client.id}`}
-          >
-            ★ Certificate
-          </button>
+          <Button type="button" variant="outline" size="sm" onClick={openProfileEditor} data-testid="edit-client-profile">
+            <Pencil className="mr-1.5 h-3.5 w-3.5" />Edit profile
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setTab("contacts")}><Users className="mr-1.5 h-3.5 w-3.5" />Contacts</Button>
+          <Button type="button" size="sm" onClick={() => setTab("tickets")}><Ticket className="mr-1.5 h-3.5 w-3.5" />Service work</Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="sm">More <ChevronRight className="ml-1.5 h-3.5 w-3.5 rotate-90" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onSelect={() => setTab("notes")}>Account notes</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTab("followups")}><CalendarClock className="mr-2 h-3.5 w-3.5" />Follow-ups</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTab("plan")}>Account plan</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setBriefingOpen(true)} data-testid="ai-briefing-btn">Account briefing</DropdownMenuItem>
+              <DropdownMenuItem onSelect={downloadHealthCertificate} disabled={certificateLoading} data-testid={`health-cert-btn-${client.id}`}>{certificateLoading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}Health certificate</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       </section>
       <AccountBriefingDialog clientId={client.id} open={briefingOpen} onClose={() => setBriefingOpen(false)} />
 
+      {tab === "overview" && <ClientPriorityPanel
+        client={{
+          ...client,
+          onboarding_status: onboardingSession?.status || (onboardingPrompt ? "not_started" : client.onboarding_status),
+        }}
+        onboardingProgress={onboardingProgress}
+        onNavigate={setTab}
+        onStartOnboarding={onStartOnboarding}
+        onContinueOnboarding={onboardingSession ? onContinueOnboarding : undefined}
+        onEditProfile={openProfileEditor}
+      />}
+
       {/* Quick Actions strip */}
-      <section className="rounded-2xl border border-primary/15 bg-[linear-gradient(135deg,rgba(45,212,191,0.055),rgba(9,9,11,0.72))] p-4 shadow-sm">
+      {(tab === "overview" || tab === "tickets") && <section className="rounded-2xl border border-border/70 bg-card/40 p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Client command bar</p><p className="mt-1 text-sm text-muted-foreground">Start a traceable operational action without leaving this record.</p></div>
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Common work</p><p className="mt-1 text-sm text-muted-foreground">Start the work technicians need most; related actions stay available under More.</p></div>
           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><CheckCircle2 className="h-3 w-3 text-emerald-400" />Every action remains linked to {client.name}</span>
         </div>
-        <ClientQuickActionsStrip client={client} onOpenWarRoom={() => setTab("warroom")} />
-      </section>
+        <ClientQuickActionsStrip
+          client={client}
+          onOpenWarRoom={() => setTab("warroom")}
+          personal={learning?.personal}
+          team={learning?.team}
+          onRecordAction={learning?.record}
+          onForgetLearning={learning?.forget}
+        />
+      </section>}
 
       {/* Quick metrics strip */}
-      <section className="rounded-2xl border border-border/70 bg-card/25 p-4 shadow-sm">
+      {tab === "overview" && <section className="rounded-2xl border border-border/70 bg-card/25 p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Account pulse</p><p className="mt-1 text-sm text-muted-foreground">Commercial, service and asset context at a glance.</p></div></div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <HeroTile
           label="Monthly Recurring"
-          value={`$${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          value={`$${clientMrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           glow="violet"
           animated={false}
           subtitle={mrrData.length ? "trending" : "—"}
@@ -1207,43 +1389,43 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
         />
         <HeroTile
           label="Open Tickets"
-          value={client.open_tickets}
-          glow={client.open_tickets > 10 ? "amber" : "cyan"}
-          subtitle={client.open_tickets > 10 ? "high volume" : "within range"}
+          value={clientOpenTickets}
+          glow={clientOpenTickets > 10 ? "amber" : "cyan"}
+          subtitle={clientOpenTickets > 10 ? "high volume" : "within range"}
           testId="client-open-tickets-tile"
         />
         <HeroTile
           label="Assets"
-          value={client.asset_count}
+          value={clientAssetCount}
           glow="emerald"
-          subtitle={`${client.assets_online}/${client.asset_count} online`}
+          subtitle={`${clientAssetsOnline}/${clientAssetCount} online`}
           testId="client-assets-tile"
         />
         <HeroTile
           label="Contacts"
-          value={client.contact_count}
+          value={clientContactCount}
           glow="cyan"
-          subtitle={`${client.active_contracts} active contracts`}
+          subtitle={`${clientActiveContracts} active contracts`}
           testId="client-contacts-tile"
         />
         <HeroTile
           label="AR Overdue"
-          value={`$${client.overdue_amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-          glow={client.overdue_count > 0 ? "rose" : "emerald"}
+          value={`$${clientOverdueAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          glow={clientOverdueCount > 0 ? "rose" : "emerald"}
           animated={false}
-          subtitle={`${client.overdue_count} invoice${client.overdue_count !== 1 ? "s" : ""}`}
+          subtitle={`${clientOverdueCount} invoice${clientOverdueCount !== 1 ? "s" : ""}`}
           testId="client-overdue-tile"
         />
       </div>
-      </section>
+      </section>}
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/25 shadow-sm">
-        <ClientWorkspaceNavigation value={tab} onChange={setTab} />
+        <ClientWorkspaceNavigation value={tab} onChange={setTab} resolveEntry={resolveGroupEntry} />
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           <TabsContent value="overview" className="mt-0 space-y-3">
-            <ClientDigitalTwinOverview client={client} activity={activity} healthDetail={healthDetail} onNavigate={setTab} />
+            <ClientDigitalTwinOverview client={client} activity={activity} healthDetail={healthDetail} />
           </TabsContent>
 
           <TabsContent value="fabric" className="mt-0 space-y-3">
@@ -1274,6 +1456,10 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
 
           <TabsContent value="plan" className="mt-0 space-y-3">
             <AccountPlanCanvas clientId={client.id} />
+          </TabsContent>
+
+          <TabsContent value="followups" className="mt-0 space-y-3">
+            <ClientFollowUpsPanel clientId={client.id} token={token} currentUserId={user?.id} currentUserName={user?.name} />
           </TabsContent>
 
           <TabsContent value="tickets" className="mt-0">
@@ -1364,6 +1550,7 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
 
           <TabsContent value="contacts" className="mt-0">
             <ClientContactsPanel
+              key={client.id}
               clientId={client.id}
               token={token}
               onCountChange={(contact_count) => applyClientPatch({ contact_count })}
@@ -1437,6 +1624,27 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
           </TabsContent>
         </div>
       </Tabs>
+      <Dialog open={profileEditorOpen} onOpenChange={setProfileEditorOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Client identity"
+          title="Edit client profile"
+          description="Keep the client identity and primary contact channel correct before Nexus uses them in tickets, approvals, billing and customer communications."
+          icon={Building2}
+          tone="violet"
+          className="max-w-2xl"
+          data-testid="edit-client-profile-workflow"
+          footer={<><Button variant="outline" onClick={() => setProfileEditorOpen(false)} disabled={profileSaving}>Cancel</Button><Button onClick={saveClientProfile} disabled={profileSaving}>{profileSaving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Save profile</Button></>}
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2 sm:col-span-2"><Label htmlFor="client-profile-name">Client name</Label><Input id="client-profile-name" value={profileForm.name} onChange={(event) => setProfileForm((current) => ({ ...current, name: event.target.value }))} autoFocus /></div>
+            <div className="grid gap-2"><Label htmlFor="client-profile-email">Primary email</Label><Input id="client-profile-email" type="email" value={profileForm.email} onChange={(event) => setProfileForm((current) => ({ ...current, email: event.target.value }))} placeholder="support@client.example" /></div>
+            <div className="grid gap-2"><Label htmlFor="client-profile-phone">Primary phone</Label><Input id="client-profile-phone" type="tel" value={profileForm.phone} onChange={(event) => setProfileForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+61 …" /></div>
+            <div className="grid gap-2"><Label htmlFor="client-profile-industry">Industry</Label><Input id="client-profile-industry" value={profileForm.industry} onChange={(event) => setProfileForm((current) => ({ ...current, industry: event.target.value }))} placeholder="e.g. Healthcare" /></div>
+            <div className="grid gap-2"><Label htmlFor="client-profile-address">Address</Label><Input id="client-profile-address" value={profileForm.address} onChange={(event) => setProfileForm((current) => ({ ...current, address: event.target.value }))} placeholder="Street, suburb, state" /></div>
+            <div className="grid gap-2 sm:col-span-2"><Label htmlFor="client-profile-website">Website</Label><Input id="client-profile-website" type="url" value={profileForm.website} onChange={(event) => setProfileForm((current) => ({ ...current, website: event.target.value }))} placeholder="https://client.example" /><p className="text-[11px] text-muted-foreground">Shown as a quick external reference on the client record; it is not used as a sign-in or integration endpoint.</p></div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
@@ -1446,21 +1654,18 @@ function CippTenantPanel({ client }) {
   const headers = { Authorization: `Bearer ${token}` };
 
   const [clientDoc, setClientDoc] = useState(null);
-  const [tenants, setTenants] = useState([]);
   const [users, setUsers] = useState([]);
   const [licenses, setLicenses] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [linkOpen, setLinkOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [licenseDialog, setLicenseDialog] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [selectedTenantId, setSelectedTenantId] = useState("");
   const [createForm, setCreateForm] = useState({ displayName: "", userPrincipalName: "", password: "", firstName: "", lastName: "", usageLocation: "AU", licenses: [], mustChangePassword: true });
   const [licAdd, setLicAdd] = useState([]);
   const [licRemove, setLicRemove] = useState([]);
-  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
   const [resetDialog, setResetDialog] = useState(null);
   const [resetPassword, setResetPassword] = useState("");
+  const [verificationRequestId, setVerificationRequestId] = useState("");
   const [signInDialog, setSignInDialog] = useState(null);
   const [offboardDialog, setOffboardDialog] = useState(null);
 
@@ -1474,6 +1679,18 @@ function CippTenantPanel({ client }) {
   useEffect(() => { loadClient(); }, [client.id]); // eslint-disable-line
 
   const tenantId = clientDoc?.cipp_tenant_id;
+  const nexusVerifyUrl = (action, user) => {
+    const params = new URLSearchParams({
+      client: client.id,
+      action,
+      subject_name: user?.displayName || "",
+      subject_email: user?.userPrincipalName || "",
+      entra_tenant_id: tenantId || "",
+      provider_user_id: user?.id || "",
+      user_principal_name: user?.userPrincipalName || "",
+    });
+    return `/nexus-verify?${params.toString()}`;
+  };
 
   const [hygiene, setHygiene] = useState(null);
   const [loadingHygiene, setLoadingHygiene] = useState(false);
@@ -1510,40 +1727,6 @@ function CippTenantPanel({ client }) {
     // eslint-disable-next-line
   }, [tenantId]);
 
-  const openLink = async () => {
-    setLinkOpen(true);
-    try {
-      const r = await axios.get(`${API}/cipp/tenants`, { headers });
-      setTenants(r.data || []);
-    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't load Microsoft tenants"); }
-  };
-
-  const doLink = async () => {
-    if (!selectedTenantId) { toast.error("Pick a tenant"); return; }
-    const t = tenants.find(x => x.customerId === selectedTenantId);
-    setBusy(true);
-    try {
-      await axios.post(`${API}/clients/${client.id}/link-cipp-tenant`, {
-        tenant_id: t.customerId,
-        tenant_display: t.displayName,
-        tenant_domain: t.defaultDomainName,
-      }, { headers });
-      toast.success("Tenant linked");
-      setLinkOpen(false);
-      loadClient();
-    } catch (e) { toast.error(e.response?.data?.detail || "Link failed"); }
-    finally { setBusy(false); }
-  };
-
-  const doUnlink = async () => {
-    try {
-      await axios.delete(`${API}/clients/${client.id}/link-cipp-tenant`, { headers });
-      toast.success("Unlinked");
-      setUnlinkConfirmOpen(false);
-      loadClient();
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-  };
-
   const doCreateUser = async () => {
     if (!createForm.displayName || !createForm.userPrincipalName || !createForm.password) {
       toast.error("Display name, UPN, and password are required"); return;
@@ -1573,24 +1756,28 @@ function CippTenantPanel({ client }) {
 
   const doReset = async () => {
     if (!resetDialog) return;
+    if (!verificationRequestId.trim()) { toast.error("A connector-verified Nexus Verify request is required"); return; }
     setBusy(true);
     try {
-      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${resetDialog.id}/reset-password`, { password: resetPassword, mustChange: true }, { headers });
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${resetDialog.id}/reset-password`, { password: resetPassword, mustChange: true, verification_request_id: verificationRequestId.trim() }, { headers });
       toast.success("Password reset");
       setResetDialog(null);
       setResetPassword("");
+      setVerificationRequestId("");
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
     finally { setBusy(false); }
   };
 
   const doToggleSignin = async () => {
     if (!signInDialog) return;
+    if (!verificationRequestId.trim()) { toast.error("A connector-verified Nexus Verify request is required"); return; }
     const u = signInDialog;
     setBusy(true);
     try {
-      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/block-signin`, { enable: !u.accountEnabled }, { headers });
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/block-signin`, { enable: !u.accountEnabled, verification_request_id: verificationRequestId.trim() }, { headers });
       toast.success(`Sign-in ${u.accountEnabled ? "blocked" : "unblocked"}`);
       setSignInDialog(null);
+      setVerificationRequestId("");
       const res = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
       setUsers(res.data || []);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
@@ -1599,14 +1786,16 @@ function CippTenantPanel({ client }) {
 
   const doOffboard = async () => {
     if (!offboardDialog) return;
+    if (!verificationRequestId.trim()) { toast.error("A connector-verified Nexus Verify request is required"); return; }
     const u = offboardDialog;
     setBusy(true);
     try {
       await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/offboard`, {
-        convertToShared: true, removeLicenses: true, resetPassword: true, revokeSessions: true, disableUser: true, removeGroups: true, hideFromGAL: true,
+        convertToShared: true, removeLicenses: true, resetPassword: true, revokeSessions: true, disableUser: true, removeGroups: true, hideFromGAL: true, verification_request_id: verificationRequestId.trim(),
       }, { headers });
       toast.success(`${u.userPrincipalName} offboarded`);
       setOffboardDialog(null);
+      setVerificationRequestId("");
       const res = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
       setUsers(res.data || []);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
@@ -1619,34 +1808,9 @@ function CippTenantPanel({ client }) {
         <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-cyan-400" /><span className="font-medium">Nexus Control Plane · Microsoft 365</span></div>
         <p className="text-sm text-zinc-400 mb-3">No Microsoft tenant is linked to this client. Link one to manage identities and licences in Nexus Control Plane.</p>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={openLink} data-testid="client-cipp-link-btn"><LinkIcon className="w-3 h-3 mr-1" />Link tenant</Button>
-          <Button size="sm" variant="outline" asChild><Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure provider</Link></Button>
+          <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" asChild data-testid="client-cipp-link-btn"><Link to={`/control-plane?module=microsoft365&view=connections&client_id=${encodeURIComponent(client.id)}`}><LinkIcon className="w-3 h-3 mr-1" />Set up tenant</Link></Button>
+          <Button size="sm" variant="outline" asChild><Link to="/control-plane?module=microsoft365&view=connections"><ExternalLink className="w-3 h-3 mr-1" />Open tenant setup</Link></Button>
         </div>
-
-        <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
-          <NexusWorkflowDialog
-            eyebrow="Client Microsoft setup"
-            title="Link Microsoft tenant"
-            description={`Map ${client.name} to the correct Microsoft 365 tenant in Nexus Control Plane.`}
-            icon={LinkIcon}
-            tone="cyan"
-            data-testid="client-cipp-link-dialog"
-            footer={<><Button variant="outline" onClick={() => setLinkOpen(false)}>Cancel</Button><Button onClick={doLink} disabled={busy || !selectedTenantId} data-testid="client-cipp-link-submit">Link tenant</Button></>}
-          >
-            <div className="space-y-2">
-              <select
-                value={selectedTenantId}
-                onChange={(e) => setSelectedTenantId(e.target.value)}
-                className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
-                data-testid="client-cipp-link-tenant-select"
-              >
-                <option value="">Select a Microsoft tenant…</option>
-                {tenants.map(t => <option key={t.customerId} value={t.customerId}>{t.displayName} ({t.defaultDomainName})</option>)}
-              </select>
-              {tenants.length === 0 && <p className="text-xs text-muted-foreground">No tenants returned — verify the Microsoft tenant provider in Settings.</p>}
-            </div>
-          </NexusWorkflowDialog>
-        </Dialog>
       </div>
     );
   }
@@ -1667,7 +1831,7 @@ function CippTenantPanel({ client }) {
           <div className="flex gap-2">
             <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setCreateOpen(true)} data-testid="client-cipp-create-user"><UserPlus className="w-3 h-3 mr-1" />Create user</Button>
             <Button size="sm" variant="outline" asChild><Link to="/control-plane?module=microsoft365"><ExternalLink className="w-3 h-3 mr-1" />Control Plane</Link></Button>
-            <Button size="sm" variant="ghost" className="text-rose-400" onClick={() => setUnlinkConfirmOpen(true)} data-testid="client-cipp-unlink"><X className="w-3 h-3 mr-1" />Unlink</Button>
+            <Button size="sm" variant="ghost" asChild data-testid="client-cipp-unlink"><Link to={`/control-plane?module=microsoft365&view=connections&client_id=${encodeURIComponent(client.id)}`}><LinkIcon className="w-3 h-3 mr-1" />Manage mapping</Link></Button>
           </div>
         </div>
 
@@ -1793,11 +1957,11 @@ function CippTenantPanel({ client }) {
                   <td className="px-3 py-2 text-right">
                     <div className="flex gap-1 justify-end flex-wrap">
                       <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setLicenseDialog(u); setLicAdd([]); setLicRemove([]); }} data-testid={`client-cipp-user-licenses-${u.id}`}><KeyRound className="w-3 h-3 mr-0.5" />Licenses</Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setResetDialog(u); setResetPassword(""); }} data-testid={`client-cipp-user-reset-${u.id}`}><RefreshCw className="w-3 h-3 mr-0.5" />Reset</Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setSignInDialog(u)} data-testid={`client-cipp-user-block-${u.id}`}>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setResetDialog(u); setResetPassword(""); setVerificationRequestId(""); }} data-testid={`client-cipp-user-reset-${u.id}`}><RefreshCw className="w-3 h-3 mr-0.5" />Reset</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setSignInDialog(u); setVerificationRequestId(""); }} data-testid={`client-cipp-user-block-${u.id}`}>
                         {u.accountEnabled ? <><Lock className="w-3 h-3 mr-0.5" />Block</> : <><Unlock className="w-3 h-3 mr-0.5" />Unblock</>}
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px] text-rose-400" onClick={() => setOffboardDialog(u)} data-testid={`client-cipp-user-offboard-${u.id}`}><UserX className="w-3 h-3 mr-0.5" />Offboard</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px] text-rose-400" onClick={() => { setOffboardDialog(u); setVerificationRequestId(""); }} data-testid={`client-cipp-user-offboard-${u.id}`}><UserX className="w-3 h-3 mr-0.5" />Offboard</Button>
                     </div>
                   </td>
                 </tr>
@@ -1895,20 +2059,16 @@ function CippTenantPanel({ client }) {
         </NexusWorkflowDialog>
       </Dialog>
 
-      <Dialog open={unlinkConfirmOpen} onOpenChange={setUnlinkConfirmOpen}>
-        <NexusWorkflowDialog eyebrow="Client Microsoft setup" title="Unlink Microsoft tenant?" description={`Disconnect ${clientDoc?.cipp_tenant_display || "the linked tenant"} from ${client.name}. Nexus will retain existing client and audit records.`} icon={X} tone="amber" className="max-w-lg" data-testid="client-cipp-unlink-workflow" footer={<><Button variant="outline" onClick={() => setUnlinkConfirmOpen(false)}>Keep linked</Button><Button variant="destructive" onClick={doUnlink} disabled={busy}>Unlink tenant</Button></>}><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This stops Microsoft administration from the client record. It does not delete the Microsoft tenant.</p></NexusWorkflowDialog>
-      </Dialog>
-
       <Dialog open={Boolean(resetDialog)} onOpenChange={(open) => !open && setResetDialog(null)}>
-        <NexusWorkflowDialog eyebrow="Sensitive identity action" title="Reset user password" description={`Reset ${resetDialog?.userPrincipalName || "this user's"} password and require a new password at next sign-in.`} icon={KeyRound} tone="amber" className="max-w-lg" data-testid="client-cipp-reset-workflow" footer={<><Button variant="outline" onClick={() => setResetDialog(null)}>Cancel</Button><Button onClick={doReset} disabled={busy}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <KeyRound className="mr-1.5 h-4 w-4" />}Reset password</Button></>}><div className="space-y-2"><Label htmlFor="cipp-reset-password">Temporary password <span className="text-muted-foreground">(optional)</span></Label><Input id="cipp-reset-password" type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="Leave blank to generate securely" autoFocus /><p className="text-xs text-muted-foreground">Nexus will require the user to change this password after their next successful sign-in.</p></div></NexusWorkflowDialog>
+        <NexusWorkflowDialog eyebrow="Protected identity action" title="Reset user password" description={`Reset ${resetDialog?.userPrincipalName || "this user's"} password only after Nexus has current connector-verified customer proof.`} icon={KeyRound} tone="amber" className="max-w-lg" data-testid="client-cipp-reset-workflow" footer={<><Button variant="outline" onClick={() => setResetDialog(null)}>Cancel</Button><Button onClick={doReset} disabled={busy || !verificationRequestId.trim()}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <KeyRound className="mr-1.5 h-4 w-4" />}Reset with verified proof</Button></>}><div className="space-y-4"><div className="space-y-2"><Label htmlFor="cipp-reset-password">Temporary password <span className="text-muted-foreground">(optional)</span></Label><Input id="cipp-reset-password" type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="Leave blank to generate securely" autoFocus /><p className="text-xs text-muted-foreground">Nexus will require the user to change this password after their next successful sign-in.</p></div><div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3"><Label htmlFor="client-cipp-reset-verify-id">Connector-verified Nexus Verify request ID *</Label><Input id="client-cipp-reset-verify-id" className="mt-2" value={verificationRequestId} onChange={(event) => setVerificationRequestId(event.target.value)} placeholder="Verification request ID" /><div className="mt-2"><Button variant="outline" size="sm" asChild><Link to={nexusVerifyUrl("password_reset", resetDialog)}>Open Nexus Verify<ExternalLink className="ml-1.5 h-3.5 w-3.5" /></Link></Button></div></div></div></NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={Boolean(signInDialog)} onOpenChange={(open) => !open && setSignInDialog(null)}>
-        <NexusWorkflowDialog eyebrow="Sensitive identity action" title={`${signInDialog?.accountEnabled ? "Block" : "Unblock"} user sign-in?`} description={`${signInDialog?.userPrincipalName || "This user"} will ${signInDialog?.accountEnabled ? "no longer be able to sign in" : "be able to sign in again"} to the linked Microsoft tenant.`} icon={signInDialog?.accountEnabled ? Lock : Unlock} tone="amber" className="max-w-lg" data-testid="client-cipp-signin-workflow" footer={<><Button variant="outline" onClick={() => setSignInDialog(null)}>Cancel</Button><Button variant={signInDialog?.accountEnabled ? "destructive" : "default"} onClick={doToggleSignin} disabled={busy}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : signInDialog?.accountEnabled ? <Lock className="mr-1.5 h-4 w-4" /> : <Unlock className="mr-1.5 h-4 w-4" />}{signInDialog?.accountEnabled ? "Block sign-in" : "Unblock sign-in"}</Button></>}><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This action is attributable to your Nexus session and recorded in the identity audit trail.</p></NexusWorkflowDialog>
+        <NexusWorkflowDialog eyebrow="Protected identity action" title={`${signInDialog?.accountEnabled ? "Block" : "Unblock"} user sign-in?`} description={`${signInDialog?.userPrincipalName || "This user"} will ${signInDialog?.accountEnabled ? "no longer be able to sign in" : "be able to sign in again"} only after current connector-verified customer proof and approval.`} icon={signInDialog?.accountEnabled ? Lock : Unlock} tone="amber" className="max-w-lg" data-testid="client-cipp-signin-workflow" footer={<><Button variant="outline" onClick={() => setSignInDialog(null)}>Cancel</Button><Button variant={signInDialog?.accountEnabled ? "destructive" : "default"} onClick={doToggleSignin} disabled={busy || !verificationRequestId.trim()}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : signInDialog?.accountEnabled ? <Lock className="mr-1.5 h-4 w-4" /> : <Unlock className="mr-1.5 h-4 w-4" />}{signInDialog?.accountEnabled ? "Block sign-in" : "Unblock sign-in"}</Button></>}><div className="space-y-3"><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This action is attributable to your Nexus session and recorded in the identity audit trail. A browser confirmation alone is not enough.</p><div><Label htmlFor="client-cipp-signin-verify-id">Connector-verified Nexus Verify request ID *</Label><Input id="client-cipp-signin-verify-id" className="mt-2" value={verificationRequestId} onChange={(event) => setVerificationRequestId(event.target.value)} placeholder="Verification request ID" /><div className="mt-2"><Button variant="outline" size="sm" asChild><Link to={nexusVerifyUrl("offboarding", signInDialog)}>Open Nexus Verify<ExternalLink className="ml-1.5 h-3.5 w-3.5" /></Link></Button></div></div></div></NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={Boolean(offboardDialog)} onOpenChange={(open) => !open && setOffboardDialog(null)}>
-        <NexusWorkflowDialog eyebrow="High-impact identity workflow" title="Offboard Microsoft 365 user" description={`Prepare a safe departure workflow for ${offboardDialog?.userPrincipalName || "this user"}. Review the actions Nexus will apply before proceeding.`} icon={UserX} tone="amber" className="max-w-xl" data-testid="client-cipp-offboard-workflow" footer={<><Button variant="outline" onClick={() => setOffboardDialog(null)}>Cancel</Button><Button variant="destructive" onClick={doOffboard} disabled={busy}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <UserX className="mr-1.5 h-4 w-4" />}Offboard user</Button></>}><div className="grid gap-2 sm:grid-cols-2">{["Disable sign-in and revoke active sessions", "Reset password and remove group membership", "Convert mailbox to shared and hide it from the GAL", "Remove assigned Microsoft licences"].map((action) => <div key={action} className="flex items-start gap-2 rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3 text-sm text-muted-foreground"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />{action}</div>)}</div></NexusWorkflowDialog>
+        <NexusWorkflowDialog eyebrow="High-impact identity workflow" title="Offboard Microsoft 365 user" description={`Prepare a safe departure workflow for ${offboardDialog?.userPrincipalName || "this user"}. Nexus requires a connector-verified request and independent approval before any provider change.`} icon={UserX} tone="amber" className="max-w-xl" data-testid="client-cipp-offboard-workflow" footer={<><Button variant="outline" onClick={() => setOffboardDialog(null)}>Cancel</Button><Button variant="destructive" onClick={doOffboard} disabled={busy || !verificationRequestId.trim()}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <UserX className="mr-1.5 h-4 w-4" />}Offboard user</Button></>}><div className="space-y-4"><div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3"><Label htmlFor="client-cipp-offboard-verify-id">Connector-verified Nexus Verify request ID *</Label><Input id="client-cipp-offboard-verify-id" className="mt-2" value={verificationRequestId} onChange={(event) => setVerificationRequestId(event.target.value)} placeholder="Verification request ID" /><div className="mt-2"><Button variant="outline" size="sm" asChild><Link to={nexusVerifyUrl("offboarding", offboardDialog)}>Open Nexus Verify<ExternalLink className="ml-1.5 h-3.5 w-3.5" /></Link></Button></div></div><div className="grid gap-2 sm:grid-cols-2">{["Disable sign-in and revoke active sessions", "Reset password and remove group membership", "Convert mailbox to shared and hide it from the GAL", "Remove assigned Microsoft licences"].map((action) => <div key={action} className="flex items-start gap-2 rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3 text-sm text-muted-foreground"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />{action}</div>)}</div></div></NexusWorkflowDialog>
       </Dialog>
     </div>
   );

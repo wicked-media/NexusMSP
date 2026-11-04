@@ -51,7 +51,7 @@ def test_canary_deploy_rejects_offline_agent(monkeypatch):
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(ransomware_canary.deploy_canary(
             {"agent_id": "agent-offline"},
-            current_user={"id": "operator-1", "email": "operator@example.test"},
+            current_user={"id": "operator-1", "email": "operator@example.test", "role": "admin"},
         ))
 
     assert rejected.value.status_code == 409
@@ -79,7 +79,7 @@ def test_canary_deploy_rejects_duplicate_active_sensor(monkeypatch):
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(ransomware_canary.deploy_canary(
             {"agent_id": "agent-protected"},
-            current_user={"id": "operator-1", "email": "operator@example.test"},
+            current_user={"id": "operator-1", "email": "operator@example.test", "role": "admin"},
         ))
 
     assert rejected.value.status_code == 409

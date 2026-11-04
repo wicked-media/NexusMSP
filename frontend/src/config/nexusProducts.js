@@ -79,7 +79,7 @@ export const NEXUS_PRODUCTS = [
     name: "Nexus Remote",
     strapline: "Audited remote support",
     description: "Technician-initiated support sessions with device context, customer consent, provider policy and activity history.",
-    route: "/remote-access",
+    route: "/nexus-remote",
     category: "Infrastructure",
     icon: Radar,
     tone: "sky",

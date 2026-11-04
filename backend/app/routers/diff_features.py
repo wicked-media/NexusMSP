@@ -2,7 +2,7 @@
   â€¢ POST /api/ai/why-on-fire/{entity_type}/{entity_id} â€” AI senior-engineer triage
   â€¢ POST /api/tickets/{ticket_id}/auto-quote        â€” Conversation -> quote draft
   â€¢ GET  /api/threat-radar                          â€” MSP-wide threat ticker
-  â€¢ GET  /api/clients/{client_id}/health-certificate.pdf?token=  â€” printable cert
+  â€¢ GET  /api/clients/{client_id}/health-certificate.pdf  â€” printable cert
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -15,6 +15,7 @@ import jwt
 
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_tenant_record_scope, tenant_scoped_query
 
 router = APIRouter()
 
@@ -128,16 +129,31 @@ async def why_on_fire(entity_type: str, entity_id: str, current_user: dict = Dep
 
 @router.post("/tickets/{ticket_id}/auto-quote")
 async def auto_quote_from_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    """Read the ticket conversation + product catalog and draft a quote."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    """Draft a reviewed quote using only authorised ticket and product evidence."""
+    ticket = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.billing.quote_draft",
+        resource_name="Ticket",
+    )
+    notes = await db.ticket_comments.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"_id": 0, "content": 1, "user_name": 1},
+    ).sort("created_at", 1).to_list(50)
+    products = await db.products.find(
+        tenant_scoped_query(current_user, {}),
+        {"_id": 0, "id": 1, "name": 1, "description": 1, "price": 1},
+    ).to_list(200) if "products" in await db.list_collection_names() else []
 
-    notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0, "body": 1, "author": 1}).sort("created_at", 1).limit(50).to_list(50)
-    products = await db.products.find({}, {"_id": 0, "id": 1, "name": 1, "description": 1, "price": 1, "category": 1}).limit(200).to_list(200) if "products" in await db.list_collection_names() else []
-
-    convo = "\n".join([f"  {n.get('author','?')}: {(n.get('body') or '')[:300]}" for n in notes])
-    catalog = "\n".join([f"  - {p.get('name')} (${p.get('price', 0)}): {(p.get('description') or '')[:90]}" for p in products[:60]]) or "  (catalog empty â€” invent reasonable pricing)"
+    convo = "\n".join(
+        f"  {n.get('user_name', '?')}: {(n.get('content') or '')[:300]}"
+        for n in notes
+    )
+    catalog = "\n".join(
+        f"  - {p.get('id')} | {p.get('name')} | ${p.get('price', 0)}"
+        for p in products[:60]
+    ) or "  (No approved products or prices are available.)"
 
     system = (
         "You are an MSP sales engineer. Read a support-ticket conversation and draft a QUOTE for the work "
@@ -146,7 +162,8 @@ async def auto_quote_from_ticket(ticket_id: str, current_user: dict = Depends(ge
         "'line_items' (array of {description, quantity, unit_price (number), total (number), product_id (or null)}), "
         "'subtotal' (number), 'tax_rate' (0.10 default), 'tax' (number), 'total' (number), "
         "'confidence' (low|medium|high), 'notes_for_tech' (string explaining your assumptions). "
-        "Use products from the provided catalog when they match. Otherwise invent reasonable line items."
+        "Use only products from the provided catalog. Never invent a product, price, tax or quantity. "
+        "When evidence is insufficient, return an empty line_items array and explain what the technician must price manually."
     )
     user_msg = (
         f"TICKET: {ticket.get('title','')} ({ticket.get('priority','medium')})\n"
@@ -156,6 +173,28 @@ async def auto_quote_from_ticket(ticket_id: str, current_user: dict = Depends(ge
     )
     text = await _llm(system, user_msg, "quote")
     draft = _safe_json(text)
+    products_by_id = {str(product.get("id")): product for product in products}
+    validated_items = []
+    for item in draft.get("line_items") or []:
+        product = products_by_id.get(str((item or {}).get("product_id") or ""))
+        if not product:
+            continue
+        quantity = (item or {}).get("quantity")
+        if not isinstance(quantity, (int, float)) or quantity <= 0:
+            continue
+        unit_price = product.get("price")
+        if not isinstance(unit_price, (int, float)):
+            continue
+        validated_items.append({
+            "description": product.get("name") or "Approved product",
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "total": round(quantity * unit_price, 2),
+            "product_id": product.get("id"),
+        })
+    draft["line_items"] = validated_items
+    draft["requires_manual_pricing"] = not validated_items
+    draft["evidence_status"] = "review_required"
     draft["ticket_id"] = ticket_id
     draft["client_id"] = ticket.get("client_id")
     draft["client_name"] = ticket.get("client_name")
@@ -268,10 +307,21 @@ def _safe_pdf(text) -> str:
 
 
 @router.get("/clients/{client_id}/health-certificate.pdf")
-async def health_certificate_pdf(client_id: str, user: dict = Depends(_user_from_qtoken)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
+async def health_certificate_pdf(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Return a certificate through the normal authenticated client boundary.
+
+    Browser navigation cannot safely attach an Authorization header, so callers
+    must fetch this endpoint with the normal bearer header and handle the PDF
+    as a response blob.  Tokens never belong in a URL.
+    """
+    client = await assert_tenant_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        client_field="id",
+        operation="client.health_certificate.read",
+        resource_name="Client",
+    )
     branding_doc = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
     branding = branding_doc.get("value") or branding_doc or {}
     company = branding.get("company_name") or "NexusOps"

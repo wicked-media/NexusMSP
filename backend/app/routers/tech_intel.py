@@ -6,7 +6,6 @@ Outclasses Syncro/HaloPSA/CW/Ninja by combining live ops data with AI insight.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 import os
 import logging
 from app.database import db

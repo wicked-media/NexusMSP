@@ -1,25 +1,40 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Optional
+from datetime import datetime, timezone
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+import httpx
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity, ticket_audit
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
+from app.services.webhook_security import redact_webhook_for_response, validate_legacy_webhook_url
 from app.models import *
 
 router = APIRouter()
 
 # ============== AUDIT LOG ENDPOINTS ==============
 
-@router.get("/audit-logs")
+@router.get(
+    "/audit-logs",
+    dependencies=[Depends(require_action("platform.audit.view"))],
+)
 async def get_audit_logs(
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
     user_id: Optional[str] = None,
     action: Optional[str] = None,
     limit: int = 100,
+    request: Request = None,
     current_user: dict = Depends(get_current_user)
 ):
+    # Audit history crosses customer boundaries. A restricted technician must
+    # never use this administrative list to browse other client activity.
+    await assert_global_scope(
+        current_user,
+        operation="platform.audit.read",
+        request=request,
+    )
     query = {}
     if entity_type:
         query["entity_type"] = entity_type
@@ -184,7 +199,8 @@ async def get_on_call_rotations(current_user: dict = Depends(get_current_user)):
     return rotations
 
 @router.post("/on-call")
-async def create_on_call_rotation(rotation_data: dict, current_user: dict = Depends(get_current_user)):
+async def create_on_call_rotation(rotation_data: dict, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    await assert_global_scope(current_user, operation="platform.configuration.on_call.create", request=request)
     rotation = OnCallRotation(
         name=rotation_data.get('name'),
         description=rotation_data.get('description'),
@@ -198,7 +214,9 @@ async def create_on_call_rotation(rotation_data: dict, current_user: dict = Depe
     doc = rotation.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.on_call_rotations.insert_one(doc)
-    return rotation
+    doc.pop("_id", None)
+    await log_activity(current_user, "on_call_rotation_created", "on_call_rotation", doc["id"], doc.get("name") or "On-call rotation")
+    return doc
 
 @router.get("/on-call/current")
 async def get_current_on_call(current_user: dict = Depends(get_current_user)):
@@ -229,7 +247,8 @@ async def get_custom_fields(entity_type: Optional[str] = None, current_user: dic
     return fields
 
 @router.post("/custom-fields")
-async def create_custom_field(field_data: dict, current_user: dict = Depends(get_current_user)):
+async def create_custom_field(field_data: dict, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    await assert_global_scope(current_user, operation="platform.configuration.custom_field.create", request=request)
     field = CustomFieldDefinition(
         entity_type=field_data.get('entity_type'),
         field_name=field_data.get('field_name'),
@@ -244,27 +263,46 @@ async def create_custom_field(field_data: dict, current_user: dict = Depends(get
     doc = field.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.custom_fields.insert_one(doc)
-    return field
+    doc.pop("_id", None)
+    await log_activity(current_user, "custom_field_created", "custom_field", doc["id"], doc.get("field_label") or "Custom field")
+    return doc
 
 @router.delete("/custom-fields/{field_id}")
-async def delete_custom_field(field_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_custom_field(field_id: str, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("platform.configuration.manage"))):
+    await assert_global_scope(current_user, operation="platform.configuration.custom_field.delete", request=request)
+    field = await db.custom_fields.find_one({"id": field_id}, {"_id": 0})
+    if not field:
+        raise HTTPException(status_code=404, detail="Custom field not found")
     result = await db.custom_fields.delete_one({"id": field_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Custom field not found")
+    await log_activity(current_user, "custom_field_deleted", "custom_field", field_id, field.get("field_label") or "Custom field")
     return {"message": "Custom field deleted"}
 
 # ============== WEBHOOKS ENDPOINTS ==============
 
+async def _require_webhook_administration(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    _permission: dict = Depends(require_action("platform.webhooks.manage")),
+) -> dict:
+    await assert_global_scope(current_user, operation="platform.webhooks.manage", request=request)
+    return current_user
+
 @router.get("/webhooks")
-async def get_webhooks(current_user: dict = Depends(get_current_user)):
+async def get_webhooks(current_user: dict = Depends(_require_webhook_administration)):
     webhooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
-    return webhooks
+    return [redact_webhook_for_response(webhook) for webhook in webhooks]
 
 @router.post("/webhooks")
-async def create_webhook(webhook_data: dict, current_user: dict = Depends(get_current_user)):
+async def create_webhook(webhook_data: dict, current_user: dict = Depends(_require_webhook_administration)):
+    try:
+        endpoint_url = validate_legacy_webhook_url(webhook_data.get("url"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     webhook = Webhook(
         name=webhook_data.get('name'),
-        url=webhook_data.get('url'),
+        url=endpoint_url,
         secret=webhook_data.get('secret'),
         events=webhook_data.get('events', []),
         is_active=webhook_data.get('is_active', True),
@@ -273,24 +311,33 @@ async def create_webhook(webhook_data: dict, current_user: dict = Depends(get_cu
     doc = webhook.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.webhooks.insert_one(doc)
-    return webhook
+    await log_activity(current_user, "webhook_created", "webhook", doc["id"], doc.get("name") or "Webhook")
+    return redact_webhook_for_response(doc)
 
 @router.put("/webhooks/{webhook_id}")
-async def update_webhook(webhook_id: str, webhook_data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.webhooks.update_one({"id": webhook_id}, {"$set": webhook_data})
+async def update_webhook(webhook_id: str, webhook_data: dict, current_user: dict = Depends(_require_webhook_administration)):
+    update = dict(webhook_data)
+    if "url" in update:
+        try:
+            update["url"] = validate_legacy_webhook_url(update["url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = await db.webhooks.update_one({"id": webhook_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Webhook not found")
+    await log_activity(current_user, "webhook_updated", "webhook", webhook_id, "Webhook")
     return {"message": "Webhook updated"}
 
 @router.delete("/webhooks/{webhook_id}")
-async def delete_webhook(webhook_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_webhook(webhook_id: str, current_user: dict = Depends(_require_webhook_administration)):
     result = await db.webhooks.delete_one({"id": webhook_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Webhook not found")
+    await log_activity(current_user, "webhook_deleted", "webhook", webhook_id, "Webhook")
     return {"message": "Webhook deleted"}
 
 @router.post("/webhooks/{webhook_id}/test")
-async def test_webhook(webhook_id: str, current_user: dict = Depends(get_current_user)):
+async def test_webhook(webhook_id: str, current_user: dict = Depends(_require_webhook_administration)):
     webhook = await db.webhooks.find_one({"id": webhook_id}, {"_id": 0})
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook not found")
@@ -308,30 +355,32 @@ async def test_webhook(webhook_id: str, current_user: dict = Depends(get_current
             {"id": webhook_id},
             {"$set": {"last_triggered": datetime.now(timezone.utc).isoformat(), "last_status": response.status_code}}
         )
+        await log_activity(current_user, "webhook_tested", "webhook", webhook_id, "Webhook", metadata={"status_code": response.status_code})
         return {"success": response.status_code < 400, "status_code": response.status_code}
-    except Exception as e:
+    except Exception:
         await db.webhooks.update_one(
             {"id": webhook_id},
             {"$inc": {"failure_count": 1}}
         )
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "Webhook delivery failed"}
 
 # ============== SITES / LOCATIONS ENDPOINTS ==============
 
 @router.get("/sites")
-async def get_sites(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+async def get_sites(client_id: Optional[str] = None, request: Request = None, current_user: dict = Depends(get_current_user)):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="client.site.read", request=request)
         query["client_id"] = client_id
-    
-    sites = await db.sites.find(query, {"_id": 0}).sort("name", 1).to_list(1000)
+    sites = await db.sites.find(scoped_query(current_user, query), {"_id": 0}).sort("name", 1).to_list(1000)
     return sites
 
 @router.post("/sites")
-async def create_site(site_data: dict, current_user: dict = Depends(get_current_user)):
+async def create_site(site_data: dict, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("client.site.manage"))):
     client = await db.clients.find_one({"id": site_data.get('client_id')}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    await assert_client_scope(current_user, client["id"], operation="client.site.create", request=request, mask_not_found=True)
     
     site = Site(
         client_id=client['id'],
@@ -350,19 +399,29 @@ async def create_site(site_data: dict, current_user: dict = Depends(get_current_
     doc = site.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.sites.insert_one(doc)
-    return site
+    doc.pop("_id", None)
+    await log_activity(current_user, "site_created", "site", doc["id"], doc.get("name") or "Site", metadata={"client_id": doc["client_id"]})
+    return doc
 
 @router.put("/sites/{site_id}")
-async def update_site(site_id: str, site_data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.sites.update_one({"id": site_id}, {"$set": site_data})
+async def update_site(site_id: str, site_data: dict, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("client.site.manage"))):
+    site = await assert_record_scope(current_user, db.sites, site_id, operation="client.site.update", request=request, resource_name="Site")
+    # A site must not be silently reassigned by a record update. Use an
+    # explicit migration workflow when a customer relationship changes.
+    allowed_fields = {"name", "address", "city", "state", "postal_code", "country", "phone", "is_primary", "timezone", "notes"}
+    update = {key: value for key, value in site_data.items() if key in allowed_fields}
+    result = await db.sites.update_one({"id": site_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Site not found")
+    await log_activity(current_user, "site_updated", "site", site_id, site.get("name") or "Site", metadata={"client_id": site.get("client_id"), "fields": sorted(update)})
     return {"message": "Site updated"}
 
 @router.delete("/sites/{site_id}")
-async def delete_site(site_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_site(site_id: str, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("client.site.manage"))):
+    site = await assert_record_scope(current_user, db.sites, site_id, operation="client.site.delete", request=request, resource_name="Site")
     result = await db.sites.delete_one({"id": site_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Site not found")
+    await log_activity(current_user, "site_deleted", "site", site_id, site.get("name") or "Site", metadata={"client_id": site.get("client_id")})
     return {"message": "Site deleted"}
 

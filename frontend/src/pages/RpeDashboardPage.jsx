@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { DollarSign, Monitor, TrendingDown, AlertTriangle, Target } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const statusColors = { above_target: "text-green-500", at_target: "text-blue-500", below_target: "text-red-500", no_devices: "text-slate-400" };
 const statusLabels = { above_target: "Above Target", at_target: "At Target", below_target: "Below Target", no_devices: "No Devices" };
@@ -28,10 +29,7 @@ export default function RpeDashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="rpe-dashboard-page">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Revenue Per Endpoint</h1>
-        <p className="text-muted-foreground text-sm mt-1">Real-time RPE analysis across all clients</p>
-      </div>
+      <OperationalPageHeader eyebrow="Commercial efficiency · endpoint economics" title="Revenue Per Endpoint" description="Compare recurring revenue with managed endpoint volume across every permitted client." icon={Monitor} tone="emerald" signal={clients.some(client => client.status === "below_target") ? "attention" : "ready"} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         <Card><CardContent className="pt-4 pb-3 text-center">

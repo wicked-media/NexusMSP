@@ -1,0 +1,32 @@
+# Keep production build contexts source-only. In particular, never send local
+# environment files or a per-device Agent config into the Docker daemon.
+.git
+.github
+.env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+agent/dist
+
+# Never send retained customer uploads, private evidence, local agent installers,
+# or test fixtures in the root-context production API build.
+backend/uploads/
+backend/private_uploads/
+backend/data/
+backend/tests/
+uploads/
+private_uploads/
+data/
+
+# Local dependency/build/test output is regenerated inside the relevant stage.
+frontend/node_modules
+frontend/build
+backend/.pytest_cache
+backend/__pycache__
+**/__pycache__
+*.py[cod]
+*.log
+coverage
+test_reports

@@ -6,7 +6,7 @@ and one-click clone from designer presets.
 
 Templates live in db.invoice_pdf_templates:
   {
-    id, name, description, doc_type: 'invoice'|'estimate'|'qbr'|'statement',
+    id, name, description, doc_type: 'invoice'|'estimate'|'purchase_order'|'qbr'|'statement',
     layout: 'classic'|'minimal'|'bold'|'executive'|'tactical'|'modern',
     density: 'compact'|'standard'|'spacious',
     primary_color, accent_color, secondary_color,
@@ -22,17 +22,21 @@ Templates live in db.invoice_pdf_templates:
     created_at, created_by
   }
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone
 import os
 import re
 import tempfile
 import uuid
-import jwt
 
-from app.database import db, JWT_SECRET, JWT_ALGORITHM
-from app.auth import get_current_user
+from app.database import db
+from app.auth import get_active_user_from_token, get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
+from app.services.commercial_documents import resolve_commercial_document_render_context
+from app.services.nexus_document_pdf import render_nexus_invoice_pdf, render_nexus_purchase_order_pdf
+from app.services.scope_permissions import assert_client_scope, assert_global_scope
 
 router = APIRouter()
 
@@ -47,8 +51,82 @@ VALID_BLOCKS = [
 ]
 VALID_LAYOUTS = {"classic", "minimal", "bold", "executive", "tactical", "modern"}
 VALID_DENSITIES = {"compact", "standard", "spacious"}
-VALID_DOC_TYPES = {"invoice", "estimate", "qbr", "statement"}
+VALID_DOC_TYPES = {"invoice", "estimate", "purchase_order", "qbr", "statement"}
 EDITABLE_CONTENT_BLOCKS = {"payment_terms", "notes", "bank_details", "thank_you", "footer", "custom_html", "signature", "header_banner"}
+DEFAULT_TEMPLATE_SETTINGS_PREFIX = "invoice_template_default:"
+
+
+def _default_template_settings_key(doc_type: str) -> str:
+    """Return the one-document default pointer key for a document type.
+
+    A single MongoDB settings document is the authoritative pointer for a
+    template type.  This avoids the old clear-all-then-set pattern, which could
+    briefly leave no default or allow concurrent requests to make multiple
+    templates look default.
+    """
+    if doc_type not in VALID_DOC_TYPES:
+        raise HTTPException(400, f"doc_type must be one of {sorted(VALID_DOC_TYPES)}")
+    return f"{DEFAULT_TEMPLATE_SETTINGS_PREFIX}{doc_type}"
+
+
+async def _default_template_id(doc_type: str) -> str | None:
+    """Load the canonical default pointer, falling back to legacy flags later."""
+    if doc_type not in VALID_DOC_TYPES:
+        return None
+    setting = await db.settings.find_one(
+        {"key": _default_template_settings_key(doc_type)},
+        {"_id": 0, "template_id": 1},
+    ) or {}
+    template_id = setting.get("template_id")
+    return str(template_id) if template_id else None
+
+
+async def _is_default_template(template: dict) -> bool:
+    """Resolve a response-facing default flag without trusting stale copies."""
+    template_id = await _default_template_id(template.get("doc_type", ""))
+    if template_id:
+        return template_id == str(template.get("id"))
+    # Legacy deployments may have an is_default flag before their first safe
+    # selection.  Preserve that behaviour until the canonical pointer exists.
+    return bool(template.get("is_default"))
+
+
+async def _decorate_default_flags(templates: list[dict]) -> list[dict]:
+    """Return template documents with a canonical, not stale, default flag."""
+    defaults: dict[str, str | None] = {}
+    for template in templates:
+        doc_type = str(template.get("doc_type") or "")
+        if doc_type and doc_type not in defaults:
+            defaults[doc_type] = await _default_template_id(doc_type)
+    for template in templates:
+        selected = defaults.get(str(template.get("doc_type") or ""))
+        if selected:
+            template["is_default"] = selected == str(template.get("id"))
+    return templates
+
+
+async def _resolve_default_template(doc_type: str) -> dict | None:
+    """Find the safe canonical default, while retaining legacy compatibility."""
+    template_id = await _default_template_id(doc_type)
+    if template_id:
+        template = await db.invoice_pdf_templates.find_one(
+            {"id": template_id, "doc_type": doc_type}, {"_id": 0}
+        )
+        if template:
+            template["is_default"] = True
+            return template
+    return await db.invoice_pdf_templates.find_one(
+        {"doc_type": doc_type, "is_default": True}, {"_id": 0}
+    )
+
+
+async def _require_global_template_scope(
+    current_user: dict,
+    request: Request | None,
+    operation: str,
+) -> None:
+    """Template designs are organisation-wide commercial configuration."""
+    await assert_global_scope(current_user, operation=operation, request=request)
 
 
 def _default_blocks():
@@ -344,6 +422,20 @@ DESIGNER_PRESETS = [
         "block_overrides": {"header_banner": {"enabled": True, "content": "TECHNOLOGY PROPOSAL"}, "signature": {"enabled": True}, "payment_terms": {"enabled": True}},
     },
     {
+        "preset_key": "purchase_order_standard",
+        "name": "Purchase Order Standard",
+        "description": "A clear, approval-ready purchase order layout for vendor commitments and delivery references.",
+        "doc_type": "purchase_order", "layout": "classic", "density": "standard",
+        "primary_color": "#1E3A8A", "accent_color": "#38BDF8",
+        "page": _default_page(),
+        "block_overrides": {
+            "header_banner": {"enabled": True, "content": "PURCHASE ORDER"},
+            "signature": {"enabled": True, "content": "Authorised by {{company_name}}"},
+            "payment_terms": {"enabled": False},
+            "bank_details": {"enabled": False},
+        },
+    },
+    {
         "preset_key": "qbr_value_review",
         "name": "QBR Value Review",
         "description": "Client-facing quarterly review layout for outcomes, recommendations, and strategic technology value.",
@@ -384,7 +476,6 @@ def _build_preset_doc(preset: dict, created_by: str = "system") -> dict:
 async def _ensure_presets_seeded():
     """Idempotently seed presets and clean duplicate read-only gallery entries."""
     for p in DESIGNER_PRESETS:
-        preset_id = f"tpl-{p['preset_key']}"
         matches = await db.invoice_pdf_templates.find({"preset_key": p["preset_key"], "is_preset": True}, {"_id": 1}).sort("_id", 1).to_list(20)
         if not matches:
             await db.invoice_pdf_templates.insert_one(_build_preset_doc(p))
@@ -394,17 +485,32 @@ async def _ensure_presets_seeded():
 
 # ───────────────────────────────────── Gallery + CRUD ─────────────────────────────────────
 
-@router.get("/invoice-templates/gallery")
-async def template_gallery(current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/invoice-templates/gallery",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def template_gallery(
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
     """Return the designer preset gallery (seeded if missing)."""
+    await _require_global_template_scope(current_user, request, "billing.document_template.gallery")
     await _ensure_presets_seeded()
     items = await db.invoice_pdf_templates.find({"is_preset": True}, {"_id": 0}).to_list(50)
-    return items
+    return await _decorate_default_flags(items)
 
 
-@router.post("/invoice-templates/clone/{preset_key}")
-async def clone_preset(preset_key: str, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/invoice-templates/clone/{preset_key}",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def clone_preset(
+    preset_key: str,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
     """Clone a designer preset into a user-editable template."""
+    await _require_global_template_scope(current_user, request, "billing.document_template.clone_preset")
     await _ensure_presets_seeded()
     preset = await db.invoice_pdf_templates.find_one({"preset_key": preset_key, "is_preset": True}, {"_id": 0})
     if not preset:
@@ -419,11 +525,31 @@ async def clone_preset(preset_key: str, current_user: dict = Depends(get_current
     cloned["created_by"] = current_user.get("name", "user")
     await db.invoice_pdf_templates.insert_one(cloned)
     cloned.pop("_id", None)
+    await log_activity(
+        current_user,
+        "cloned",
+        "invoice_pdf_template",
+        cloned["id"],
+        cloned["name"],
+        "Cloned an approved document-design preset",
+        metadata={"preset_key": preset_key, "doc_type": cloned["doc_type"]},
+    )
     return cloned
 
 
-@router.get("/invoice-templates")
-async def list_templates(doc_type: str | None = None, include_presets: bool = True, current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/invoice-templates",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def list_templates(
+    doc_type: str | None = None,
+    include_presets: bool = True,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.list")
+    if doc_type and doc_type not in VALID_DOC_TYPES:
+        raise HTTPException(400, f"doc_type must be one of {sorted(VALID_DOC_TYPES)}")
     await _ensure_presets_seeded()
     q = {}
     if doc_type:
@@ -431,19 +557,38 @@ async def list_templates(doc_type: str | None = None, include_presets: bool = Tr
     if not include_presets:
         q["is_preset"] = {"$ne": True}
     items = await db.invoice_pdf_templates.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
-    return items
+    return await _decorate_default_flags(items)
 
 
-@router.get("/invoice-templates/{tid}")
-async def get_template(tid: str, current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/invoice-templates/{tid}",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def get_template(
+    tid: str,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.read")
     doc = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Template not found")
+    doc["is_default"] = await _is_default_template(doc)
     return doc
 
 
-@router.post("/invoice-templates")
-async def create_template(data: dict, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/invoice-templates",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def create_template(
+    data: dict,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.create")
+    if not isinstance(data, dict):
+        raise HTTPException(422, "Template payload must be an object")
     if not (data.get("name") or "").strip():
         raise HTTPException(400, "name required")
     clean = _sanitize(data)
@@ -466,12 +611,34 @@ async def create_template(data: dict, current_user: dict = Depends(get_current_u
     }
     await db.invoice_pdf_templates.insert_one(doc)
     doc.pop("_id", None)
+    await log_activity(
+        current_user,
+        "created",
+        "invoice_pdf_template",
+        doc["id"],
+        doc["name"],
+        "Created an organisation-wide commercial document template",
+        metadata={"doc_type": doc["doc_type"], "layout": doc["layout"]},
+    )
     return doc
 
 
-@router.put("/invoice-templates/{tid}")
-async def update_template(tid: str, data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0, "is_preset": 1})
+@router.put(
+    "/invoice-templates/{tid}",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def update_template(
+    tid: str,
+    data: dict,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.update")
+    if not isinstance(data, dict):
+        raise HTTPException(422, "Template payload must be an object")
+    existing = await db.invoice_pdf_templates.find_one(
+        {"id": tid}, {"_id": 0, "id": 1, "is_preset": 1, "doc_type": 1, "name": 1, "is_default": 1}
+    )
     if not existing:
         raise HTTPException(404, "Template not found")
     if existing.get("is_preset"):
@@ -479,34 +646,122 @@ async def update_template(tid: str, data: dict, current_user: dict = Depends(get
     clean = _sanitize(data, doc_type_required=False)
     if not clean:
         return {"success": True, "no_change": True}
+    if clean.get("doc_type") and clean["doc_type"] != existing.get("doc_type") and await _is_default_template(existing):
+        raise HTTPException(
+            409,
+            "Set another template as the default before changing this template's document type",
+        )
     clean["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.invoice_pdf_templates.update_one({"id": tid}, {"$set": clean})
-    return await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0})
+    updated = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0})
+    await log_activity(
+        current_user,
+        "updated",
+        "invoice_pdf_template",
+        tid,
+        updated.get("name") or existing.get("name") or "Document template",
+        "Updated an organisation-wide commercial document template",
+        metadata={"fields": sorted(key for key in clean if key != "updated_at"), "doc_type": updated.get("doc_type")},
+    )
+    updated["is_default"] = await _is_default_template(updated)
+    return updated
 
 
-@router.delete("/invoice-templates/{tid}")
-async def delete_template(tid: str, current_user: dict = Depends(get_current_user)):
-    existing = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0, "is_preset": 1})
+@router.delete(
+    "/invoice-templates/{tid}",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def delete_template(
+    tid: str,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.delete")
+    existing = await db.invoice_pdf_templates.find_one(
+        {"id": tid}, {"_id": 0, "id": 1, "is_preset": 1, "doc_type": 1, "name": 1, "is_default": 1}
+    )
     if not existing:
         raise HTTPException(404, "Template not found")
     if existing.get("is_preset"):
         raise HTTPException(400, "Cannot delete designer presets.")
+    if await _is_default_template(existing):
+        raise HTTPException(409, "Set another template as the default before deleting this template")
     await db.invoice_pdf_templates.delete_one({"id": tid})
+    await log_activity(
+        current_user,
+        "deleted",
+        "invoice_pdf_template",
+        tid,
+        existing.get("name") or "Document template",
+        "Deleted an organisation-wide commercial document template",
+        metadata={"doc_type": existing.get("doc_type")},
+    )
     return {"success": True}
 
 
-@router.post("/invoice-templates/{tid}/set-default")
-async def set_default(tid: str, current_user: dict = Depends(get_current_user)):
-    tpl = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0, "doc_type": 1})
+@router.post(
+    "/invoice-templates/{tid}/set-default",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def set_default(
+    tid: str,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.set_default")
+    tpl = await db.invoice_pdf_templates.find_one(
+        {"id": tid}, {"_id": 0, "id": 1, "name": 1, "doc_type": 1}
+    )
     if not tpl:
         raise HTTPException(404, "Template not found")
-    await db.invoice_pdf_templates.update_many({"doc_type": tpl["doc_type"]}, {"$set": {"is_default": False}})
-    await db.invoice_pdf_templates.update_one({"id": tid}, {"$set": {"is_default": True}})
-    return {"success": True}
+    previous_template_id = await _default_template_id(tpl["doc_type"])
+    if previous_template_id == tid:
+        return {"success": True, "template_id": tid, "doc_type": tpl["doc_type"], "unchanged": True}
+
+    now = datetime.now(timezone.utc).isoformat()
+    # One document per document type is the source of truth for default
+    # selection.  MongoDB applies this upsert atomically, so concurrent
+    # selections cannot leave multiple active defaults or a zero-default gap.
+    await db.settings.update_one(
+        {"key": _default_template_settings_key(tpl["doc_type"])},
+        {
+            "$set": {
+                "key": _default_template_settings_key(tpl["doc_type"]),
+                "doc_type": tpl["doc_type"],
+                "template_id": tid,
+                "updated_at": now,
+                "updated_by": current_user.get("id"),
+            },
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+    await log_activity(
+        current_user,
+        "default_changed",
+        "invoice_pdf_template_default",
+        tpl["doc_type"],
+        f"Default {tpl['doc_type']} template",
+        "Changed the organisation-wide commercial document template default",
+        metadata={
+            "doc_type": tpl["doc_type"],
+            "template_id": tid,
+            "previous_template_id": previous_template_id,
+        },
+    )
+    return {"success": True, "template_id": tid, "doc_type": tpl["doc_type"]}
 
 
-@router.post("/invoice-templates/{tid}/duplicate")
-async def duplicate_template(tid: str, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/invoice-templates/{tid}/duplicate",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def duplicate_template(
+    tid: str,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.duplicate")
     src = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0})
     if not src:
         raise HTTPException(404, "Template not found")
@@ -520,6 +775,15 @@ async def duplicate_template(tid: str, current_user: dict = Depends(get_current_
     dup["created_by"] = current_user.get("name", "user")
     await db.invoice_pdf_templates.insert_one(dup)
     dup.pop("_id", None)
+    await log_activity(
+        current_user,
+        "duplicated",
+        "invoice_pdf_template",
+        dup["id"],
+        dup["name"],
+        "Duplicated an organisation-wide commercial document template",
+        metadata={"source_template_id": tid, "doc_type": dup.get("doc_type")},
+    )
     return dup
 
 
@@ -1031,66 +1295,201 @@ def _render_template_pdf(template: dict, invoice: dict, branding: dict | None, c
 # ───────────────────────────────────── Preview + Live invoice rendering ─────────────────────────────────────
 
 async def _user_from_qtoken(token: str = Query(None)):
+    """Resolve a browser PDF query token through the normal active-user path."""
     if not token:
         raise HTTPException(401, "Token required")
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
-        if not user:
-            raise HTTPException(401, "User not found")
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(401, "Token expired")
-    except Exception:
-        raise HTTPException(401, "Invalid token")
+    return await get_active_user_from_token(token)
 
 
-@router.post("/invoice-templates/{tid}/preview")
-async def preview_template(tid: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+async def _template_preview_query_user(
+    request: Request,
+    user: dict = Depends(_user_from_qtoken),
+) -> dict:
+    """Do not let the browser-only template preview bypass template controls."""
+    await require_action("billing.document_template.manage")(request=request, current_user=user)
+    await _require_global_template_scope(user, request, "billing.document_template.preview")
+    return user
+
+
+async def _financial_document_query_user(
+    request: Request,
+    user: dict = Depends(_user_from_qtoken),
+) -> dict:
+    """Query-token invoice rendering retains the regular billing view action."""
+    await require_action("billing.portal.view")(request=request, current_user=user)
+    return user
+
+
+def _private_pdf_headers(content_disposition: str) -> dict[str, str]:
+    """Keep browser PDF responses private until object-bound capabilities ship."""
+    return {
+        "Cache-Control": "private, no-store, max-age=0",
+        "Pragma": "no-cache",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": content_disposition,
+    }
+
+
+def _sample_commercial_invoice() -> dict:
+    """Use the same field contract as a real invoice renderer for preview."""
+    sample = _sample_invoice()
+    return {
+        **sample,
+        "tax": sample.get("tax_total", 0),
+        "status": "draft",
+        "payment_status": "unpaid",
+        "line_items": [
+            {
+                "name": item.get("description"),
+                "description": item.get("description"),
+                "quantity": item.get("quantity"),
+                "unit_price": item.get("unit_price"),
+                "total": item.get("total"),
+            }
+            for item in sample.get("items", [])
+        ],
+    }
+
+
+def _sample_purchase_order() -> dict:
+    return {
+        "id": "preview-po",
+        "po_number": "PO-PREVIEW",
+        "vendor": "Nexus Supply Co.",
+        "vendor_contact": "Purchasing Desk",
+        "vendor_email": "orders@nexussupply.example",
+        "ship_to": "123 King St\nSydney NSW 2000",
+        "expected_delivery": "2026-09-15",
+        "status": "approved",
+        "subtotal": 980.0,
+        "tax": 98.0,
+        "shipping": 25.0,
+        "total": 1103.0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "line_items": [
+            {"product_name": "Managed firewall", "quantity": 1, "unit_price": 720.0, "received_qty": 0},
+            {"product_name": "Wireless access point", "quantity": 2, "unit_price": 130.0, "received_qty": 0},
+        ],
+    }
+
+
+async def _commercial_template_preview(template: dict, sample: dict | None, branding: dict) -> bytes | None:
+    """Render invoice/PO template previews through the live document engine.
+
+    A studio preview must not show a legacy layout that the actual delivery
+    path will never use.  Other established document types retain their
+    specialist renderer until they are intentionally standardised.
+    """
+    doc_type = str(template.get("doc_type") or "")
+    if doc_type not in {"invoice", "purchase_order"}:
+        return None
+    if doc_type == "invoice":
+        document = {**_sample_commercial_invoice(), **(sample or {})}
+        renderer = render_nexus_invoice_pdf
+    else:
+        document = {**_sample_purchase_order(), **(sample or {})}
+        renderer = render_nexus_purchase_order_pdf
+    document["document_template_id"] = template["id"]
+    context = await resolve_commercial_document_render_context(
+        doc_type,
+        document,
+        branding,
+        include_global_profile=False,
+        database=db,
+    )
+    return renderer(
+        document,
+        branding=context["branding"],
+        generated_by="NexusMSP Document Studio",
+        document_profile=context["profile"],
+    )
+
+
+async def _commercial_branding() -> dict:
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    if branding:
+        return branding
+    legacy = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
+    return legacy.get("value") or legacy or {}
+
+
+@router.post(
+    "/invoice-templates/{tid}/preview",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def preview_template(
+    tid: str,
+    data: dict = None,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
+    await _require_global_template_scope(current_user, request, "billing.document_template.preview")
     tpl = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0})
     if not tpl:
         raise HTTPException(404, "Template not found")
-    branding_doc = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
-    branding = (branding_doc.get("value") or branding_doc) if branding_doc else {}
+    branding = await _commercial_branding()
     invoice = (data or {}).get("sample") or _sample_invoice()
-    pdf_bytes = _render_template_pdf(tpl, invoice, branding)
+    pdf_bytes = await _commercial_template_preview(tpl, invoice, branding)
+    if pdf_bytes is None:
+        pdf_bytes = _render_template_pdf(tpl, invoice, branding)
     return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": "inline; filename=preview.pdf"})
+                    headers=_private_pdf_headers("inline; filename=preview.pdf"))
 
 
 @router.get("/invoice-templates/{tid}/preview-pdf")
-async def preview_template_get(tid: str, user: dict = Depends(_user_from_qtoken)):
+async def preview_template_get(tid: str, user: dict = Depends(_template_preview_query_user)):
     tpl = await db.invoice_pdf_templates.find_one({"id": tid}, {"_id": 0})
     if not tpl:
         raise HTTPException(404, "Template not found")
-    branding_doc = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
-    branding = branding_doc.get("value") or branding_doc or {}
-    pdf_bytes = _render_template_pdf(tpl, _sample_invoice(), branding)
+    branding = await _commercial_branding()
+    pdf_bytes = await _commercial_template_preview(tpl, None, branding)
+    if pdf_bytes is None:
+        pdf_bytes = _render_template_pdf(tpl, _sample_invoice(), branding)
     return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": "inline; filename=preview.pdf"})
+                    headers=_private_pdf_headers("inline; filename=preview.pdf"))
 
 
 @router.get("/invoices/{invoice_id}/pdf-with-template")
-async def invoice_pdf_with_template(invoice_id: str, template_id: str | None = None, user: dict = Depends(_user_from_qtoken)):
+async def invoice_pdf_with_template(
+    invoice_id: str,
+    template_id: str | None = None,
+    request: Request = None,
+    user: dict = Depends(_financial_document_query_user),
+):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(404, "Invoice not found")
+    # A query-token PDF preview is still an authenticated Nexus request.  Do
+    # not let an invoice ID become a cross-client document download handle.
+    await assert_client_scope(
+        user,
+        invoice.get("client_id"),
+        operation="billing.invoice.pdf_with_template",
+        mask_not_found=True,
+    )
     tpl = None
     if template_id:
+        # The caller may always render the selected invoice with the governed
+        # default. Selecting an arbitrary organisation-wide document template
+        # is global commercial configuration and remains manager-only.
+        await require_action("billing.document_template.manage")(request=request, current_user=user)
+        await _require_global_template_scope(user, request, "billing.document_template.render_selected")
         tpl = await db.invoice_pdf_templates.find_one({"id": template_id}, {"_id": 0})
     if not tpl:
-        tpl = await db.invoice_pdf_templates.find_one({"doc_type": "invoice", "is_default": True}, {"_id": 0})
+        # Resolve through the atomic default pointer rather than the legacy
+        # denormalised is_default flag.  This keeps invoice rendering stable
+        # while an administrator changes the default design.
+        tpl = await _resolve_default_template("invoice")
     if not tpl:
         raise HTTPException(404, "No template found (template_id missing and no default)")
-    branding_doc = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
-    branding = branding_doc.get("value") or branding_doc or {}
-    client_doc = None
-    if invoice.get("client_id"):
-        client_doc = await db.clients.find_one({"id": invoice["client_id"]}, {"_id": 0}) or {}
-    pdf_bytes = _render_template_pdf(tpl, invoice, branding, client_doc)
+    if tpl.get("doc_type") != "invoice":
+        raise HTTPException(status_code=422, detail="Select an invoice template when rendering an invoice")
+    branding = await _commercial_branding()
+    pdf_bytes = await _commercial_template_preview(tpl, invoice, branding)
     safe = re.sub(r"[^a-zA-Z0-9_-]", "_", f"INV_{invoice.get('invoice_number', invoice_id)}")
     return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": f"attachment; filename={safe}.pdf"})
+                    headers=_private_pdf_headers(f"attachment; filename={safe}.pdf"))
 
 
 @router.get("/invoice-templates/blocks/catalog")

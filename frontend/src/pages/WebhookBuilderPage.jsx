@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import {
   Webhook, Plus, Play, Pause, Trash2, Edit, Search, Loader2, Zap, Send, ChevronDown, ChevronUp
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const METHODS = ["POST", "PUT", "PATCH", "GET", "DELETE"];
 const METHOD_COLORS = { POST: "bg-emerald-500/20 text-emerald-400", PUT: "bg-amber-500/20 text-amber-400", PATCH: "bg-blue-500/20 text-blue-400", GET: "bg-cyan-500/20 text-cyan-400", DELETE: "bg-red-500/20 text-red-400" };
@@ -106,16 +107,7 @@ export default function WebhookBuilderPage() {
 
   return (
     <div className="space-y-5" data-testid="webhook-builder-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center"><Webhook className="w-5 h-5 text-white" /></div>
-            Webhook Builder
-          </h1>
-          <p className="text-muted-foreground mt-1">Create custom webhook integrations with any external service</p>
-        </div>
-        <Button onClick={openCreate} data-testid="new-webhook-btn" className="bg-gradient-to-r from-cyan-600 to-blue-600"><Plus className="w-4 h-4 mr-1" />New Webhook</Button>
-      </div>
+      <OperationalPageHeader eyebrow="Integration engineering · governed events" title="Webhook Builder" description="Create, test and operate auditable webhook connections to external services." icon={Webhook} tone="cyan" signal={hooks.some(hook => hook.active) ? "working" : undefined} actions={<Button onClick={openCreate} data-testid="new-webhook-btn"><Plus className="w-4 h-4 mr-1" />New webhook</Button>} />
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
@@ -143,7 +135,7 @@ export default function WebhookBuilderPage() {
           <Webhook className="w-14 h-14 mx-auto text-muted-foreground/20 mb-4" />
           <p className="text-lg font-semibold mb-1">No Webhooks</p>
           <p className="text-sm text-muted-foreground mb-5">Create your first webhook to start integrating</p>
-          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Create Webhook</Button>
+          <Button onClick={openCreate}><Plus className="w-4 h-4 mr-2" />Create webhook</Button>
         </CardContent></Card>
       ) : (
         <div className="space-y-3">
@@ -215,12 +207,12 @@ export default function WebhookBuilderPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={createDialog} onOpenChange={setCreateDialog}>
-        <DialogContent className="max-w-2xl" aria-describedby="webhook-dialog-desc">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="webhook-dialog-desc" data-testid="webhook-builder-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><Webhook className="w-5 h-5 text-cyan-400" />{editHook ? "Edit Webhook" : "Create Webhook"}</DialogTitle>
             <DialogDescription id="webhook-dialog-desc">{editHook ? "Update webhook configuration" : "Configure a new webhook integration"}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <div><Label className="text-xs">Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Slack - Critical Alerts" data-testid="webhook-name" /></div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Event Trigger</Label>
@@ -255,7 +247,7 @@ export default function WebhookBuilderPage() {
               <div><Label className="text-xs">Retry Delay (seconds)</Label><Input type="number" value={form.retry_delay} onChange={e => setForm({ ...form, retry_delay: parseInt(e.target.value) || 0 })} /></div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button variant="outline" onClick={() => setCreateDialog(false)}>Cancel</Button>
             <Button onClick={handleSave} data-testid="save-webhook-btn">{editHook ? "Update" : "Create Webhook"}</Button>
           </DialogFooter>

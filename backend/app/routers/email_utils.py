@@ -4,10 +4,13 @@ import base64
 import re
 import uuid
 from datetime import datetime, timezone
+from html import escape
 from fastapi import APIRouter, Depends, HTTPException
 import httpx
 from app.database import db
 from app.auth import get_current_user
+from app.services.microsoft365_credentials import has_microsoft365_client_secret
+from app.services.microsoft_graph_connection import acquire_graph_access_token, load_connection
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings/email-delivery", tags=["Microsoft 365 Email Delivery"])
@@ -15,15 +18,67 @@ router = APIRouter(prefix="/settings/email-delivery", tags=["Microsoft 365 Email
 
 async def _load_microsoft365_config():
     settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    connection = await load_connection()
+    delegated = connection if (connection and connection.get("status") == "connected") else None
+    if delegated:
+        # One-click Microsoft sign-in: the delegated grant is the credential,
+        # so no manual Azure client secret or mailbox registration is required.
+        settings["connection_mode"] = "delegated"
+        settings["connected_account"] = delegated.get("connected_account", "")
+        settings["sender_email"] = (
+            settings.get("outbound_mailbox_email")
+            or settings.get("mailbox_email")
+            or settings["connected_account"]
+        )
+        if not str(settings.get("sender_email") or "").strip():
+            return None
+        return settings
+    # Legacy manual Azure application connection (client-credentials).
     if not settings.get("enabled") or not settings.get("connected"):
         return None
-    required = ("tenant_id", "client_id", "client_secret")
-    if not all(str(settings.get(field) or "").strip() for field in required):
+    required = ("tenant_id", "client_id")
+    if not has_microsoft365_client_secret(settings) or not all(str(settings.get(field) or "").strip() for field in required):
         return None
+    settings["connection_mode"] = "app_only"
     settings["sender_email"] = settings.get("outbound_mailbox_email") or settings.get("mailbox_email")
     if not str(settings.get("sender_email") or "").strip():
         return None
     return settings
+
+
+async def _append_organisation_email_footer(html_content: str) -> str:
+    """Append the administrator-managed Nexus footer without trusting HTML input.
+
+    Technician signatures remain the message-specific sign-off.  This is the
+    organisation-level legal/contact footer configured in Platform Branding,
+    so it is applied once at the shared delivery boundary for every Microsoft
+    365 message.
+    """
+    html_content = html_content or ""
+    marker = "<!--nx-organisation-footer-->"
+    if marker in html_content:
+        return html_content
+
+    branding = await db.settings.find_one(
+        {"type": "branding"},
+        {"_id": 0, "email_sender_name": 1, "email_footer_text": 1},
+    ) or {}
+    sender_name = str(branding.get("email_sender_name") or "").strip()
+    footer_text = str(branding.get("email_footer_text") or "").strip()
+    if not sender_name and not footer_text:
+        return html_content
+
+    parts = []
+    if sender_name:
+        parts.append(f"<strong>{escape(sender_name)}</strong>")
+    if footer_text:
+        parts.append(escape(footer_text).replace("\n", "<br/>"))
+    footer = "<br/>".join(parts)
+    return (
+        f'{html_content}<div data-nexus-footer="organisation" '
+        f'style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;'
+        f'color:#64748b;font-size:12px;line-height:1.55">{marker}{footer}</div>'
+    )
 
 
 async def is_microsoft365_configured() -> bool:
@@ -63,7 +118,7 @@ async def _resolve_client_for_addresses(addresses: list[str], explicit_client_id
     return None
 
 
-async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], bcc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
+async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], bcc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None, thread_key: str | None = None):
     """Maintain a delivery audit and attach client correspondence to the client history."""
     try:
         delivery_id = str(uuid.uuid4())
@@ -83,6 +138,7 @@ async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], b
             "client_name": (client or {}).get("company_name") or (client or {}).get("name"),
             "related_type": related_type,
             "related_id": related_id,
+            "thread_key": thread_key,
             "initiated_by": initiated_by,
             "initiated_by_name": initiated_by_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -105,6 +161,7 @@ async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], b
                 "delivery_confirmed": result.get("status") == "sent",
                 "related_type": related_type,
                 "related_id": related_id,
+                "thread_key": thread_key,
                 "initiated_by": initiated_by,
                 "initiated_by_name": initiated_by_name,
                 "created_at": entry["created_at"],
@@ -138,21 +195,26 @@ async def record_inbound_client_email(*, sender_email: str, sender_name: str, su
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.client_communication_events.insert_one(event)
+    event.pop("_id", None)
     return event
 
 
-async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, bcc_addresses: list[str] | None = None, attachments: list[dict] | None = None, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
+async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, bcc_addresses: list[str] | None = None, attachments: list[dict] | None = None, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None, thread_key: str | None = None):
     """Send through the selected Microsoft 365 mailbox for an outbound category."""
     recipients = [to_email] if isinstance(to_email, str) else [address for address in to_email if address]
     cc_recipients = [address for address in (cc_addresses or []) if address]
     bcc_recipients = [address for address in (bcc_addresses or []) if address]
+    if thread_key and not re.fullmatch(r"[A-Za-z0-9:_-]{1,160}", thread_key):
+        raise HTTPException(status_code=400, detail="Invalid email thread key")
+
+    html_content = await _append_organisation_email_footer(html_content)
 
     async def record(result: dict):
         result["delivery_id"] = await _record_delivery(
             recipients=recipients, cc_recipients=cc_recipients, bcc_recipients=bcc_recipients, subject=subject, category=category,
             sender=result.get("sender"), attachments=attachments, result=result, client_id=client_id,
             related_type=related_type, related_id=related_id, initiated_by=initiated_by,
-            initiated_by_name=initiated_by_name,
+            initiated_by_name=initiated_by_name, thread_key=thread_key,
         )
         return result
 
@@ -177,34 +239,37 @@ async def send_email(to_email: str | list[str], subject: str, html_content: str,
             "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
         })
     try:
+        access_token, token_mode = await acquire_graph_access_token()
+    except Exception:
+        access_token, token_mode = None, ""
+    if not access_token:
+        result = {"status": "failed", "message": "Microsoft 365 authentication failed", "email_id": None}
+        return await record(result)
+    # A delegated one-click grant sends as the connected account directly;
+    # shared senders keep the /users/{sender} path so Exchange Send As applies.
+    connected_account = str(config.get("connected_account") or "").strip().casefold()
+    if token_mode == "delegated" and connected_account and sender.casefold() == connected_account:
+        send_path = "me"
+    else:
+        send_path = f"users/{sender}"
+    try:
         async with httpx.AsyncClient(timeout=20) as client:
-            token_response = await client.post(
-                f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token",
-                data={
-                    "client_id": config["client_id"],
-                    "client_secret": config["client_secret"],
-                    "scope": "https://graph.microsoft.com/.default",
-                    "grant_type": "client_credentials",
-                },
-            )
-            if token_response.status_code != 200:
-                result = {"status": "failed", "message": "Microsoft 365 authentication failed", "email_id": None}
-                return await record(result)
-            access_token = token_response.json().get("access_token")
+            message = {
+                "subject": subject,
+                "body": {"contentType": "HTML", "content": html_content},
+                "toRecipients": [{"emailAddress": {"address": address}} for address in recipients],
+                "ccRecipients": [{"emailAddress": {"address": address}} for address in cc_recipients],
+                "bccRecipients": [{"emailAddress": {"address": address}} for address in bcc_recipients],
+                "attachments": graph_attachments,
+            }
+            if thread_key:
+                message["internetMessageHeaders"] = [{"name": "X-Nexus-Thread", "value": thread_key}]
+                if related_type == "ticket" and related_id:
+                    message["internetMessageHeaders"].append({"name": "X-Nexus-Ticket-ID", "value": str(related_id)})
             send_response = await client.post(
-                f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
+                f"https://graph.microsoft.com/v1.0/{send_path}/sendMail",
                 headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-                json={
-                    "message": {
-                        "subject": subject,
-                        "body": {"contentType": "HTML", "content": html_content},
-                        "toRecipients": [{"emailAddress": {"address": address}} for address in recipients],
-                        "ccRecipients": [{"emailAddress": {"address": address}} for address in cc_recipients],
-                        "bccRecipients": [{"emailAddress": {"address": address}} for address in bcc_recipients],
-                        "attachments": graph_attachments,
-                    },
-                    "saveToSentItems": True,
-                },
+                json={"message": message, "saveToSentItems": True},
             )
             if send_response.status_code not in (200, 202):
                 result = {"status": "failed", "message": "Microsoft 365 rejected the email", "email_id": None}
@@ -235,6 +300,8 @@ async def get_email_delivery_settings(current_user: dict = Depends(get_current_u
     return {
         "provider": "microsoft_365",
         "configured": bool(config),
+        "connection_mode": (config or {}).get("connection_mode", ""),
+        "connected_account": (config or {}).get("connected_account", ""),
         "sender_email": config.get("sender_email") if config else "",
         "updated_at": config.get("updated_at") if config else None,
         "updated_by": config.get("connected_by") if config else None,
@@ -256,24 +323,31 @@ async def test_microsoft365_delivery(data: dict = None, current_user: dict = Dep
     await _require_admin(current_user)
     data = data or {}
     to_email = (data.get("to_email") or current_user.get("email") or "").strip()
+    category = str(data.get("category") or "notifications").strip().lower()
     if not to_email:
         raise HTTPException(status_code=400, detail="to_email required")
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", category):
+        raise HTTPException(status_code=400, detail="Invalid outbound email role")
     if not await is_microsoft365_configured():
         raise HTTPException(status_code=400, detail="Microsoft 365 mailbox is not connected")
 
+    role_label = category.replace("_", " ").title()
     html = f"""<div style="font-family: system-ui, sans-serif; padding: 24px; max-width: 560px; margin: auto;">
-      <h2 style="color: #10b981;">NexusMSP - Microsoft 365 Test Email</h2>
+      <h2 style="color: #10b981;">NexusMSP - {role_label} Delivery Test</h2>
       <p>Hi {current_user.get('name', 'there')},</p>
-      <p>This is a test email from your NexusMSP installation to verify Microsoft 365 mail delivery.</p>
-      <p style="color:#64748b;font-size:12px;margin-top:24px;">If you received this, the shared mailbox is ready for leads, tickets, invoices, and reminders.</p>
+      <p>This is a test email from your NexusMSP installation to verify the <strong>{role_label}</strong> Microsoft 365 delivery route.</p>
+      <p style="color:#64748b;font-size:12px;margin-top:24px;">If you received this, the selected Microsoft 365 sender route is ready for live Nexus workflows.</p>
     </div>"""
-    result = await send_email(to_email, "NexusMSP - Microsoft 365 Test Email", html)
+    result = await send_email(to_email, f"NexusMSP - {role_label} Delivery Test", html, category=category)
+    result["category"] = category
     await db.settings.update_one(
         {"type": "o365_mailbox"},
         {"$set": {
             "last_outbound_test_status": result.get("status"),
             "last_outbound_test_at": datetime.now(timezone.utc).isoformat(),
             "last_outbound_test_to": to_email,
+            "last_outbound_test_role": category,
+            "last_outbound_test_sender": result.get("sender") or "",
             "last_outbound_test_message": result.get("message", ""),
         }},
     )

@@ -5,19 +5,15 @@ import {
   CheckCircle2,
   CircleDollarSign,
   ClipboardCheck,
-  FileText,
-  Monitor,
   MonitorCog,
   RefreshCw,
-  Search,
   ShieldCheck,
-  ShoppingCart,
   Sparkles,
-  Ticket,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
 import { buildNexusDailyBriefing } from "@/lib/nexusDaily";
 
 const SECTION_ICONS = {
@@ -53,22 +49,22 @@ function DailySection({ section, navigate }) {
     <button
       type="button"
       onClick={() => navigate(section.route)}
-      className="group relative min-h-44 overflow-hidden border-t border-border/80 px-4 py-4 text-left transition hover:bg-muted/35 lg:border-l lg:border-t-0 first:lg:border-l-0"
+      className="group relative min-h-40 overflow-hidden border-t border-border/70 px-5 py-4 text-left transition-colors hover:bg-muted/25 lg:border-l lg:border-t-0 first:lg:border-l-0"
       data-testid={`nexus-daily-${section.id}`}
     >
       <div className="flex items-center justify-between gap-3">
         <span className={`flex h-9 w-9 items-center justify-center rounded-xl border ${tone.icon}`}>
           <Icon className="h-4 w-4" />
         </span>
-        <span className={`text-2xl font-semibold tracking-tight ${tone.count}`}>{section.count}</span>
+        <span className={`text-xl font-semibold tracking-tight ${tone.count}`}>{section.count}</span>
       </div>
       <div className="mt-5 flex items-center gap-2">
         <span className={`h-1.5 w-1.5 rounded-full ${tone.dot} ${section.tone === "critical" ? "animate-pulse" : ""}`} />
-        <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-foreground">{section.label}</h3>
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">{section.label}</h3>
       </div>
       <p className="mt-2 text-sm font-medium leading-snug text-foreground">{section.headline}</p>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{section.detail}</p>
-      <span className="absolute bottom-3 right-3 flex items-center gap-1 text-[10px] font-medium text-primary opacity-0 transition group-hover:opacity-100">
+      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{section.detail}</p>
+      <span className="absolute bottom-3 right-3 flex items-center gap-1 text-[11px] font-medium text-primary opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
         Open workspace <ArrowRight className="h-3 w-3" />
       </span>
     </button>
@@ -80,20 +76,12 @@ export default function NexusDaily({
   nexusBrain,
   user,
   navigate,
-  onOpenCommand,
   onOpenDailyReview,
   onRefresh,
 }) {
   if (!missionControl) return null;
 
   const briefing = buildNexusDailyBriefing({ missionControl, nexusBrain, user });
-  const healthStyle = briefing.healthScore >= 90
-    ? "border-emerald-500/25 bg-emerald-500/[0.08] text-emerald-700 dark:text-emerald-200"
-    : briefing.healthScore >= 75
-      ? "border-cyan-500/25 bg-cyan-500/[0.08] text-cyan-700 dark:text-cyan-200"
-      : briefing.healthScore >= 50
-        ? "border-amber-500/25 bg-amber-500/[0.08] text-amber-700 dark:text-amber-200"
-        : "border-rose-500/25 bg-rose-500/[0.08] text-rose-700 dark:text-rose-200";
   const generatedAt = missionControl.generated_at ? new Date(missionControl.generated_at) : new Date();
   const dateLabel = generatedAt.toLocaleDateString(undefined, {
     weekday: "long",
@@ -107,81 +95,51 @@ export default function NexusDaily({
 
   return (
     <section
-      className="relative overflow-hidden rounded-2xl border border-border/80 bg-card text-card-foreground shadow-[0_22px_70px_rgba(15,23,42,0.09)] dark:shadow-[0_26px_72px_rgba(0,0,0,0.26)]"
+      className="nx-command-workspace relative overflow-hidden rounded-2xl border border-border/80 bg-card text-card-foreground shadow-[0_22px_70px_rgba(15,23,42,0.09)] dark:shadow-[0_26px_72px_rgba(0,0,0,0.26)]"
       data-testid="nexus-daily"
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-primary/[0.08] to-transparent" />
-      <div className="relative border-b border-border/80 px-5 py-4 md:px-7">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-              <Sparkles className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.25em] text-primary">MSP operating system · Nexus Daily</p>
-              <h1 className="mt-0.5 whitespace-nowrap text-xl font-semibold tracking-tight text-foreground md:text-2xl">Nexus Mission Control</h1>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">One live briefing, one priority view, one place to act.</p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 xl:items-end">
-            <div className="text-left xl:text-right">
-              <p className="flex items-center gap-1.5 text-[11px] font-medium text-foreground xl:justify-end">
-                <CalendarDays className="h-3.5 w-3.5 text-primary" />{dateLabel}
-              </p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">Generated from live, access-scoped records</p>
-            </div>
-            <div className="flex flex-wrap gap-1.5 xl:justify-end" aria-label="Mission Control shortcuts">
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={onOpenCommand} data-testid="bridge-search-btn">
-                <Search className="mr-1.5 h-3.5 w-3.5" />Search <kbd className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[8px]">Ctrl K</kbd>
+      <NexusWorkspaceHeader
+        eyebrow="MSP operating system · Nexus Daily"
+        title="Nexus Mission Control"
+        description="One live briefing, one priority view, one place to act."
+        icon={Sparkles}
+        tone="emerald"
+        signal={briefing.healthScore < 50 ? "critical" : briefing.healthScore < 75 ? "attention" : briefing.attentionCount ? "working" : "healthy"}
+        signalLabel={`${briefing.healthLabel} operating health`}
+        signalDescription={`${briefing.healthScore}/100 · ${briefing.attentionCount} connected signal${briefing.attentionCount === 1 ? "" : "s"} affecting the score.`}
+        actionsLabel={null}
+        actionsDescription={null}
+        meta={[
+          <span key="date"><CalendarDays className="h-3.5 w-3.5 text-primary" />{dateLabel}</span>,
+          <span key="scope">Generated from live, access-scoped records</span>,
+        ]}
+        showBack={false}
+        variant="command"
+        actions={
+          <div className="flex flex-wrap gap-1.5" aria-label="Mission Control shortcuts">
+              <Button type="button" size="sm" className="h-9 max-w-[280px] px-3 text-xs shadow-[0_8px_24px_rgba(14,165,233,0.14)]" onClick={() => navigate(briefing.focus?.route || "/clients")} data-testid="nexus-daily-hero-focus" aria-label={briefing.focus?.title ? `Open priority: ${briefing.focus.title}` : "Open today's priority"}>
+                <Sparkles className="mr-1.5 h-3.5 w-3.5 shrink-0" /><span className="truncate">{briefing.focus?.title || "Open today’s priority"}</span><ArrowRight className="ml-1.5 h-3.5 w-3.5 shrink-0" />
               </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn">
-                <Ticket className="mr-1.5 h-3.5 w-3.5" />Tickets
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/leads")} data-testid="bridge-leads-btn">
-                <Users className="mr-1.5 h-3.5 w-3.5" />Leads
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/devices")} data-testid="bridge-devices-btn">
-                <Monitor className="mr-1.5 h-3.5 w-3.5" />Assets
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/invoices")} data-testid="bridge-invoices-btn">
-                <FileText className="mr-1.5 h-3.5 w-3.5" />Invoices
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/purchase-orders")} data-testid="bridge-purchase-orders-btn">
-                <ShoppingCart className="mr-1.5 h-3.5 w-3.5" />Purchase Orders
-              </Button>
-              <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={onRefresh} data-testid="bridge-refresh-btn">
+              <Button type="button" size="sm" variant="ghost" className="h-9 px-2.5 text-xs text-muted-foreground" onClick={onRefresh} data-testid="bridge-refresh-btn">
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh
               </Button>
-            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="relative grid gap-5 px-5 py-6 md:px-7 xl:grid-cols-[1.45fr_0.55fr] xl:items-center">
+      <div className="relative px-5 py-6 md:px-7">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="border-primary/20 bg-primary/[0.06] text-[9px] text-primary">
               {briefing.lens.label}
             </Badge>
-            <span className="text-[10px] text-muted-foreground">{briefing.lens.summary}</span>
+            <span className="text-xs text-muted-foreground">{briefing.lens.summary}</span>
           </div>
           <h3 className="mt-4 max-w-4xl text-2xl font-semibold leading-tight tracking-tight text-foreground md:text-3xl">
             {greeting}, {firstName}.
           </h3>
           <p className="mt-2 max-w-4xl text-sm leading-relaxed text-muted-foreground">{briefing.headline}</p>
-        </div>
-        <div className="flex items-center gap-4 rounded-2xl border border-border/70 bg-background/55 p-4">
-          <span className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border ${healthStyle}`}>
-            <span className="text-2xl font-semibold leading-none">{briefing.healthScore}</span>
-            <span className="mt-1 text-[8px] font-semibold uppercase tracking-[0.14em]">of 100</span>
-          </span>
-          <div>
-            <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Operating health</p>
-            <p className="mt-1 text-lg font-semibold text-foreground">{briefing.healthLabel}</p>
-            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
-              {briefing.attentionCount ? `${briefing.attentionCount} connected signal${briefing.attentionCount === 1 ? "" : "s"} are affecting the score.` : "No material exception is reducing the score."}
-            </p>
-          </div>
         </div>
       </div>
 
@@ -195,9 +153,9 @@ export default function NexusDaily({
             {briefing.focus?.severity === "healthy" ? <CheckCircle2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
           </span>
           <div className="min-w-0">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-700 dark:text-cyan-300">Today&apos;s recommendation</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-700 dark:text-cyan-300">Today&apos;s recommendation</p>
             <p className="mt-1 text-sm font-semibold text-foreground">{briefing.focus?.title || "Review connected operations"}</p>
-            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {briefing.focus?.recommendation || "Review connected operations and plan the highest-value proactive work."}
             </p>
           </div>
@@ -206,14 +164,14 @@ export default function NexusDaily({
           <Button type="button" variant="outline" className="h-9" onClick={onOpenDailyReview} data-testid="nexus-daily-sign-off">
             <ClipboardCheck className="mr-2 h-4 w-4" />Daily sign-off
           </Button>
-          <Button type="button" className="h-9" onClick={() => navigate(briefing.focus?.route || "/clients")} data-testid="nexus-daily-start">
-            Start recommendation <ArrowRight className="ml-2 h-4 w-4" />
+          <Button type="button" variant="outline" className="h-9" onClick={() => navigate(briefing.focus?.route || "/clients")} data-testid="nexus-daily-start">
+            Review details <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         </div>
       </div>
 
       {briefing.evidenceNote && (
-        <p className="border-t border-border/70 px-5 py-2.5 text-[9px] leading-relaxed text-muted-foreground md:px-7">
+        <p className="border-t border-border/70 px-5 py-2.5 text-[11px] leading-relaxed text-muted-foreground md:px-7">
           {briefing.evidenceNote}
         </p>
       )}

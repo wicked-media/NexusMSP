@@ -5,18 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   Loader2, DollarSign, TrendingUp, AlertTriangle, CheckCircle,
-  Clock, CreditCard, Flame, Zap, Send, ArrowUpRight, ArrowDownRight,
-  BarChart3, Users, FileText, Receipt, ShoppingCart, Target, Banknote,
-  Trophy, ChevronRight, Activity, RefreshCw, MoreHorizontal, ChevronDown, Calculator, Layers3
+  Clock, Flame, Zap, Send, ArrowUpRight, ArrowDownRight,
+  BarChart3, Users, FileText, ShoppingCart, Target, Banknote,
+  Trophy, ChevronRight, Activity, RefreshCw
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 const STREAK_CONFIG = {
   starter: { label: "Getting Started", color: "text-gray-400", bg: "bg-gray-500/10", ring: "" },
@@ -125,24 +126,35 @@ export default function BillingDashboardPage() {
   const { token } = useAuth();
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [chasingId, setChasingId] = useState(null);
   const navigate = useNavigate();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchMetrics = useCallback(async () => {
-    setLoading(true);
-    setLoadError("");
+  const fetchMetrics = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    setLoadError(null);
     try {
       const res = await axios.get(`${API}/billing-dashboard/metrics`, { headers });
       setMetrics(normalizeBillingMetrics(res.data));
     } catch (error) {
-      const message = error.response?.data?.detail || "Failed to load billing metrics";
-      setMetrics(null);
-      setLoadError(message);
-      toast.error(message);
+      const permissionDenied = error.response?.status === 403;
+      const message = permissionDenied
+        ? "This account does not have billing.analytics.view. Ask a Nexus administrator to grant Billing analytics access from Team Hub permissions."
+        : (error.response?.data?.detail || "Failed to load billing metrics");
+      if (quiet) toast.error("Billing could not refresh. The last verified figures are still shown.");
+      else {
+        setMetrics(null);
+        setLoadError({ message, permissionDenied });
+        toast.error(message);
+      }
     }
-    finally { setLoading(false); }
+    finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
@@ -152,16 +164,17 @@ export default function BillingDashboardPage() {
     try {
       const res = await axios.post(`${API}/billing-dashboard/chase/${invoiceId}`, {}, { headers });
       toast.success(res.data.message);
-      fetchMetrics();
+      fetchMetrics({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Chase failed"); }
     finally { setChasingId(null); }
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+    return <WorkspaceLoadingState label="Loading billing command" />;
   }
 
   if (loadError || !metrics) {
+    const permissionDenied = Boolean(loadError?.permissionDenied);
     return (
       <div className="space-y-6" data-testid="billing-dashboard-error">
         <OperationalPageHeader
@@ -170,16 +183,16 @@ export default function BillingDashboardPage() {
           description="Revenue, collections, cash flow, and financial follow-through across NexusMSP."
           icon={Banknote}
           tone="emerald"
-          actions={<Button variant="outline" size="sm" onClick={fetchMetrics}><RefreshCw className="mr-1.5 h-4 w-4" />Retry</Button>}
+          actions={!permissionDenied && <Button variant="outline" size="sm" onClick={fetchMetrics}><RefreshCw className="mr-1.5 h-4 w-4" />Retry</Button>}
         />
-        <Card className="border-rose-500/20 bg-rose-500/[0.04]">
-          <CardContent className="flex min-h-56 flex-col items-center justify-center p-8 text-center">
-            <AlertTriangle className="h-8 w-8 text-rose-300" />
-            <h2 className="mt-3 text-base font-semibold">Billing metrics are temporarily unavailable</h2>
-            <p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError || "The metrics response was empty."}</p>
-            <Button className="mt-4" onClick={fetchMetrics}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>
-          </CardContent>
-        </Card>
+        <WorkspaceErrorState
+          title={permissionDenied ? "Billing access required" : "Billing metrics are temporarily unavailable"}
+          description={loadError?.message || "The metrics response was empty."}
+          onRetry={permissionDenied ? undefined : fetchMetrics}
+          retryLabel="Try again"
+          onSecondaryAction={permissionDenied ? () => navigate("/team-hub?view=matrix") : undefined}
+          secondaryLabel="Open Team Hub permissions"
+        />
       </div>
     );
   }
@@ -203,39 +216,13 @@ export default function BillingDashboardPage() {
         tone="emerald"
         signal={billingSignal}
         actions={<>
-          <Button variant="outline" size="sm" onClick={fetchMetrics} disabled={loading} data-testid="refresh-billing-dashboard">
-            <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
+          <Button variant="outline" size="sm" onClick={() => fetchMetrics({ quiet: true })} disabled={refreshing} data-testid="refresh-billing-dashboard">
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="go-to-invoices">
-            <Receipt className="w-4 h-4 mr-1" />Invoices
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")} data-testid="go-to-recurring">
-            <RefreshCw className="w-4 h-4 mr-1" />Recurring
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/purchase-orders")} data-testid="go-to-pos">
-            <ShoppingCart className="w-4 h-4 mr-1" />Purchase Orders
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5" data-testid="billing-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={() => navigate("/estimates")} className="gap-2.5"><FileText className="h-4 w-4 text-sky-300" />Estimates</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/quote-to-cash")} className="gap-2.5"><Target className="h-4 w-4 text-violet-300" />Quote to cash</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/billing-recon")} className="gap-2.5"><CheckCircle className="h-4 w-4 text-emerald-300" />Reconciliation</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/services-subscriptions")} className="gap-2.5"><Layers3 className="h-4 w-4 text-cyan-300" />Services & subscriptions</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/usage-billing")} className="gap-2.5"><Activity className="h-4 w-4 text-cyan-300" />Usage billing</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/billing-portal")} className="gap-2.5"><CreditCard className="h-4 w-4 text-amber-300" />Payment portal</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/proposals")} className="gap-2.5"><FileText className="h-4 w-4 text-indigo-300" />Proposals & quotes</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/invoice-templates")} className="gap-2.5"><Receipt className="h-4 w-4 text-rose-300" />Document templates</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/finance-intel")} className="gap-2.5"><BarChart3 className="h-4 w-4 text-violet-300" />Finance intelligence</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/late-payment")} className="gap-2.5"><AlertTriangle className="h-4 w-4 text-rose-300" />Late-payment assistant</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/pricing-calc")} className="gap-2.5"><Calculator className="h-4 w-4 text-emerald-300" />Pricing calculator</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate("/xero")} className="gap-2.5"><ArrowUpRight className="h-4 w-4 text-sky-300" />Xero synchronisation</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </>}
       />
+
+      <BillingWorkspaceNav />
 
       {/* Row 1: MRR/ARR + Health + Streak */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">

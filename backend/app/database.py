@@ -3,13 +3,16 @@ from fastapi.security import HTTPBearer
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from app.services.runtime_config import dotenv_loading_enabled, validate_runtime_database_name
 
 ROOT_DIR = Path(__file__).parent.parent
-load_dotenv(ROOT_DIR / '.env')
+if dotenv_loading_enabled():
+    load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db_name = validate_runtime_database_name(os.environ['DB_NAME'])
+db = client[db_name]
 
 JWT_SECRET = os.environ.get('JWT_SECRET')
 if not JWT_SECRET:
@@ -25,6 +28,7 @@ PAX8_AUTH_URL = "https://login.pax8.com/oauth/token"
 
 security = HTTPBearer()
 
-UPLOADS_DIR = ROOT_DIR / "uploads"
+_configured_uploads_dir = str(os.environ.get("NEXUS_UPLOADS_DIR") or "").strip()
+UPLOADS_DIR = Path(_configured_uploads_dir).expanduser().resolve() if _configured_uploads_dir else ROOT_DIR / "uploads"
 AVATARS_DIR = UPLOADS_DIR / "avatars"
 AVATARS_DIR.mkdir(parents=True, exist_ok=True)

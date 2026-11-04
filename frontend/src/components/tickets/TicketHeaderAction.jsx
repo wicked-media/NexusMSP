@@ -20,6 +20,8 @@ export default function TicketHeaderAction({ icon: Icon, tone = "neutral", child
       type="button"
       size="sm"
       variant="outline"
+      aria-label={compact && typeof children === "string" ? children : undefined}
+      title={compact && typeof children === "string" ? children : undefined}
       className={`h-9 rounded-lg border px-3 text-xs font-medium transition-colors ${TONES[tone] || TONES.neutral} ${compact ? "p-0" : ""} ${className}`}
       {...props}
     >

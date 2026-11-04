@@ -11,8 +11,8 @@ export default function StatusOrb({ status, size = 10 }) {
   const s = map[status] || map.unknown;
   return (
     <span
-      className={`nx-status-orb inline-block rounded-full ${s.color} ${s.glow}`}
-      style={{ width: size, height: size }}
+      className={`nx-status-orb relative inline-flex shrink-0 aspect-square rounded-full ${s.color} ${s.glow}`}
+      style={{ width: size, height: size, minWidth: size, minHeight: size }}
       data-status={status || "unknown"}
       aria-label={`status-${status}`}
       data-testid={`status-orb-${status}`}

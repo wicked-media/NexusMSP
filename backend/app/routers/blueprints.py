@@ -27,12 +27,19 @@ Data model:
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
+import os
 import uuid
 
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_client_scope, assert_record_scope
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -138,13 +145,13 @@ def _validate_child_templates(items):
 @router.get("/blueprints")
 async def list_blueprints(active_only: bool = True, current_user: dict = Depends(get_current_user)):
     q = {"active": True} if active_only else {}
-    items = await db.blueprints.find(q, {"_id": 0}).sort("name", 1).to_list(500)
+    items = await db.blueprints.find(tenant_scoped_query(current_user, q), {"_id": 0}).sort("name", 1).to_list(500)
     return items
 
 
 @router.get("/blueprints/{bp_id}")
 async def get_blueprint(bp_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.blueprints.find_one({"id": bp_id}, {"_id": 0})
+    doc = await db.blueprints.find_one(tenant_scoped_query(current_user, {"id": bp_id}), {"_id": 0})
     if not doc:
         raise HTTPException(404, "Blueprint not found")
     return doc
@@ -173,6 +180,7 @@ async def create_blueprint(data: dict, current_user: dict = Depends(get_current_
         "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("name"),
+        "tenant_id": platform_tenant_id(current_user),
     }
     await db.blueprints.insert_one(doc)
     doc.pop("_id", None)
@@ -204,15 +212,21 @@ async def update_blueprint(bp_id: str, data: dict, current_user: dict = Depends(
     if not patch:
         return {"success": True, "no_change": True}
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
-    res = await db.blueprints.update_one({"id": bp_id}, {"$set": patch})
+    res = await db.blueprints.update_one(
+        tenant_scoped_query(current_user, {"id": bp_id}), {"$set": patch}
+    )
     if res.matched_count == 0:
         raise HTTPException(404, "Blueprint not found")
-    return await db.blueprints.find_one({"id": bp_id}, {"_id": 0})
+    return await db.blueprints.find_one(
+        tenant_scoped_query(current_user, {"id": bp_id}), {"_id": 0}
+    )
 
 
 @router.delete("/blueprints/{bp_id}")
 async def delete_blueprint(bp_id: str, current_user: dict = Depends(get_current_user)):
-    await db.blueprints.update_one({"id": bp_id}, {"$set": {"active": False}})
+    await db.blueprints.update_one(
+        tenant_scoped_query(current_user, {"id": bp_id}), {"$set": {"active": False}}
+    )
     return {"success": True}
 
 
@@ -245,12 +259,12 @@ async def install_starter_library(current_user: dict = Depends(get_current_user)
 @router.get("/clients/{client_id}/blueprints")
 async def get_client_blueprints(client_id: str, current_user: dict = Depends(get_current_user)):
     await assert_client_scope(current_user, client_id, operation="client.blueprints.read")
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "blueprint_ids": 1, "default_blueprint_id": 1})
+    client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": client_id}), {"_id": 0, "blueprint_ids": 1, "default_blueprint_id": 1})
     if not client:
         raise HTTPException(404, "Client not found")
     bp_ids = client.get("blueprint_ids") or []
     default_id = client.get("default_blueprint_id")
-    blueprints = await db.blueprints.find({"id": {"$in": bp_ids}, "active": True}, {"_id": 0}).to_list(100) if bp_ids else []
+    blueprints = await db.blueprints.find(tenant_scoped_query(current_user, {"id": {"$in": bp_ids}, "active": True}), {"_id": 0}).to_list(100) if bp_ids else []
     return {"blueprint_ids": bp_ids, "default_blueprint_id": default_id, "blueprints": blueprints}
 
 
@@ -262,7 +276,7 @@ async def set_client_blueprints(client_id: str, data: dict, current_user: dict =
     if default_id and default_id not in bp_ids:
         raise HTTPException(400, "default_blueprint_id must be in blueprint_ids")
     res = await db.clients.update_one(
-        {"id": client_id},
+        tenant_scoped_query(current_user, {"id": client_id}),
         {"$set": {"blueprint_ids": bp_ids, "default_blueprint_id": default_id}},
     )
     if res.matched_count == 0:
@@ -310,10 +324,12 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
     bp_id = data.get("blueprint_id")
     if not bp_id:
         raise HTTPException(400, "blueprint_id required")
-    bp = await db.blueprints.find_one({"id": bp_id, "active": True}, {"_id": 0})
+    bp = await db.blueprints.find_one(
+        tenant_scoped_query(current_user, {"id": bp_id, "active": True}), {"_id": 0}
+    )
     if not bp:
         raise HTTPException(404, "Blueprint not found or inactive")
-    ticket = await assert_record_scope(
+    ticket = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -323,7 +339,7 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
     _hydrate_ticket_with_blueprint(ticket, bp)
     ticket["blueprint_applied_at"] = datetime.now(timezone.utc).isoformat()
     ticket["blueprint_applied_by"] = current_user.get("name")
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {k: ticket[k] for k in (
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {k: ticket[k] for k in (
         "priority", "category", "status", "assignee_id", "sla_minutes",
         "blueprint_id", "blueprint_name", "blueprint_require_completion",
         "blueprint_fields", "blueprint_checklist",
@@ -347,7 +363,7 @@ async def update_worksheet_fields(ticket_id: str, data: dict, current_user: dict
     patch = data.get("fields") or {}
     if not isinstance(patch, dict):
         raise HTTPException(400, "fields must be an object")
-    ticket = await assert_record_scope(
+    ticket = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -355,7 +371,7 @@ async def update_worksheet_fields(ticket_id: str, data: dict, current_user: dict
         resource_name="Ticket",
     )
     merged = {**(ticket.get("blueprint_fields") or {}), **{k: v for k, v in patch.items() if isinstance(k, str)}}
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {"blueprint_fields": merged, "blueprint_fields_updated_at": datetime.now(timezone.utc).isoformat()}})
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {"blueprint_fields": merged, "blueprint_fields_updated_at": datetime.now(timezone.utc).isoformat()}})
     await log_activity(
         current_user,
         "ticket_blueprint_fields_updated",
@@ -370,7 +386,7 @@ async def update_worksheet_fields(ticket_id: str, data: dict, current_user: dict
 
 @router.post("/tickets/{ticket_id}/blueprint-checklist/{item_id}/toggle")
 async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await assert_record_scope(
+    ticket = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -390,7 +406,7 @@ async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict
             break
     if not found:
         raise HTTPException(404, "Checklist item not found")
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {"blueprint_checklist": cl}})
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {"blueprint_checklist": cl}})
     changed = next(item for item in cl if item.get("id") == item_id)
     await log_activity(
         current_user,
@@ -750,10 +766,25 @@ async def push_blueprint_to_clients(bp_id: str, data: dict, current_user: dict =
     bp = await db.blueprints.find_one({"id": bp_id, "active": True}, {"_id": 0, "id": 1, "name": 1})
     if not bp:
         raise HTTPException(404, "Blueprint not found")
-    client_ids = data.get("client_ids") or []
+    client_ids = list(dict.fromkeys(
+        str(client_id).strip()
+        for client_id in (data.get("client_ids") or [])
+        if str(client_id).strip()
+    ))
     if not client_ids:
         raise HTTPException(400, "client_ids required")
     make_default = bool(data.get("make_default", False))
+
+    # Validate the entire bulk scope before mutating any client.  A technician
+    # with delegated access to one client must not be able to attach a shared
+    # blueprint to another client, and a mixed client list must not partially
+    # apply before the unauthorised entry is discovered.
+    for client_id in client_ids:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="client.blueprints.bulk_modify",
+        )
 
     updated = 0
     for cid in client_ids:

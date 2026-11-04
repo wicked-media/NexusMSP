@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,8 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
-  Plus, Loader2, Edit, Trash2, Tag, ChevronDown, ChevronRight, AlertCircle, RefreshCw, Folder, ListTree, Hash, Save
+  Plus, Loader2, Edit, Trash2, Tag, ChevronDown, ChevronRight, AlertCircle, RefreshCw, Folder, ListTree, Hash, Save, BriefcaseBusiness, ArchiveRestore, CircleDollarSign
 } from "lucide-react";
 
 const PRIORITY_COLORS = {
@@ -35,8 +37,108 @@ const DEFAULT_SCHEME = {
   default: { prefix: "TKT", description: "Default/Other" },
 };
 
+const EMPTY_LABOUR_TYPE = { name: "", code: "", description: "", hourly_rate: "", billable_default: true, sort_order: 0 };
+
+function LabourTypesPanel({ headers }) {
+  const [labourTypes, setLabourTypes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(EMPTY_LABOUR_TYPE);
+  const [saving, setSaving] = useState(false);
+
+  const fetchLabourTypes = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const response = await axios.get(`${API}/labour-types`, { headers });
+      setLabourTypes(Array.isArray(response.data) ? response.data : response.data?.labour_types || []);
+    } catch (error) {
+      setLoadError(error.response?.status === 403
+        ? "You can log time, but an administrator must manage the organisation labour-type catalogue."
+        : error.response?.data?.detail || "Could not load labour types.");
+    } finally { setLoading(false); }
+  }, [headers]);
+
+  useEffect(() => { fetchLabourTypes(); }, [fetchLabourTypes]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({ ...EMPTY_LABOUR_TYPE, sort_order: labourTypes.filter(type => type.is_active !== false).length + 1 });
+    setDialogOpen(true);
+  };
+  const openEdit = (type) => {
+    setEditing(type);
+    setForm({
+      name: type.name || "", code: type.code || "", description: type.description || "",
+      hourly_rate: String(type.hourly_rate ?? ""), billable_default: type.billable_default !== false,
+      sort_order: type.sort_order ?? 0,
+    });
+    setDialogOpen(true);
+  };
+  const save = async () => {
+    if (!form.name.trim()) { toast.error("A labour type name is required"); return; }
+    if (form.hourly_rate === "" || !Number.isFinite(Number(form.hourly_rate)) || Number(form.hourly_rate) < 0) { toast.error("Enter a valid hourly rate"); return; }
+    setSaving(true);
+    const payload = { ...form, hourly_rate: Number(form.hourly_rate), sort_order: Number(form.sort_order) || 0 };
+    try {
+      if (editing) {
+        await axios.put(`${API}/labour-types/${editing.id}`, { ...payload, expected_version: editing.version }, { headers });
+        toast.success("Labour type updated");
+      } else {
+        await axios.post(`${API}/labour-types`, payload, { headers });
+        toast.success("Labour type created");
+      }
+      setDialogOpen(false);
+      await fetchLabourTypes();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not save labour type"); }
+    finally { setSaving(false); }
+  };
+  const setActive = async (type, isActive) => {
+    try {
+      if (isActive) {
+        await axios.put(`${API}/labour-types/${type.id}`, { is_active: true, expected_version: type.version }, { headers });
+        toast.success("Labour type restored");
+      } else {
+        await axios.delete(`${API}/labour-types/${type.id}?expected_version=${encodeURIComponent(type.version)}`, { headers });
+        toast.success("Labour type archived; historic time remains unchanged");
+      }
+      await fetchLabourTypes();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not update labour type"); }
+  };
+
+  if (loading) return <Card><CardContent className="flex min-h-48 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-cyan-300" /></CardContent></Card>;
+  if (loadError) return <Card className="border-amber-400/20"><CardContent className="flex min-h-48 flex-col items-center justify-center gap-3 text-center"><AlertCircle className="h-6 w-6 text-amber-300" /><p className="max-w-md text-sm text-muted-foreground">{loadError}</p><Button variant="outline" size="sm" onClick={fetchLabourTypes}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Try again</Button></CardContent></Card>;
+
+  const active = labourTypes.filter(type => type.is_active !== false);
+  const archived = labourTypes.filter(type => type.is_active === false);
+  return <div className="space-y-4" data-testid="labour-types-settings">
+    <Card className="overflow-hidden border-cyan-400/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.09),transparent_42%),rgba(8,12,20,0.42)]">
+      <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+        <div className="flex min-w-0 items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-400/10"><BriefcaseBusiness className="h-5 w-5 text-cyan-200" /></span><div><p className="font-semibold text-cyan-50">Labour type catalogue</p><p className="mt-1 max-w-xl text-xs leading-5 text-zinc-400">Set the names, default billability and rates technicians select when recording work. Nexus snapshots those values on the time entry, so changing this catalogue never rewrites history.</p></div></div>
+        <Button onClick={openCreate} data-testid="create-labour-type"><Plus className="mr-1.5 h-4 w-4" />New labour type</Button>
+      </CardContent>
+    </Card>
+    <div className="grid gap-3 sm:grid-cols-3">
+      <Card><CardContent className="flex items-center gap-3 p-4"><BriefcaseBusiness className="h-5 w-5 text-cyan-300" /><div><p className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Active types</p><p className="text-xl font-semibold">{active.length}</p></div></CardContent></Card>
+      <Card><CardContent className="flex items-center gap-3 p-4"><CircleDollarSign className="h-5 w-5 text-emerald-300" /><div><p className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Default billable</p><p className="text-xl font-semibold">{active.filter(type => type.billable_default !== false).length}</p></div></CardContent></Card>
+      <Card><CardContent className="flex items-center gap-3 p-4"><ArchiveRestore className="h-5 w-5 text-zinc-400" /><div><p className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Archived</p><p className="text-xl font-semibold">{archived.length}</p></div></CardContent></Card>
+    </div>
+    <div className="space-y-2">
+      {active.map(type => <Card key={type.id} className="border-white/[0.08] transition hover:border-cyan-300/25"><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{type.name}</p>{type.code && <Badge variant="outline" className="font-mono text-[10px]">{type.code}</Badge>}<Badge variant="outline" className={type.billable_default !== false ? "border-emerald-400/25 text-emerald-200" : "border-zinc-500/30 text-zinc-400"}>{type.billable_default !== false ? "Billable by default" : "Non-billable by default"}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{type.description || "No description"} <span className="text-zinc-600">· Order {type.sort_order || 0}</span></p></div><div className="flex items-center gap-2"><span className="rounded-lg border border-cyan-400/15 bg-cyan-400/[0.05] px-2 py-1 font-mono text-xs text-cyan-100">${Number(type.hourly_rate || 0).toFixed(2)}/hr</span><Button variant="ghost" size="sm" onClick={() => openEdit(type)}><Edit className="mr-1 h-3.5 w-3.5" />Edit</Button><Button variant="ghost" size="sm" className="text-zinc-400 hover:text-amber-200" onClick={() => setActive(type, false)}><ArchiveRestore className="mr-1 h-3.5 w-3.5" />Archive</Button></div></CardContent></Card>)}
+      {!active.length && <Card className="border-dashed"><CardContent className="py-12 text-center"><BriefcaseBusiness className="mx-auto mb-3 h-8 w-8 text-zinc-600" /><p className="text-sm text-muted-foreground">No labour types are configured. Technicians will use their trusted default rate until you add one.</p><Button className="mt-4" onClick={openCreate}>Create first labour type</Button></CardContent></Card>}
+      {archived.length > 0 && <div className="pt-3"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Archived</p>{archived.map(type => <div key={type.id} className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 opacity-75"><span className="text-sm line-through">{type.name}</span><Button variant="ghost" size="sm" onClick={() => setActive(type, true)}><ArchiveRestore className="mr-1 h-3.5 w-3.5" />Restore</Button></div>)}</div>}
+    </div>
+    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>{editing ? "Edit labour type" : "New labour type"}</DialogTitle></DialogHeader><div className="space-y-4"><div className="grid gap-3 sm:grid-cols-[1fr_130px]"><div><Label>Name *</Label><Input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} placeholder="e.g. Remote support" data-testid="labour-type-name" /></div><div><Label>Code</Label><Input value={form.code} onChange={event => setForm({ ...form, code: event.target.value.toUpperCase() })} placeholder="REMOTE" maxLength={24} /></div></div><div><Label>Description</Label><Textarea value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} rows={2} placeholder="When should a technician select this?" /></div><div className="grid gap-3 sm:grid-cols-2"><div><Label>Hourly rate *</Label><Input type="number" min="0" step="0.01" value={form.hourly_rate} onChange={event => setForm({ ...form, hourly_rate: event.target.value })} data-testid="labour-type-rate" /></div><div><Label>Display order</Label><Input type="number" min="0" value={form.sort_order} onChange={event => setForm({ ...form, sort_order: event.target.value })} /></div></div><label className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.025] p-3 text-sm"><input type="checkbox" checked={form.billable_default} onChange={event => setForm({ ...form, billable_default: event.target.checked })} />Billable by default</label></div><DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button><Button disabled={saving} onClick={save}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{editing ? "Save changes" : "Create labour type"}</Button></DialogFooter></DialogContent></Dialog>
+  </div>;
+}
+
 export default function TicketSettingsPage() {
   const { token } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(requestedTab === "labour" ? "labour" : requestedTab === "categories" ? "categories" : "numbering");
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedCat, setExpandedCat] = useState(null);
@@ -55,9 +157,9 @@ export default function TicketSettingsPage() {
   const [workPrefixes, setWorkPrefixes] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
   const [workPrefixesSaving, setWorkPrefixesSaving] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     setLoading(true);
     try {
       const [catRes, numRes, workPrefixesRes] = await Promise.all([
@@ -72,9 +174,23 @@ export default function TicketSettingsPage() {
       if (workPrefixesRes.data) setWorkPrefixes(current => ({ ...current, ...workPrefixesRes.data }));
     } catch { toast.error("Failed to load settings"); }
     finally { setLoading(false); }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchCategories(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
+
+  useEffect(() => {
+    if (["numbering", "categories", "labour"].includes(requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
+
+  const handleTabChange = (nextTab) => {
+    setActiveTab(nextTab);
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextTab === "numbering") nextParams.delete("tab");
+    else nextParams.set("tab", nextTab);
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const openAddCategory = () => {
     setEditingCat(null);
@@ -168,18 +284,20 @@ export default function TicketSettingsPage() {
 
   return (
     <div className="space-y-6" data-testid="ticket-settings-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Ticket Configuration</h1>
-          <p className="text-muted-foreground">Manage ticket numbering, categories, and issue types</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={fetchCategories}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Service desk standards"
+        title="Ticket Configuration"
+        description="Set the numbering, categories and issue types that make ticket intake consistent across the service desk."
+        icon={ListTree}
+        tone="sky"
+        actions={<Button variant="outline" size="sm" onClick={fetchCategories}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>}
+      />
 
-      <Tabs defaultValue="numbering" className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList>
           <TabsTrigger value="numbering"><Hash className="w-3 h-3 mr-1" />Ticket Numbering</TabsTrigger>
           <TabsTrigger value="categories"><Tag className="w-3 h-3 mr-1" />Categories & Issues</TabsTrigger>
+          <TabsTrigger value="labour"><BriefcaseBusiness className="w-3 h-3 mr-1" />Labour Types</TabsTrigger>
         </TabsList>
 
         {/* ===== NUMBERING SCHEME TAB ===== */}
@@ -372,6 +490,10 @@ export default function TicketSettingsPage() {
               </div>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="labour" className="space-y-4">
+          <LabourTypesPanel headers={headers} />
         </TabsContent>
       </Tabs>
 

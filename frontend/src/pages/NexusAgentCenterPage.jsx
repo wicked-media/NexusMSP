@@ -7,11 +7,12 @@
  *  - Multi-device parallel script runner with live result streaming
  *  - Per-client installer builder
  *  - Recent enrollments timeline
- *  - Settings: heartbeat/poll intervals, auto-update toggle, server URL, Splashtop
+ *  - Settings: heartbeat/poll intervals, auto-update toggle, server URL, Splashtop,
+ *    local self-repair and the opt-in Windows performance guard / component repair
  *
  * Per-device telemetry/management lives on the Devices page (single source of truth).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
@@ -29,7 +30,7 @@ import {
   Server, Activity, Download, Plus, Terminal, Zap, FileDown,
   Settings as SettingsIcon, ShieldCheck, Loader2, Sparkles, Copy,
   CheckCircle2, WifiOff, Users, TrendingUp, AlertCircle, XCircle, ExternalLink, RefreshCw,
-  KeyRound, BadgeCheck, Wrench, LockKeyhole,
+  KeyRound, BadgeCheck, Wrench, LockKeyhole, HardDrive,
 } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
@@ -492,11 +493,12 @@ function InstallerBuilder({ open, onClose }) {
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) { onClose?.(); setResult(null); } }}>
-      <DialogContent className="max-w-lg" data-testid="installer-builder-dialog">
-        <DialogHeader>
+      <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="installer-builder-dialog">
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12">
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
           <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield, Nexus Canary, secure Client Chat, Nexus Elevate, and the staged Nexus DNS endpoint channel.</DialogDescription>
         </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {!result ? (
           <div className="space-y-3">
             <div>
@@ -537,7 +539,8 @@ function InstallerBuilder({ open, onClose }) {
           </div>
         )}
         {loadError && <InlineError>{loadError}</InlineError>}
-        <DialogFooter>
+        </div>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
           {!result ? (
             <>
               <Button variant="ghost" onClick={() => onClose?.()}>Cancel</Button>
@@ -564,15 +567,15 @@ function AgentTrustCard({ canOperate }) {
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const load = () => axios.get(`${API}/nexus-agent/trust/overview`, { headers })
+  const load = useCallback(() => axios.get(`${API}/nexus-agent/trust/overview`, { headers })
     .then(r => { setData(r.data || { counts: {}, attention: [] }); setError(""); })
-    .catch(() => setError("Agent trust evidence is unavailable."));
+    .catch(() => setError("Agent trust evidence is unavailable.")), [headers]);
 
   useEffect(() => {
     load();
     const timer = setInterval(load, 10000);
     return () => clearInterval(timer);
-  }, [headers]);
+  }, [load]);
 
   const repair = async (deviceId) => {
     setBusyId(deviceId);
@@ -654,7 +657,7 @@ function AgentTrustCard({ canOperate }) {
 function SettingsCard({ canEdit }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, self_repair_enabled: true, require_signed_updates: true, require_mtls: false, winget_enabled: false, winget_allowed_ids: [] });
+  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, self_repair_enabled: true, windows_self_heal_enabled: false, require_signed_updates: true, require_mtls: false, winget_enabled: false, winget_auto_update_enabled: false, winget_allowed_ids: [] });
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false, agent_binary_sha256: "", agent_binary_size: 0, transport_mode: "", mtls_proxy_trust_enabled: false });
   const [loadError, setLoadError] = useState("");
@@ -713,6 +716,27 @@ function SettingsCard({ canEdit }) {
             <div><div className="text-sm font-medium">Winget approved-app updates</div><p className="text-[11px] text-zinc-500">Only packages in this allow-list can run in a maintenance window.</p></div>
           </div>
           <Textarea value={(s.winget_allowed_ids || []).join("\n")} onChange={e => setS({ ...s, winget_allowed_ids: e.target.value.split(/[\n,]/).map(x => x.trim()).filter(Boolean) })} placeholder={"Microsoft.Edge\nGoogle.Chrome\n7zip.7zip"} rows={3} disabled={!canEdit} />
+          <div className="mt-3 flex items-start gap-3">
+            <button type="button" role="switch" aria-checked={s.winget_auto_update_enabled}
+              onClick={() => setS({ ...s, winget_auto_update_enabled: !s.winget_auto_update_enabled })} disabled={!canEdit}
+              data-testid="agent-setting-winget-auto-update"
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-transparent transition-colors mt-0.5 ${s.winget_auto_update_enabled ? "bg-cyan-500" : "bg-zinc-700"}`}>
+              <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${s.winget_auto_update_enabled ? "translate-x-4" : "translate-x-0.5"} mt-0.5`} />
+            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-sm font-medium">Auto-update approved applications
+                <Badge variant="outline" className="text-[10px]">{s.winget_auto_update_enabled ? "ON" : "OFF"}</Badge>
+              </div>
+              <p className="mt-0.5 text-[11px] text-zinc-500">
+                Enrolled agents install the application updates they have reported as pending, inside a maintenance window, and report each result back to Nexus. It authorises installation on customer endpoints, so it stays off until an operator turns it on.
+              </p>
+              {!s.winget_enabled && s.winget_auto_update_enabled && (
+                <p className="mt-1 flex items-start gap-1.5 text-[10px] leading-4 text-amber-300">
+                  <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />Winget approved-app updates are off, so an agent has no approve-list to install from yet. Save both together.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
         <div className="border-t border-zinc-800 pt-3">
           <div className="flex items-start gap-3">
@@ -742,6 +766,28 @@ function SettingsCard({ canEdit }) {
           <button type="button" onClick={() => canEdit && setS({ ...s, self_repair_enabled: !s.self_repair_enabled })} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left disabled:opacity-60" disabled={!canEdit}>
             <div className="flex items-center gap-2 text-sm font-medium"><Wrench className="h-4 w-4 text-amber-300" />Local self-repair<Badge variant="outline" className="ml-auto text-[9px]">{s.self_repair_enabled ? "ON" : "OFF"}</Badge></div>
             <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">Verify identity files, policy cache and local configuration evidence.</p>
+          </button>
+        </div>
+        <div className="border-t border-zinc-800 pt-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={s.windows_self_heal_enabled}
+            onClick={() => canEdit && setS({ ...s, windows_self_heal_enabled: !s.windows_self_heal_enabled })}
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!canEdit}
+            data-testid="agent-setting-windows-self-heal"
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <HardDrive className="h-4 w-4 text-amber-300" />
+              Endpoint performance guard and Windows component repair
+              <Badge variant="outline" className="ml-auto text-[9px]">{s.windows_self_heal_enabled ? "ON" : "OFF"}</Badge>
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+              {s.windows_self_heal_enabled
+                ? "A sustained performance drop on this endpoint runs the built-in repair — DISM /RestoreHealth from Windows Update, then sfc /scannow, then a DISM health check — inside the maintenance window. Elevated agents only; the agent reports what it repaired."
+                : "The agent still tracks its own performance against a baseline learned on each endpoint and reports degradation. It never changes the Windows image until an operator enables this."}
+            </p>
           </button>
         </div>
         <div className="border-t border-zinc-800 pt-3">

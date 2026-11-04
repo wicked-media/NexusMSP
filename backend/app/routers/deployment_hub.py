@@ -48,8 +48,7 @@ JUMP_ENDPOINT_RE = re.compile(
 )
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _hash(value: str) -> str:

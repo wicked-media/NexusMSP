@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -35,15 +35,17 @@ const fmtBytes = (n) => {
 };
 
 function MiniGauge({ value, label, icon: Icon }) {
-  const v = Math.min(100, Math.max(0, Number(value) || 0));
+  const numericValue = Number(value);
+  const known = Number.isFinite(numericValue);
+  const v = known ? Math.min(100, Math.max(0, numericValue)) : 0;
   const tone = v > 90 ? "bg-rose-500" : v > 75 ? "bg-amber-500" : "bg-emerald-500";
   return (
-    <div className="flex items-center gap-1 min-w-0" aria-label={`${label}: ${v.toFixed(0)} percent`}>
+    <div className="flex items-center gap-1 min-w-0" aria-label={known ? `${label}: ${v.toFixed(0)} percent` : `${label}: not available`}>
       {Icon && <Icon className="w-3 h-3 text-zinc-500 shrink-0" />}
       <div className="flex-1 min-w-[40px] max-w-[80px] h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div className={`h-full ${tone}`} style={{ width: `${v}%` }} />
+        {known && <div className={`h-full ${tone}`} style={{ width: `${v}%` }} />}
       </div>
-      <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{v.toFixed(0)}%</span>
+      <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{known ? `${v.toFixed(0)}%` : "—"}</span>
     </div>
   );
 }
@@ -87,8 +89,8 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
   }, [fetchAgent, device.has_agent]);
 
   const isOnline = (agent?.status || device.status) === "online";
-  const cpu = agent?.cpu_load ?? 0;
-  const ram = agent?.used_ram ?? 0;
+  const cpu = agent?.cpu_load;
+  const ram = agent?.used_ram;
   const disk = agent?.disks?.[0]?.percent;
 
   const runAction = async (path, label, opts = {}) => {
@@ -472,11 +474,16 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
 
       {/* Live Metrics Drawer */}
       <Dialog open={metricsOpen} onOpenChange={(v) => !v && setMetricsOpen(false)}>
-        <DialogContent className="max-w-3xl" data-testid={`metrics-drawer-${device.id}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Gauge className="w-4 h-4 text-sky-400" />Live Metrics — {device.name}</DialogTitle>
-            <DialogDescription className="text-xs">Last {metricsData?.minutes || 30} minutes · auto-refreshing every 30s</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-3xl"
+          eyebrow="Endpoint telemetry · live evidence"
+          title={`Live metrics — ${device.name}`}
+          description={`Last ${metricsData?.minutes || 30} minutes · auto-refreshing every 30 seconds.`}
+          icon={Gauge}
+          tone="cyan"
+          data-testid={`metrics-drawer-${device.id}`}
+          footer={<><Button variant="outline" onClick={openMetrics}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button><Button onClick={() => setMetricsOpen(false)}>Close</Button></>}
+        >
           {metricsLoading && !metricsData ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
             metricsData && (
               <div className="space-y-3">
@@ -527,20 +534,21 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
                 </Card>
               </div>
             )}
-          <DialogFooter>
-            <Button variant="outline" onClick={openMetrics}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
-            <Button onClick={() => setMetricsOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* AI Diagnose Dialog */}
       <Dialog open={diagOpen} onOpenChange={(v) => !v && setDiagOpen(false)}>
-        <DialogContent className="max-w-2xl" data-testid={`diagnose-${device.id}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-fuchsia-400" />AI Diagnose — {device.name}</DialogTitle>
-            <DialogDescription className="text-xs">Nexus AI analyses telemetry, events, services, and patches, then posts the result to the ticket.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-2xl"
+          eyebrow="Endpoint intelligence · evidence review"
+          title={`AI diagnosis — ${device.name}`}
+          description="Nexus analyses current telemetry, events, services, and patches, then records the result against this ticket."
+          icon={BrainCircuit}
+          tone="violet"
+          data-testid={`diagnose-${device.id}`}
+          footer={<><Button variant="outline" onClick={runDiagnose} disabled={diagLoading}><RefreshCw className="w-3 h-3 mr-1" />Re-run</Button><Button onClick={() => setDiagOpen(false)}>Close</Button></>}
+        >
           {diagLoading ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
             diagData && (
               <div className="space-y-3">
@@ -579,11 +587,7 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
                 )}
               </div>
             )}
-          <DialogFooter>
-            <Button variant="outline" onClick={runDiagnose} disabled={diagLoading}><RefreshCw className="w-3 h-3 mr-1" />Re-run</Button>
-            <Button onClick={() => setDiagOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Terminal modal */}
@@ -758,18 +762,18 @@ export default function TicketDeviceList({ ticketId, headers, refreshTicketDetai
 
       {/* Fan-out reboot confirmation */}
       <Dialog open={fanoutConfirm === "reboot"} onOpenChange={(v) => !v && setFanoutConfirm(null)}>
-        <DialogContent className="max-w-sm" data-testid="fanout-reboot-confirm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Power className="w-4 h-4 text-amber-400" />Reboot all {agentCount} devices?</DialogTitle>
-            <DialogDescription className="text-xs">
-              Each linked device will reboot immediately in parallel. Offline devices and devices without an agent will be skipped. The action is audited on this ticket.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setFanoutConfirm(null)}>Cancel</Button>
-            <Button onClick={() => runFanout("reboot", "Reboot (all)")} disabled={!!fanoutBusy} data-testid="fanout-reboot-go">Reboot all</Button>
-          </DialogFooter>
-        </DialogContent>
+        <NexusWorkflowDialog
+          className="max-w-lg"
+          eyebrow="Ticket device control · audited action"
+          title={`Reboot all ${agentCount} devices?`}
+          description="Each linked device will reboot immediately in parallel. Offline devices and devices without an agent will be skipped."
+          icon={Power}
+          tone="amber"
+          data-testid="fanout-reboot-confirm"
+          footer={<><Button variant="outline" onClick={() => setFanoutConfirm(null)}>Cancel</Button><Button onClick={() => runFanout("reboot", "Reboot (all)")} disabled={!!fanoutBusy} data-testid="fanout-reboot-go">Reboot all</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">This action is recorded against the current ticket. Verify the target list before continuing.</div>
+        </NexusWorkflowDialog>
       </Dialog>
     </Card>
   );

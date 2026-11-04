@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from pathlib import PureWindowsPath
 from typing import Any
 import uuid
@@ -7,13 +6,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.auth import get_current_user
 from app.database import db
-from app.routers.nexus_agent import _audit, _is_online, _verify_agent_token
+from app.routers.nexus_agent import _audit, _is_online, _verify_agent_token, require_agent_operator
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _write_security_audit(
@@ -42,9 +41,22 @@ def _default_canary_path(canary_id: str) -> str:
 
 
 @router.get("/ransomware-canary/status")
-async def get_canary_status(current_user: dict = Depends(get_current_user)):
+async def get_canary_status(
+    current_user: dict = Depends(get_current_user),
+    client_id: str = "",
+):
+    selected_client_id = str(client_id or "").strip()
+    if selected_client_id:
+        await assert_client_scope(
+            current_user,
+            selected_client_id,
+            operation="ransomware_canary.status",
+        )
+    query = {"deployment_source": "nexus-agent"}
+    if selected_client_id:
+        query["client_id"] = selected_client_id
     canaries = await db.ransomware_canaries.find(
-        {"deployment_source": "nexus-agent"}, {"_id": 0}
+        scoped_query(current_user, query), {"_id": 0}
     ).sort("created_at", -1).to_list(500)
     canary_ids = [item["id"] for item in canaries]
     triggers = await db.canary_triggers.find(
@@ -65,13 +77,19 @@ async def get_canary_status(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/ransomware-canary/deploy")
-async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(get_current_user)):
+async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(require_agent_operator)):
     agent_id = str(data.get("agent_id") or "").strip()
     if not agent_id:
         raise HTTPException(400, "Choose an enrolled Nexus Agent")
     agent = await db.nexus_agents.find_one({"id": agent_id, "is_active": True}, {"_id": 0})
     if not agent:
         raise HTTPException(404, "Nexus Agent not found")
+    await assert_client_scope(
+        current_user,
+        agent.get("client_id"),
+        operation="ransomware_canary.deploy",
+        mask_not_found=True,
+    )
     if not _is_online(agent.get("last_seen")):
         raise HTTPException(409, "Nexus Agent is offline; wait for a fresh heartbeat before deploying a canary")
     platform = str(agent.get("os_name") or agent.get("os") or "").lower()
@@ -93,7 +111,10 @@ async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(get_c
     path = PureWindowsPath(requested_path)
     if not path.is_absolute() or path.suffix.lower() != ".txt":
         raise HTTPException(400, "Canary files must use an absolute Windows .txt path")
-    mirrored = await db.devices.find_one({"nexus_agent_id": agent_id}, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1}) or {}
+    mirrored = await db.devices.find_one({
+        "nexus_agent_id": agent_id,
+        "client_id": agent.get("client_id"),
+    }, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1}) or {}
     canary = {
         "id": canary_id,
         "agent_id": agent_id,
@@ -111,6 +132,7 @@ async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(get_c
     command = {
         "id": command_id,
         "device_id": agent_id,
+        "client_id": agent.get("client_id"),
         "kind": "canary_deploy",
         "payload": {"canary_id": canary_id, "canary_path": str(path)},
         "status": "pending",
@@ -118,6 +140,7 @@ async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(get_c
         "created_at": _now(),
     }
     await db.ransomware_canaries.insert_one(canary)
+    canary.pop("_id", None)
     await db.nexus_agent_commands.insert_one(command)
     await _audit(db, "canary_deploy_queued", {"canary_id": canary_id, "device_id": agent_id, "command_id": command_id})
     await _write_security_audit("ransomware_canary_deploy_queued", canary_id, {
@@ -195,6 +218,12 @@ async def resolve_canary_trigger(trigger_id: str, data: dict[str, Any], current_
     trigger = await db.canary_triggers.find_one({"id": trigger_id}, {"_id": 0})
     if not trigger:
         raise HTTPException(404, "Canary alert not found")
+    await assert_client_scope(
+        current_user,
+        trigger.get("client_id"),
+        operation="ransomware_canary.trigger.resolve",
+        mask_not_found=True,
+    )
     if trigger.get("resolved"):
         raise HTTPException(409, "Canary alert is already resolved")
     await db.canary_triggers.update_one({"id": trigger_id}, {"$set": {

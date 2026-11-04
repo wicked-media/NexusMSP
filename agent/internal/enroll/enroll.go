@@ -22,6 +22,7 @@ type request struct {
 	MAC             string   `json:"mac,omitempty"`
 	AgentVersion    string   `json:"agent_version,omitempty"`
 	Capabilities    []string `json:"capabilities,omitempty"`
+	RuntimeCapabilities []string `json:"runtime_capabilities,omitempty"`
 	InstallID       string   `json:"install_id,omitempty"`
 	CSR             string   `json:"certificate_signing_request,omitempty"`
 	KeyFingerprint  string   `json:"public_key_fingerprint,omitempty"`
@@ -54,8 +55,10 @@ type renewResponse struct {
 	SPIFFEID               string `json:"spiffe_id"`
 }
 
-// Run posts an enrollment request and returns (agent_token, device_id).
-func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
+// Run posts an enrollment request and returns (agent_token, device_id). The
+// compiled version is passed in by main; telemetry's startup probe must not be
+// treated as release metadata because it intentionally stays lightweight.
+func Run(tr *transport.Client, cfg *config.Config, agentVersion string) (string, string, error) {
 	if cfg.EnrollmentToken == "" {
 		return "", "", errors.New("missing enrollment_token in config (got an empty installer?)")
 	}
@@ -74,8 +77,9 @@ func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
 		Arch:            runtime.GOARCH,
 		OSVersion:       info.OSVersion,
 		MAC:             info.PrimaryMAC,
-		AgentVersion:    info.AgentVersion,
+		AgentVersion:    agentVersion,
 		Capabilities:    cfg.ShieldCapabilities(),
+		RuntimeCapabilities: cfg.RuntimeCapabilities(),
 		InstallID:       cfg.InstallID,
 		CSR:             csr,
 		KeyFingerprint:  keyFingerprint,
@@ -99,7 +103,7 @@ func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
 	}
 	cfg.DeviceIdentity.Status = resp.IdentityStatus
 	if resp.Policy != nil {
-		cfg.PlatformPolicy = resp.Policy
+		cfg.ApplyPlatformPolicy(resp.Policy)
 	}
 	if err := config.Save(cfg); err != nil {
 		return "", "", err

@@ -1,14 +1,48 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from app.database import db
 from app.routers.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
+from app.services.scope_permissions import assert_global_scope, assert_record_scope
 from datetime import datetime, timezone, timedelta
 
 router = APIRouter(tags=["Billing Dashboard"])
 
 
-@router.get("/billing-dashboard/metrics")
-async def get_billing_dashboard_metrics(user=Depends(get_current_user)):
+def _normalise_invoice_id(value: object) -> str:
+    invoice_id = str(value or "").strip()
+    if not invoice_id or len(invoice_id) > 128 or any(char in invoice_id for char in ("\x00", "\r", "\n")):
+        raise HTTPException(status_code=422, detail="Invoice id is invalid")
+    return invoice_id
+
+
+def _invoice_version_filter(invoice: dict) -> dict:
+    version = invoice.get("version")
+    return {"version": version} if version is not None else {"version": {"$exists": False}}
+
+
+def _next_invoice_version(invoice: dict) -> int:
+    version = invoice.get("version")
+    if version is None:
+        return 1
+    if isinstance(version, bool):
+        raise HTTPException(status_code=409, detail="Invoice has an invalid version; repair it before chasing")
+    try:
+        parsed = int(version)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Invoice has an invalid version; repair it before chasing") from None
+    if parsed < 0 or parsed != version:
+        raise HTTPException(status_code=409, detail="Invoice has an invalid version; repair it before chasing")
+    return parsed + 1
+
+
+@router.get("/billing-dashboard/metrics", dependencies=[Depends(require_action("billing.analytics.view"))])
+async def get_billing_dashboard_metrics(request: Request, user: dict = Depends(get_current_user)):
     """Aggregate all billing metrics for the dedicated billing dashboard."""
+    # This endpoint deliberately aggregates organisation-wide receivables,
+    # revenue and purchase orders.  Restricted client scope must not return a
+    # misleading or accidentally partial cross-client financial dashboard.
+    await assert_global_scope(user, operation="billing.dashboard.metrics.read", request=request)
     now = datetime.now(timezone.utc)
 
     # --- Fetch all invoices ---
@@ -299,12 +333,24 @@ async def get_billing_dashboard_metrics(user=Depends(get_current_user)):
     }
 
 
-@router.post("/billing-dashboard/chase/{invoice_id}")
-async def chase_overdue_invoice(invoice_id: str, user=Depends(get_current_user)):
+@router.post(
+    "/billing-dashboard/chase/{invoice_id}",
+    dependencies=[Depends(require_action("billing.portal.reminder.send"))],
+)
+async def chase_overdue_invoice(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
     """One-click chase: log a chase event on an overdue invoice."""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    invoice_id = _normalise_invoice_id(invoice_id)
+    invoice = await assert_record_scope(
+        user,
+        db.invoices,
+        invoice_id,
+        operation="billing.dashboard.chase",
+        request=request,
+        resource_name="Invoice",
+    )
+    if not str(invoice.get("client_id") or "").strip():
+        raise HTTPException(status_code=409, detail="Invoice is missing its required client relationship")
+    next_version = _next_invoice_version(invoice)
 
     now_str = datetime.now(timezone.utc).isoformat()
     chase_entry = {
@@ -315,19 +361,43 @@ async def chase_overdue_invoice(invoice_id: str, user=Depends(get_current_user))
         "method": "manual",
     }
 
-    await db.invoices.update_one(
-        {"id": invoice_id},
+    updated = await db.invoices.update_one(
+        {
+            "id": invoice_id,
+            "client_id": invoice.get("client_id"),
+            "status": invoice.get("status"),
+            **_invoice_version_filter(invoice),
+        },
         {
             "$push": {"chase_history": chase_entry},
             "$set": {"last_chased_at": now_str, "last_chased_by": user.get("name", "System")},
-            "$inc": {"chase_count": 1},
+            "$inc": {"chase_count": 1, "version": 1},
         }
     )
+    if not updated.matched_count:
+        raise HTTPException(status_code=409, detail="Invoice changed while it was being chased; refresh and retry")
 
-    # Log activity
+    # Write the canonical activity audit before the legacy invoice-local
+    # compatibility record, so a legacy-log outage cannot erase the main
+    # evidence that a financial chase happened.
+    await log_activity(
+        user,
+        "payment_chase_logged",
+        "invoice",
+        invoice_id,
+        invoice.get("invoice_number", invoice_id),
+        "Manual payment chase logged",
+        metadata={
+            "client_id": invoice.get("client_id"),
+            "previous_version": invoice.get("version"),
+            "new_version": next_version,
+            "method": "manual",
+        },
+    )
     await db.invoice_activity_log.insert_one({
         "id": f"act-{invoice_id}-chase-{now_str}",
         "invoice_id": invoice_id,
+        "client_id": invoice.get("client_id"),
         "action": "chased",
         "details": f"Payment chase sent by {user.get('name', 'System')}",
         "user_id": user["id"],
