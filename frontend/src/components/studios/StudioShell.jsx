@@ -23,6 +23,7 @@ import { apiErrorMessage } from "@/lib/apiErrorMessage";
 import FleetBaselinePanel, { fleetBaselineView } from "@/components/studios/FleetBaselinePanel";
 import AgentFleetPanel from "@/components/studios/AgentFleetPanel";
 import BackupRecoveryPanel from "@/components/studios/BackupRecoveryPanel";
+import BackupVerificationPanel from "@/components/studios/BackupVerificationPanel";
 import ClientEstatePanel from "@/components/studios/ClientEstatePanel";
 import ClientPortfolioPanel from "@/components/studios/ClientPortfolioPanel";
 import ClientRenewalWatchPanel from "@/components/studios/ClientRenewalWatchPanel";
@@ -40,7 +41,9 @@ import NetworkOperationsPanel from "@/components/studios/NetworkOperationsPanel"
 import NetworkEvidencePanel from "@/components/studios/NetworkEvidencePanel";
 import NetworkSitesPanel from "@/components/studios/NetworkSitesPanel";
 import PatchPosturePanel from "@/components/studios/PatchPosturePanel";
+import ProxmoxOperationsPanel from "@/components/studios/ProxmoxOperationsPanel";
 import SecurityPosturePanel from "@/components/studios/SecurityPosturePanel";
+import SocAlertsPanel from "@/components/studios/SocAlertsPanel";
 import VoiceEstatePanel from "@/components/studios/VoiceEstatePanel";
 import WebEstatePanel from "@/components/studios/WebEstatePanel";
 import { studioObservationView } from "@/components/studios/StudioObservationKit";
@@ -432,6 +435,7 @@ const OBSERVATION_PANELS = {
   "client-portfolio": ClientPortfolioPanel,
   "client-renewal-watch": ClientRenewalWatchPanel,
   "backup-recovery": BackupRecoveryPanel,
+  "backup-verification": BackupVerificationPanel,
   "microsoft-studio": MicrosoftStudioPanel,
   "microsoft-evidence": MicrosoftEvidencePanel,
   "microsoft-operations": MicrosoftOperationsPanel,
@@ -444,7 +448,9 @@ const OBSERVATION_PANELS = {
   "network-evidence": NetworkEvidencePanel,
   "network-sites": NetworkSitesPanel,
   "patch-posture": PatchPosturePanel,
+  "proxmox-operations": ProxmoxOperationsPanel,
   "security-posture": SecurityPosturePanel,
+  "soc-alerts": SocAlertsPanel,
   "lead-pipeline": LeadPipelinePanel,
   "documentation-inventory": DocumentationInventoryPanel,
   "communications-csat": CommunicationsPanel,
@@ -495,57 +501,6 @@ function RemoteSessionsPanel({ studio, spec }) {
               );
             })}
           </div>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
-function BackupVerificationPanel({ studio, spec }) {
-  const { loading, data, error, reload } = useEndpoint(spec.endpoint);
-  const summary = data?.summary || {};
-  const tests = Array.isArray(data?.tests) ? data.tests : [];
-
-  return (
-    <Panel studio={studio} spec={spec}>
-      <div className="space-y-3" data-testid="backup-verification-panel">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold tracking-tight">Recovery verification evidence</p>
-            <p className="mt-1 text-xs text-muted-foreground">Only completed, measured verification can support a recoverability claim.</p>
-          </div>
-          <Button size="sm" variant="outline" asChild><a href="/backup-center?tab=verify">Open Backup Centre <ArrowUpRight className="ml-1 h-3.5 w-3.5" /></a></Button>
-        </div>
-        {loading && <Loading />}
-        {!loading && error && <EndpointError error={error} onRetry={reload} />}
-        {!loading && !error && (
-          <>
-            <div className="grid gap-2 sm:grid-cols-4">
-              {[
-                ["Verified passes", summary.passed],
-                ["Recorded failures", summary.failed],
-                ["Pending", summary.pending],
-                ["Pass rate", summary.pass_rate_pct === undefined ? null : `${summary.pass_rate_pct}%`],
-              ].map(([label, value]) => (
-                <Card key={label} className="border-border/60 bg-muted/[0.18]"><CardContent className="p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold tracking-tight">{value ?? "Not reported"}</p></CardContent></Card>
-              ))}
-            </div>
-            {tests.length === 0 ? (
-              <Card className="border-dashed" data-testid="backup-verification-empty"><CardContent className="py-8 text-center text-xs text-muted-foreground">No recovery-verification record exists in the current tenant scope. A green backup run alone is not restore proof.</CardContent></Card>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-border/60" data-testid="backup-verification-list">
-                {tests.map((test, index) => {
-                  const passed = String(test.result || "").toLowerCase() === "pass";
-                  const failed = ["fail", "failed"].includes(String(test.result || "").toLowerCase());
-                  return <div key={test.id || index} className="grid gap-2 border-b border-border/50 px-4 py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
-                    <div className="min-w-0"><p className="truncate text-sm font-medium">{test.client_name || test.backup_type || "Recovery verification"}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{test.backup_type || "Verification"} · {String(test.tested_at || test.requested_at || "Recorded evidence").replace("T", " ").slice(0, 16)}</p></div>
-                    <Badge variant="outline" className={passed ? "w-fit border-emerald-500/30 bg-emerald-500/10 text-emerald-500" : failed ? "w-fit border-rose-500/30 bg-rose-500/10 text-rose-500" : "w-fit border-border/80 text-muted-foreground"}>{test.result || test.status || "recorded"}</Badge>
-                    <span className="text-[11px] text-muted-foreground sm:text-right">{test.restore_time_minutes === null || test.restore_time_minutes === undefined ? "Restore time not reported" : `${test.restore_time_minutes} min`}</span>
-                  </div>;
-                })}
-              </div>
-            )}
-          </>
         )}
       </div>
     </Panel>
@@ -714,8 +669,6 @@ export default function StudioShell({ studioId }) {
                   ? <FleetBaselinePanel studio={studio} spec={spec} />
                   : spec?.state === "wired" && spec?.endpoint === "/remote/sessions"
                     ? <RemoteSessionsPanel studio={studio} spec={spec} />
-                    : spec?.state === "wired" && spec?.endpoint === "/backup-verify/overview"
-                      ? <BackupVerificationPanel studio={studio} spec={spec} />
                   : spec?.state === "wired" && spec?.endpoint && studioObservationView(spec.endpoint)
                     ? <StudioObservationPanel studio={studio} spec={spec} />
                     : spec?.state === "wired" && spec?.endpoint && spec?.subjects

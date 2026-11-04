@@ -227,6 +227,19 @@ def test_scheduler_skips_maintenance_target_when_current_client_binding_changes(
     assert "ownership changed" in reason
 
 
+def test_scheduler_skips_target_when_site_changes(monkeypatch):
+    database = _Database()
+    _install_database(monkeypatch, database)
+    window = {"id": "window-a", "client_ids": ["client-a"]}
+    stored_device = {"id": "device-a", "client_id": "client-a", "site_id": "site-old"}
+    database.devices.rows[0]["site_id"] = "site-new"
+
+    device, reason = asyncio.run(maintenance_windows._current_window_device(window, stored_device))
+
+    assert device is None
+    assert "site changed" in reason
+
+
 def test_foreign_ticket_cannot_be_linked_to_same_client_maintenance(monkeypatch):
     database = _Database()
     _install_database(monkeypatch, database)

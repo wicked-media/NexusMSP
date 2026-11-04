@@ -302,15 +302,11 @@ describe("the gate over the tree as it stands", () => {
     expect(rowRings.every((entry) => entry.ratio >= FOCUS_INDICATOR_MINIMUM)).toBe(true);
   });
 
-  test("what it does not gate is reported with a number instead of hidden", () => {
-    // Card boundaries, shadcn's default destructive fill and the light-theme signal
-    // glyphs: real gaps, but closing them is a visual-identity decision rather than a
-    // coverage one, so they are ranked instead of failing the build.
-    expect(report.contrastBacklog.length).toBeGreaterThan(0);
-    expect(report.contrastBacklog.every((entry) => entry.ratio < entry.minimum)).toBe(true);
-    expect(report.contrastBacklog.map((entry) => entry.ratio)).toEqual(
-      [...report.contrastBacklog.map((entry) => entry.ratio)].sort((left, right) => left - right),
-    );
+  test("reported visual-identity pairs are now fully accessible", () => {
+    // These pairs remain measured even though they are not a separate gate. The shared
+    // token scale now clears their thresholds, so a fresh contrast regression appears as
+    // a backlog entry instead of being accepted as deliberate visual debt.
+    expect(report.contrastBacklog).toEqual([]);
 
     // No row is left indicating focus with a fill alone.
     expect(report.focusBacklog).toEqual([]);

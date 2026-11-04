@@ -13,9 +13,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogD
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { EmptyState } from "@/components/design-system";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import {
   Bot, CheckCircle, Clock, XCircle, Zap, ThumbsUp, ThumbsDown,
-  Search, Shield, HardDrive, Network, Cpu, RefreshCw, Activity, Loader2, Terminal
+  Search, Shield, HardDrive, Network, Cpu, RefreshCw, Activity, Terminal
 } from "lucide-react";
 
 const CATEGORY_ICONS = { disk: HardDrive, service: RefreshCw, certificate: Shield, network: Network, performance: Cpu, backup: HardDrive, security: Shield };
@@ -30,6 +32,7 @@ export default function AIResolutionPage({ embedded = false }) {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [filter, setFilter] = useState("all");
   const [catFilter, setCatFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -39,10 +42,13 @@ export default function AIResolutionPage({ embedded = false }) {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const res = await axios.get(`${API}/ai-resolution/suggestions`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
-    } catch { toast.error("Failed to fetch AI resolution data"); }
+    } catch {
+      setLoadError("Nexus could not retrieve AI resolution evidence. No automated action was taken.");
+    }
     finally { setLoading(false); }
   }, [token]);
 
@@ -56,24 +62,49 @@ export default function AIResolutionPage({ embedded = false }) {
     } catch (error) { toast.error(error.response?.data?.detail || "Resolution action failed"); }
   };
 
-  if (loading || !data) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading AI resolution evidence" className="p-4 sm:p-6" />;
 
-  const s = data.summary;
-  const issues = data.issues.filter(i => {
+  if (loadError || !data) return <WorkspaceErrorState title="AI resolution evidence is unavailable" description={loadError || "Nexus did not return the information needed to review AI resolutions. No automated action was taken."} onRetry={fetchData} retryLabel="Retry AI resolution" className="mx-4 sm:mx-6" />;
+
+  const sourceIssues = Array.isArray(data.issues) ? data.issues : [];
+  const s = {
+    auto_resolved: 0,
+    pending_approval: 0,
+    manual_required: 0,
+    time_saved_hours: 0,
+    resolution_rate_pct: 0,
+    total: sourceIssues.length,
+    ...(data.summary || {}),
+  };
+  const issues = sourceIssues.filter(i => {
     if (filter !== "all" && i.status !== filter) return false;
     if (catFilter !== "all" && i.category !== catFilter) return false;
     if (search && !i.issue.toLowerCase().includes(search.toLowerCase()) && !i.device.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  const categories = [...new Set(data.issues.map(i => i.category))];
-  const resolved = data.issues.filter(i => i.status === "auto_resolved");
-  const avgConfidence = Math.round(data.issues.reduce((sum, i) => sum + (i.confidence || 0), 0) / Math.max(data.issues.length, 1));
-  const catBreakdown = categories.map(c => ({ name: c, count: data.issues.filter(i => i.category === c).length, resolved: data.issues.filter(i => i.category === c && i.status === "auto_resolved").length }));
+  const categories = [...new Set(sourceIssues.map(i => i.category))];
+  const resolved = sourceIssues.filter(i => i.status === "auto_resolved");
+  const avgConfidence = Math.round(sourceIssues.reduce((sum, i) => sum + (i.confidence || 0), 0) / Math.max(sourceIssues.length, 1));
+  const catBreakdown = categories.map(c => ({ name: c, count: sourceIssues.filter(i => i.category === c).length, resolved: sourceIssues.filter(i => i.category === c && i.status === "auto_resolved").length }));
+  const pageHeader = !embedded && <OperationalPageHeader eyebrow="AI operations · governed resolution" title="AI Auto-Resolution Engine" description="Review autonomous issue detection, runbook matching and verified resolution evidence." icon={Bot} tone="violet" signal={sourceIssues.some(issue => issue.status === "manual_required") ? "attention" : "ready"} actions={<Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>} />;
+
+  if (sourceIssues.length === 0) return (
+    <div className="space-y-5" data-testid="ai-resolution-page">
+      {pageHeader}
+      <EmptyState
+        icon={<CheckCircle className="h-12 w-12 text-emerald-400" />}
+        title="No AI resolutions need review"
+        description="Nexus has no detected issues or pending recommendations in your permitted scope. New evidence will appear here when the resolution engine records it."
+        action={<Button variant="outline" onClick={fetchData}><RefreshCw className="mr-2 h-4 w-4" />Refresh evidence</Button>}
+        testid="ai-resolution-empty"
+      />
+    </div>
+  );
 
   return (
     <div className="space-y-5" data-testid="ai-resolution-page">
-      {!embedded && <OperationalPageHeader eyebrow="AI operations · governed resolution" title="AI Auto-Resolution Engine" description="Review autonomous issue detection, runbook matching and verified resolution evidence." icon={Bot} tone="violet" signal={data.issues.some(issue => issue.status === "manual_required") ? "attention" : "ready"} actions={<Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>} />}
+      {pageHeader}
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2">
         <p className="text-xs text-muted-foreground">AI recommendations remain reviewable. Approval records the decision and preserves the matched runbook context.</p>

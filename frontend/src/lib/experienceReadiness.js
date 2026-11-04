@@ -50,6 +50,7 @@ export const STATE_MARKERS = {
   loading: [
     /\bSkeleton\b/,
     /\bLoadingState\b/,
+    /\bWorkspaceLoadingState\b/,
     /\bisLoading\b/,
     /<Loader/,
     /\bloading\b/i,

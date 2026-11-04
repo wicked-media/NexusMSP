@@ -57,6 +57,7 @@ export function studioObservationView(endpoint) {
   if (path === "/client-health/dashboard") return "client-portfolio";
   if (path === "/client-studio/renewal-watch") return "client-renewal-watch";
   if (path === "/backup-dashboard/overview") return "backup-recovery";
+  if (path === "/backup-verify/overview") return "backup-verification";
   if (path === "/m365/studio-overview") return "microsoft-studio";
   if (["/m365/sync/readiness", "/m365/security/posture", "/m365/mfa-analytics", "/m365/licensing/posture"].includes(path)) return "microsoft-evidence";
   if (path.startsWith("/m365/capabilities/")) return "microsoft-operations";
@@ -64,12 +65,14 @@ export function studioObservationView(endpoint) {
   if (path === "/yeastar/pbxs") return "voice-estate";
   if (path === "/web-studio/fleet") return "web-estate";
   if (path === "/networking/dashboard") return "network-operations";
+  if (["/proxmox/vms", "/proxmox/connection"].includes(path)) return "proxmox-operations";
   if (path === "/networking/sites") return "network-sites";
   if (["/unifi/status", "/bandwidth-monitor/overview", "/unifi/actions/log"].includes(path)) return "network-evidence";
   if (path === "/patch-compliance/overview") return "patch-posture";
   if (path === "/nexus-pulse/overview") return "monitoring-pulse";
   if (path === "/nexus-pulse/resources") return "monitoring-resources";
   if (path === "/security-dashboard/overview") return "security-posture";
+  if (path === "/soc/alerts") return "soc-alerts";
   if (path === "/leads") return "lead-pipeline";
   if (path === "/documentation") return "documentation-inventory";
   if (path === "/csat/dashboard") return "communications-csat";

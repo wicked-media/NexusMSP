@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog } from "@/components/ui/dialog";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { AlertTriangle, Bell, RefreshCw, Settings, ShieldCheck, Zap } from "lucide-react";
@@ -20,13 +21,25 @@ export default function EscalationMatrixPage() {
   const [tab, setTab] = useState("rules");
   const [checking, setChecking] = useState(false);
   const [checkConfirmationOpen, setCheckConfirmationOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = useCallback(() => {
-    Promise.all([
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [rulesResponse, logsResponse] = await Promise.all([
       axios.get(`${API}/escalation-matrix/rules`, { headers }),
       axios.get(`${API}/escalation-matrix/log`, { headers }),
-    ]).then(([r, l]) => { setRules(r.data); setLogs(l.data); }).catch(() => {});
+      ]);
+      setRules(Array.isArray(rulesResponse.data) ? rulesResponse.data : []);
+      setLogs(Array.isArray(logsResponse.data) ? logsResponse.data : []);
+    } catch {
+      setLoadError("Nexus could not retrieve the escalation rules and activity evidence. No escalation was run.");
+    } finally {
+      setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -50,6 +63,10 @@ export default function EscalationMatrixPage() {
       toast.error(`Couldn't update ${rule.name}`);
     }
   };
+
+  if (loading) return <WorkspaceLoadingState label="Loading escalation controls" className="p-4 sm:p-6" />;
+
+  if (loadError) return <WorkspaceErrorState title="Escalation controls are unavailable" description={loadError} onRetry={fetchData} retryLabel="Retry escalation controls" className="mx-4 sm:mx-6" />;
 
   return (
     <div className="space-y-6" data-testid="escalation-matrix-page">

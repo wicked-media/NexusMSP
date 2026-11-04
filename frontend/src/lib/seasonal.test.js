@@ -6,9 +6,9 @@ describe("seasonalMode", () => {
     expect(seasonalMode(new Date(2026, 11, 31))).toBe("snow");
   });
 
-  it("returns bats only in the last week of October", () => {
-    expect(seasonalMode(new Date(2026, 9, 25))).toBe("bats");
-    expect(seasonalMode(new Date(2026, 9, 31))).toBe("bats");
+  it("does not add a Halloween overlay to the operations workspace", () => {
+    expect(seasonalMode(new Date(2026, 9, 25))).toBeNull();
+    expect(seasonalMode(new Date(2026, 9, 31))).toBeNull();
     expect(seasonalMode(new Date(2026, 9, 24))).toBeNull();
     expect(seasonalMode(new Date(2026, 10, 1))).toBeNull();
   });
@@ -23,7 +23,7 @@ describe("seasonalMode", () => {
   });
 
   it("has copy for every mode", () => {
-    for (const mode of ["snow", "bats", "april"]) {
+    for (const mode of ["snow", "april"]) {
       expect(SEASONAL_COPY[mode]).toBeTruthy();
     }
   });

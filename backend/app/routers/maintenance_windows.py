@@ -38,6 +38,10 @@ router = APIRouter()
 VALID_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
 
 
+def _unsafe_parallel_actions(actions: list[str]) -> bool:
+    return "reboot" in actions and bool({"install-patches", "install-winget"}.intersection(actions))
+
+
 from app.services.time_utils import now_iso as _now_iso
 
 
@@ -51,7 +55,7 @@ def _parse_dt(s):
             dt = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+        return dt.astimezone(timezone.utc)
     except Exception:
         return None
 
@@ -176,6 +180,8 @@ async def _current_window_device(window: dict, stored_device: dict) -> tuple[dic
         or stored_client_id != current_client_id
     ):
         return None, "target client ownership changed; command was not dispatched"
+    if str(device.get("site_id") or "").strip() != str(stored_device.get("site_id") or "").strip():
+        return None, "target site changed; command was not dispatched"
     return device, None
 
 
@@ -224,6 +230,8 @@ async def create_window(data: dict, current_user: dict = Depends(require_agent_o
     for a in actions:
         if a not in VALID_ACTIONS:
             raise HTTPException(400, f"invalid action {a}; must be in {sorted(VALID_ACTIONS)}")
+    if _unsafe_parallel_actions(actions):
+        raise HTTPException(400, "Schedule reboots separately from update installation; maintenance actions are not sequenced")
     scheduled = _parse_dt(data.get("scheduled_at"))
     if not scheduled:
         raise HTTPException(400, "scheduled_at required (ISO or 'YYYY-MM-DD HH:MM:SS')")
@@ -358,6 +366,11 @@ async def _run_device_action(device: dict, action: str, window: dict) -> dict:
     if not device.get("nexus_agent_id"):
         rec.update({"status": "skipped", "message": "device has no enrolled Nexus Agent", "finished_at": _now_iso()})
         return rec
+    if action in {"install-patches", "install-winget"}:
+        platform = str(device.get("os") or device.get("os_name") or "").strip().lower()
+        if "windows" not in platform:
+            rec.update({"status": "skipped", "message": "Windows update action requires a Windows platform reported by the endpoint", "finished_at": _now_iso()})
+            return rec
     try:
         from app.routers.nexus_agent import queue_command_for_device
         if action == "reboot":
@@ -376,9 +389,13 @@ $session=New-Object -ComObject Microsoft.Update.Session
 $updates=$session.CreateUpdateSearcher().Search(\"IsInstalled=0 and Type='Software' and IsHidden=0\").Updates
 $toInstall=New-Object -ComObject Microsoft.Update.UpdateColl
 foreach($u in $updates){ if(-not $u.EulaAccepted){$u.AcceptEula()}; [void]$toInstall.Add($u) }
-if($toInstall.Count -eq 0){'No applicable Windows updates'; exit 0}
-$result=$session.CreateUpdateInstaller(); $result.Updates=$toInstall; $out=$result.Install()
-[pscustomobject]@{installed=$toInstall.Count;result_code=$out.ResultCode;reboot_required=$out.RebootRequired}|ConvertTo-Json -Compress"""
+if($toInstall.Count -eq 0){[pscustomobject]@{phase='no_updates';attempted=0;updates=@()}|ConvertTo-Json -Compress; exit 0}
+$downloader=$session.CreateUpdateDownloader(); $downloader.Updates=$toInstall; $download=$downloader.Download()
+if($download.ResultCode -ne 2){[pscustomobject]@{phase='download';result_code=[int]$download.ResultCode}|ConvertTo-Json -Compress; exit 1}
+$installer=$session.CreateUpdateInstaller(); $installer.Updates=$toInstall; $out=$installer.Install()
+$results=@(); for($i=0;$i -lt $toInstall.Count;$i++){ $item=$out.GetUpdateResult($i); $results+=@{title=$toInstall.Item($i).Title;result_code=[int]$item.ResultCode;hresult=[int]$item.HResult} }
+[pscustomobject]@{phase='install';attempted=$toInstall.Count;result_code=[int]$out.ResultCode;reboot_required=$out.RebootRequired;updates=$results}|ConvertTo-Json -Compress -Depth 4
+if($out.ResultCode -ne 2 -or @($results | Where-Object { $_.result_code -ne 2 }).Count -gt 0){exit 1}"""
             command_id = await queue_command_for_device(device, "run_powershell", {"script": script, "timeout_sec": 7200}, queued_by="maintenance-window")
         elif action == "install-winget":
             policy = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
@@ -439,6 +456,11 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
     if not window or window.get("status") in {"completed", "failed", "cancelled"}:
         return window
 
+    # Results can arrive while other targets are still being dispatched. Do not
+    # close a window until its complete set of run records has been persisted.
+    if window.get("status") == "running" and window.get("dispatch_complete") is False:
+        return window
+
     runs = await db.maintenance_window_runs.find(_window_tenant_query(window, {"window_id": wid}), {"_id": 0, "status": 1}).to_list(2000)
     counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
     for run in runs:
@@ -452,10 +474,11 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
         )
         return {**window, "status": "awaiting_results", "summary_counts": counts}
 
-    final_status = "failed" if counts.get("failed", 0) else "completed"
+    final_status = "failed" if counts.get("failed", 0) or counts.get("skipped", 0) or window.get("dispatch_errors") or not runs else "completed"
     summary = (
         f"Endpoint results returned for {len(runs)} action(s): {counts.get('ok', 0)} successful, "
-        f"{counts.get('failed', 0)} failed, and {counts.get('skipped', 0)} skipped."
+        f"{counts.get('failed', 0)} failed, and {counts.get('skipped', 0)} skipped. "
+        f"Dispatch errors: {window.get('dispatch_errors', 0)}."
     )
     completed = await db.maintenance_windows.update_one(
         _window_tenant_query(window, {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}}),
@@ -486,9 +509,17 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
         return
     claimed = await db.maintenance_windows.update_one(
         _window_tenant_query(w, {"id": wid, "status": {"$in": expected_statuses}}),
-        {"$set": {"status": "running", "started_at": _now_iso()}},
+        {"$set": {"status": "running", "started_at": _now_iso(), "dispatch_complete": False}},
     )
     if claimed.modified_count != 1:
+        return
+
+    if _unsafe_parallel_actions(w.get("actions") or []):
+        await db.maintenance_windows.update_one(
+            _window_tenant_query(w, {"id": wid, "status": "running"}),
+            {"$set": {"status": "failed", "finished_at": _now_iso(), "dispatch_complete": True,
+                      "dispatch_errors": 1, "ai_summary": "Not dispatched: reboot and update installation must be scheduled separately."}},
+        )
         return
 
     sem = asyncio.Semaphore(8)
@@ -515,10 +546,30 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
                 rec = await _run_device_action(device, action, w)
             await db.maintenance_window_runs.insert_one(rec)
             rec.pop("_id", None)
+            # An agent may return between queueing the command and inserting its
+            # run record. Recover that already-accepted result after insertion.
+            if rec.get("command_id") and rec.get("status") == "queued":
+                command = await db.nexus_agent_commands.find_one(
+                    {"id": rec["command_id"], "device_id": device["nexus_agent_id"], "status": {"$in": ["ok", "error", "timeout"]}},
+                    {"_id": 0, "status": 1, "exit_code": 1, "stdout": 1},
+                )
+                if command:
+                    from app.routers.nexus_agent import _maintenance_result_status, _patch_result_summary
+                    patch_summary = _patch_result_summary(command.get("stdout") or "") if action == "install-patches" else None
+                    status = _maintenance_result_status(action, command.get("status"), command.get("exit_code"), patch_summary)
+                    await db.maintenance_window_runs.update_one(
+                        _window_tenant_query(w, {"id": rec["id"], "status": "queued"}),
+                        {"$set": {"status": status, "finished_at": _now_iso(),
+                                  "message": f"Agent command {command.get('status')} (exit code {command.get('exit_code')}); maintenance result {status}" + ("; patch evidence missing or unsuccessful" if action == "install-patches" and status == "failed" else ""),
+                                  "patch_result": patch_summary}},
+                    )
             return rec
 
     tasks = [run_one(d, a) for d in devices for a in actions]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    dispatch_errors = sum(isinstance(result, BaseException) for result in results)
+    if dispatch_errors:
+        logger.error("Maintenance window %s had %s dispatch errors", wid, dispatch_errors)
     results = [r for r in results if isinstance(r, dict)]
     summary_counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
     for r in results:
@@ -526,6 +577,10 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
 
     # Queueing is only dispatch. The command-result callback reconciles actual
     # endpoint results and closes the window once every queued action returns.
+    await db.maintenance_windows.update_one(
+        _window_tenant_query(w, {"id": wid, "status": "running"}),
+        {"$set": {"dispatch_complete": True, "dispatch_errors": dispatch_errors}},
+    )
     await reconcile_window_from_runs(wid)
     return
 

@@ -277,7 +277,7 @@ export default function DashboardPage() {
 
   return (
     <PageShell>
-    <div className="flex-1 overflow-y-auto space-y-4 pt-1" data-testid="dashboard-page">
+    <div className="nx-dashboard-shell flex-1 overflow-y-auto space-y-5 px-4 pb-8 pt-4 sm:px-6 sm:pt-6 xl:px-8" data-testid="dashboard-page">
 
       <NexusDaily
         missionControl={missionControl}
@@ -293,14 +293,15 @@ export default function DashboardPage() {
         token={token}
       />
 
-      <details className="group rounded-2xl border border-border/70 bg-card/70 p-3" data-testid="dashboard-deep-operations">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-2 py-1.5 text-left outline-none transition hover:bg-muted/35">
+      <details className="nx-dashboard-disclosure group" data-testid="dashboard-deep-operations">
+        <summary className="nx-dashboard-disclosure__summary">
           <div>
-            <p className="text-xs font-semibold text-foreground">Mission Control evidence and Nexus Brain</p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">Open the full operating health, workstreams, completed automations, approvals and cross-client correlations.</p>
+            <p className="nx-dashboard-disclosure__eyebrow">Intelligence</p>
+            <p className="nx-dashboard-disclosure__title">Mission Control evidence and Nexus Brain</p>
+            <p className="nx-dashboard-disclosure__description">Health evidence, workstreams, approvals and cross-client correlations — available when you need depth, quiet when you do not.</p>
           </div>
-          <span className="flex shrink-0 items-center gap-2 text-[10px] font-medium text-primary">
-            Open full intelligence <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" />
+          <span className="nx-dashboard-disclosure__action">
+            View intelligence <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" />
           </span>
         </summary>
         <div className="mt-3 space-y-4 border-t border-border/70 pt-4">
@@ -309,25 +310,26 @@ export default function DashboardPage() {
         </div>
       </details>
 
-      <details className="group rounded-2xl border border-white/[0.07] bg-[#0f1116] p-3" data-testid="dashboard-operational-detail">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-2 py-1.5 text-left outline-none transition hover:bg-white/[0.025]">
+      <details className="nx-dashboard-disclosure group" data-testid="dashboard-operational-detail">
+      <summary className="nx-dashboard-disclosure__summary">
         <div>
-          <p className="text-xs font-semibold text-zinc-200">Operational analytics and custom widgets</p>
-          <p className="mt-0.5 text-[10px] text-zinc-500">Open the live ticker, SLA evidence, fleet analytics and personalised workspace when you need deeper context.</p>
+          <p className="nx-dashboard-disclosure__eyebrow">Operations</p>
+          <p className="nx-dashboard-disclosure__title">Operational workbench</p>
+          <p className="nx-dashboard-disclosure__description">Live operations, SLA evidence, fleet health and your personal widget layout — held behind one focused work surface.</p>
         </div>
-        <span className="flex shrink-0 items-center gap-2 text-[10px] font-medium text-cyan-200">
-          Open detail <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" />
+        <span className="nx-dashboard-disclosure__action">
+          Open workbench <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" />
         </span>
       </summary>
-      <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
+      <div className="nx-dashboard-workbench mt-4 space-y-4 border-t border-border/70 pt-4">
 
       {/* Widget Edit Mode bar */}
-      <div className="flex items-center justify-between px-1">
-        <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+      <div className="nx-dashboard-customise-bar">
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
           {editMode ? (
-            <><Unlock className="w-3 h-3 text-violet-400" /><span className="text-violet-300 font-medium">Edit mode active</span> — drag widgets, resize from the bottom-right, or click <X className="inline w-3 h-3 mx-0.5 text-rose-400" /> to hide{hiddenWidgets.size > 0 ? <> · <span className="text-amber-300">{hiddenWidgets.size} hidden</span></> : null}</>
+            <><Unlock className="w-3 h-3 text-primary" /><span className="text-foreground font-medium">Edit mode active</span> — drag widgets, resize from the bottom-right, or click <X className="inline w-3 h-3 mx-0.5 text-rose-400" /> to hide{hiddenWidgets.size > 0 ? <> · <span className="text-amber-600 dark:text-amber-300">{hiddenWidgets.size} hidden</span></> : null}</>
           ) : (
-            <><Lock className="w-3 h-3" />Layout locked · click <strong className="text-zinc-300">Customise</strong> to rearrange{hiddenWidgets.size > 0 ? <> · <span className="text-amber-300/80">{hiddenWidgets.size} widget{hiddenWidgets.size > 1 ? "s" : ""} hidden</span></> : null}</>
+            <><Lock className="w-3 h-3" />Layout locked · click <strong className="text-foreground">Customise</strong> to rearrange{hiddenWidgets.size > 0 ? <> · <span className="text-amber-600 dark:text-amber-300">{hiddenWidgets.size} widget{hiddenWidgets.size > 1 ? "s" : ""} hidden</span></> : null}</>
           )}
         </div>
         <div className="flex gap-2">
@@ -789,15 +791,21 @@ export default function DashboardPage() {
 }
 
 function LiveOpsTicker({ items, onNavigate }) {
-  const repeated = [...items, ...items];
+  // The second sequence exists solely to create a seamless marquee loop. It
+  // must not become a second tab stop sequence or make assistive technology
+  // announce every operational event twice.
+  const repeated = [
+    ...items.map((item, index) => ({ item, index, clone: false })),
+    ...items.map((item, index) => ({ item, index, clone: true })),
+  ];
   return (
     <div className="nx-live-ticker h-full" data-testid="live-ops-ticker">
       <div className="nx-live-ticker__label"><Activity className="w-3.5 h-3.5" /><span>Live ops</span><span className="nx-live-ticker__pulse" /></div>
       <div className="nx-live-ticker__viewport">
         <div className="nx-live-ticker__track">
-          {repeated.map((item, index) => {
+          {repeated.map(({ item, index, clone }) => {
             const Icon = item.icon || Activity;
-            return <button key={`${item.label}-${index}`} onClick={() => onNavigate(item.path)} className={`nx-live-ticker__item nx-live-ticker__item--${item.tone}`}>
+            return <button key={`${item.label}-${index}-${clone ? "clone" : "primary"}`} onClick={() => onNavigate(item.path)} className={`nx-live-ticker__item nx-live-ticker__item--${item.tone}`} aria-hidden={clone || undefined} tabIndex={clone ? -1 : undefined}>
               <Icon className="w-3.5 h-3.5 shrink-0" /><span className="font-medium">{item.label}</span><span className="nx-live-ticker__detail">{item.detail}</span>
             </button>;
           })}

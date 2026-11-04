@@ -601,6 +601,12 @@ _register(_studio(
         owner="Experience",
     ),
     tabs={
+        "overview": _tab(
+            "wired",
+            "Recorded security posture, coverage gaps and evidence freshness from the canonical Security Dashboard projection.",
+            endpoint="/security-dashboard/overview",
+            evidence="app.routers.security_dashboard",
+        ),
         "inventory": _tab(
             "wired",
             "The lead records the Sales workspace already holds (GET /leads): company and contact, "
@@ -702,8 +708,18 @@ _register(_studio(
                           endpoint="/proxmox/nodes", evidence="backend/app/routers/proxmox.py"),
         "overview": _tab("wired", "Admission contract plus live connection health from GET /proxmox/connection (no token material).",
                          endpoint="/proxmox/connection", evidence="backend/app/routers/proxmox.py"),
-        "administration": _planned("Power actions execute through POST /proxmox/vms/{id}/action with descriptor, approval and verification; the per-guest studio surface lands next."),
-        "settings": _planned("Connection management (encrypted API tokens, client scope) lives in Infrastructure; the studio settings surface adopts it next."),
+        "administration": _tab(
+            "wired",
+            "Scoped provider-bound guest inventory. Guest power actions remain in the Proxmox workspace, where descriptors, permission, approval, provider-task verification and outcome evidence are enforced.",
+            endpoint="/proxmox/vms",
+            evidence="app.routers.proxmox.get_proxmox_vms",
+        ),
+        "settings": _tab(
+            "wired",
+            "Safe Proxmox connection state, provider health and reconciliation status. Tokens and controller credentials remain server-only.",
+            endpoint="/proxmox/connection",
+            evidence="app.routers.proxmox.get_proxmox_connection",
+        ),
         "activity": _tab("wired", "Virtualisation action events: simulated, blocked, approval-requested, completed and failed outcomes.",
                          endpoint=ACTIVITY_ENDPOINT, subjects=("virtualization.",)),
     },
@@ -1003,6 +1019,12 @@ _register(_studio(
             "because no identity source is configured, never as zero alerts.",
             endpoint="/security-dashboard/overview",
             evidence="app.routers.security_dashboard",
+        ),
+        "diagnostics": _tab(
+            "wired",
+            "Recorded SOC cases in the caller's tenant and client scope. Review and lifecycle actions remain in Security Operations with their existing permission and audit controls.",
+            endpoint="/soc/alerts",
+            evidence="app.routers.soc.get_soc_alerts",
         ),
     },
 ))

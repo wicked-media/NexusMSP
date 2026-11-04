@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { seasonalMode, SEASONAL_COPY } from "@/lib/seasonal";
 
-// Ambient seasonal delight: December snow, spooky-season bats, and the
-// April Fools' banner. Purely decorative — it never touches app data.
+// Ambient seasonal moments are deliberately subtle. They never touch app data
+// and must not visually compete with operational information.
 
 const FLAKES = Array.from({ length: 26 }, (_, i) => ({
   id: i,
@@ -11,8 +11,6 @@ const FLAKES = Array.from({ length: 26 }, (_, i) => ({
   duration: 7 + (i % 5) * 2,
   size: 4 + (i % 4) * 2,
 }));
-
-const BATS = Array.from({ length: 7 }, (_, i) => ({ id: i, top: 8 + ((i * 29) % 60), delay: i * 1.7 }));
 
 export default function SeasonalEffects() {
   const mode = useMemo(() => seasonalMode(new Date()), []);
@@ -48,9 +46,6 @@ export default function SeasonalEffects() {
           className="seasonal-flake absolute rounded-full bg-sky-200/70"
           style={{ left: `${flake.left}%`, width: flake.size, height: flake.size, animationDelay: `${flake.delay}s`, animationDuration: `${flake.duration}s` }}
         />
-      ))}
-      {mode === "bats" && BATS.map((bat) => (
-        <span key={bat.id} className="seasonal-bat absolute text-xl" style={{ top: `${bat.top}%`, animationDelay: `${bat.delay}s` }}>🦇</span>
       ))}
       {mode === "april" && !aprilDismissed && (
         <div className="pointer-events-auto absolute top-16 left-1/2 z-[61] w-[min(92vw,460px)] -translate-x-1/2 rounded-xl border border-violet-400/40 bg-slate-900/95 p-4 shadow-2xl">

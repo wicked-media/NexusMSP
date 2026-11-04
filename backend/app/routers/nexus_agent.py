@@ -964,6 +964,38 @@ class CommandResult(BaseModel):
     duration_ms: int = Field(default=0, ge=0, le=86_400_000)
 
 
+def _patch_result_summary(stdout: str) -> dict | None:
+    """Extract bounded endpoint-reported evidence, never infer compliance."""
+    try:
+        value = json.loads(stdout)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(value, dict) or value.get("phase") not in {"no_updates", "download", "install"}:
+        return None
+    summary = {"phase": value["phase"]}
+    for key in ("attempted", "result_code"):
+        if type(value.get(key)) is int and 0 <= value[key] <= 100000:
+            summary[key] = value[key]
+    if type(value.get("reboot_required")) is bool:
+        summary["reboot_required"] = value["reboot_required"]
+    return summary
+
+
+def _maintenance_result_status(action: str, status: str, exit_code: int, patch_summary: dict | None) -> str:
+    """Require explicit successful patch evidence as well as process success."""
+    if status != "ok" or exit_code != 0:
+        return "failed"
+    if action != "install-patches":
+        return "ok"
+    if not patch_summary:
+        return "failed"
+    if patch_summary.get("phase") == "no_updates" and patch_summary.get("attempted") == 0:
+        return "ok"
+    if patch_summary.get("phase") == "install" and patch_summary.get("result_code") == 2 and patch_summary.get("attempted", 0) > 0:
+        return "ok"
+    return "failed"
+
+
 class CompanionDeployRequest(BaseModel):
     device_ids: list[str] = Field(default_factory=list, max_length=200)
     all_online: bool = False
@@ -2091,11 +2123,15 @@ async def command_result(
     # Maintenance windows queue commands asynchronously; reconcile the window
     # record when the agent returns instead of leaving a permanent "queued".
     try:
-        maintenance_run = await db.maintenance_window_runs.find_one({"command_id": res.id}, {"_id": 0, "window_id": 1})
+        # The command was already bound to this authenticated agent and nonce
+        # above. Maintenance run device_id is the asset ID, not the agent ID.
+        maintenance_run = await db.maintenance_window_runs.find_one({"command_id": res.id}, {"_id": 0, "window_id": 1, "action": 1})
         if maintenance_run:
-            run_status = "ok" if res.status == "ok" else "failed"
+            patch_summary = _patch_result_summary(res.stdout) if maintenance_run.get("action") == "install-patches" else None
+            run_status = _maintenance_result_status(maintenance_run.get("action"), res.status, res.exit_code, patch_summary)
             await db.maintenance_window_runs.update_one({"command_id": res.id}, {"$set": {
-                "status": run_status, "message": f"Agent command {res.status} (exit code {res.exit_code})", "finished_at": _now(),
+                "status": run_status, "message": f"Agent command {res.status} (exit code {res.exit_code}); maintenance result {run_status}" + ("; patch evidence missing or unsuccessful" if maintenance_run.get("action") == "install-patches" and run_status == "failed" else ""), "finished_at": _now(),
+                "patch_result": patch_summary,
             }})
             runs = await db.maintenance_window_runs.find({"window_id": maintenance_run["window_id"]}, {"_id": 0, "status": 1}).to_list(500)
             counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}

@@ -357,6 +357,7 @@ describe("the observation kit", () => {
     expect(studioObservationView("/client-health/dashboard")).toBe("client-portfolio");
     expect(studioObservationView("/client-studio/renewal-watch")).toBe("client-renewal-watch");
     expect(studioObservationView("/backup-dashboard/overview")).toBe("backup-recovery");
+    expect(studioObservationView("/backup-verify/overview")).toBe("backup-verification");
     expect(studioObservationView("/security-dashboard/overview")).toBe("security-posture");
     // A studio pointed somewhere else renders the generic tab, not a panel whose
     // field mapping would describe it wrongly.
@@ -372,6 +373,9 @@ describe("the observation kit", () => {
     expect(studioObservationView("/yeastar/pbxs")).toBe("voice-estate");
     expect(studioObservationView("/web-studio/fleet")).toBe("web-estate");
     expect(studioObservationView("/networking/dashboard")).toBe("network-operations");
+    expect(studioObservationView("/proxmox/vms")).toBe("proxmox-operations");
+    expect(studioObservationView("/proxmox/connection")).toBe("proxmox-operations");
+    expect(studioObservationView("/soc/alerts")).toBe("soc-alerts");
     expect(studioObservationView("/networking/sites")).toBe("network-sites");
     expect(studioObservationView("/patch-compliance/overview")).toBe("patch-posture");
     expect(studioObservationView("/leads")).toBe("lead-pipeline");

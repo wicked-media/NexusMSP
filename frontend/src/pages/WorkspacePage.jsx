@@ -12,7 +12,7 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Bookmark, Eye, Activity, Save, Loader2, Pin, X, Wifi, WifiOff,
   Ticket as TicketIcon, Monitor, Flame, Clock, History, RefreshCw,
-  AlertTriangle, Search,
+  Search,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import { priorityConfig } from "@/config/ticketConfig";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import { taskShortcuts } from "@/config/navigation";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const taskAccentClasses = {
   emerald: "border-emerald-500/20 bg-emerald-500/[0.045] text-emerald-300 hover:border-emerald-400/40 hover:bg-emerald-500/[0.075]",
@@ -92,9 +93,7 @@ export default function WorkspacePage() {
   if (loading) {
     return (
       <PageShell>
-        <div className="flex items-center justify-center h-64 text-zinc-500">
-          <Loader2 className="w-8 h-8 animate-spin" />
-        </div>
+        <WorkspaceLoadingState label="Loading your personal operations workspace" className="mx-auto mt-5 max-w-[1680px]" />
       </PageShell>
     );
   }
@@ -102,13 +101,7 @@ export default function WorkspacePage() {
   if (loadError || !data) {
     return (
       <PageShell data-testid="workspace-load-error">
-        <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]">
-          <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-            <AlertTriangle className="h-10 w-10 text-rose-300" />
-            <div><h1 className="text-lg font-semibold">My Workspace is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError || "The personal workspace did not return the data needed to render."}</p></div>
-            <Button onClick={handleRefresh} data-testid="retry-workspace-load"><RefreshCw className="mr-2 h-4 w-4" />Retry workspace</Button>
-          </CardContent>
-        </Card>
+        <WorkspaceErrorState className="mx-auto mt-5 max-w-[1680px]" title="My Workspace is unavailable" description={loadError || "The personal workspace did not return the data needed to render."} onRetry={handleRefresh} retryLabel="Retry workspace" />
       </PageShell>
     );
   }
@@ -136,7 +129,7 @@ export default function WorkspacePage() {
 
   return (
     <PageShell data-testid="workspace-page">
-      <div className="space-y-5 p-6">
+      <div className="mx-auto max-w-[1680px] space-y-5 p-4 sm:p-6">
         <OperationalPageHeader
           eyebrow="Personal operations"
           title="My Workspace"

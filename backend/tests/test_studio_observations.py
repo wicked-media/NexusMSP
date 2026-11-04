@@ -72,17 +72,63 @@ OBSERVATION_PANELS = (
     "DeviceEstatePanel.jsx",
     "AgentFleetPanel.jsx",
     "ClientEstatePanel.jsx",
+    "ClientPortfolioPanel.jsx",
+    "ClientRenewalWatchPanel.jsx",
     "BackupRecoveryPanel.jsx",
+    "BackupVerificationPanel.jsx",
+    "MicrosoftStudioPanel.jsx",
+    "MicrosoftEvidencePanel.jsx",
+    "MicrosoftOperationsPanel.jsx",
     "WebEstatePanel.jsx",
     "M365TenantPanel.jsx",
+    "MonitoringPulsePanel.jsx",
+    "MonitoringResourcesPanel.jsx",
     "VoiceEstatePanel.jsx",
+    "NetworkOperationsPanel.jsx",
+    "NetworkEvidencePanel.jsx",
     "NetworkSitesPanel.jsx",
     "PatchPosturePanel.jsx",
+    "ProxmoxOperationsPanel.jsx",
     "SecurityPosturePanel.jsx",
+    "SocAlertsPanel.jsx",
     "DocumentationInventoryPanel.jsx",
     "LeadPipelinePanel.jsx",
     "CommunicationsPanel.jsx",
 )
+
+# One entry per endpoint shape the observation kit deliberately maps to a
+# purpose-built panel. Several studios expose more than one evidence projection
+# (for example, Microsoft, Network and Backup), so this is intentionally not a
+# one-row-per-studio register. Keeping the full set here makes a new panel an
+# explicit contract change instead of an accidental expansion that only the UI
+# knows about.
+OBSERVATION_VIEWS = {
+    "device-estate": "/devices",
+    "agent-fleet": "/nexus-agent/agents",
+    "client-estate": "/clients-enriched",
+    "client-portfolio": "/client-health/dashboard",
+    "client-renewal-watch": "/client-studio/renewal-watch",
+    "backup-recovery": "/backup-dashboard/overview",
+    "backup-verification": "/backup-verify/overview",
+    "microsoft-studio": "/m365/studio-overview",
+    "microsoft-evidence": "/m365/security/posture",
+    "microsoft-operations": "/m365/capabilities/administration",
+    "m365-tenants": "/m365/tenants",
+    "monitoring-pulse": "/nexus-pulse/overview",
+    "monitoring-resources": "/nexus-pulse/resources",
+    "voice-estate": "/yeastar/pbxs",
+    "web-estate": "/web-studio/fleet",
+    "network-operations": "/networking/dashboard",
+    "network-evidence": "/unifi/status",
+    "network-sites": "/networking/sites",
+    "patch-posture": "/patch-compliance/overview",
+    "proxmox-operations": "/proxmox/vms",
+    "security-posture": "/security-dashboard/overview",
+    "soc-alerts": "/soc/alerts",
+    "lead-pipeline": "/leads",
+    "documentation-inventory": "/documentation",
+    "communications-csat": "/csat/dashboard",
+}
 
 # The shared parts a panel must render through. A panel that reimplemented the
 # header, the totals, the rows or the not-reported value itself would name none
@@ -207,8 +253,10 @@ def test_the_shell_selects_exactly_the_panels_the_kit_can_name():
         f"unselectable {sorted(selectable - set(selected))}, "
         f"unreachable {sorted(set(selected) - selectable)}"
     )
-    assert len(selected) == len(ADOPTED_PROJECTIONS), (
-        f"{len(selected)} panel(s) selected for {len(ADOPTED_PROJECTIONS)} adopted projections"
+    assert set(selected) == set(OBSERVATION_VIEWS), (
+        "the shell's panel selection changed without updating the supported "
+        f"observation-view contract: expected {sorted(OBSERVATION_VIEWS)}, "
+        f"selected {sorted(selected)}"
     )
     # A key naming a component nobody renders is the same bug dressed as
     # configuration, so every selection is checked against the filesystem.

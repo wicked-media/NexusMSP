@@ -46,17 +46,18 @@
         --muted-foreground: 240 5% 65%;    /* zinc-400 */
         --accent: 240 4% 16%;              /* zinc-800 */
         --accent-foreground: 0 0% 98%;
-        --destructive: 0 84% 60%;
+        --destructive: 0 72% 44%;
         --destructive-foreground: 0 0% 98%;
-        --border: 240 4% 16%;              /* zinc-800 */
-        --input: 240 4% 16%;
+        /* 3:1+ component boundaries on both the page and raised cards. */
+        --border: 240 4% 42%;
+        --input: 240 4% 42%;
         --ring: 217 91% 60%;
         --radius: 0.5rem;
 
         --success: 142 71% 45%;
         --warning: 48 96% 53%;
         --info: 217 91% 60%;
-        --offline: 240 4% 46%;
+        --offline: 240 4% 50%;
 
         --chart-1: 217 91% 60%;
         --chart-2: 142 71% 45%;
@@ -133,16 +134,17 @@
         --muted-foreground: 240 4% 45%;    /* zinc-500, deepened to hold 4.5:1 on --muted and --card */
         --accent: 240 5% 96%;
         --accent-foreground: 240 10% 4%;
-        --destructive: 0 84% 60%;
+        --destructive: 0 72% 44%;
         --destructive-foreground: 0 0% 100%;
-        --border: 240 6% 90%;              /* zinc-200 */
-        --input: 240 6% 90%;
+        /* Keep component boundaries distinct on the white operator surface. */
+        --border: 240 6% 60%;
+        --input: 240 6% 60%;
         --ring: 217 91% 50%;
 
-        --success: 142 71% 40%;
-        --warning: 38 92% 50%;
+        --success: 142 71% 30%;
+        --warning: 38 92% 36%;
         --info: 217 91% 50%;
-        --offline: 240 4% 56%;
+        --offline: 240 4% 42%;
 
         --chart-1: 217 91% 50%;
         --chart-2: 142 71% 40%;
@@ -2576,7 +2578,7 @@ html[data-motion="none"] .nexus-estate-status.is-critical .nexus-estate-status__
     }
 }
 
-/* Seasonal delight animations (snow / bats overlay) */
+/* Seasonal moments are limited to low-contrast snowfall. */
 .seasonal-flake {
     top: -12px;
     animation-name: seasonal-fall;
@@ -2587,20 +2589,6 @@ html[data-motion="none"] .nexus-estate-status.is-critical .nexus-estate-status__
 @keyframes seasonal-fall {
     from { transform: translateY(-10vh) rotate(0deg); opacity: 0.9; }
     to { transform: translateY(110vh) rotate(360deg); opacity: 0.15; }
-}
-
-.seasonal-bat {
-    left: -40px;
-    animation-name: seasonal-fly;
-    animation-timing-function: ease-in-out;
-    animation-iteration-count: infinite;
-    animation-duration: 14s;
-}
-
-@keyframes seasonal-fly {
-    0% { transform: translateX(-10vw) translateY(0); }
-    50% { transform: translateX(50vw) translateY(-30px); }
-    100% { transform: translateX(110vw) translateY(10px); }
 }
 
 /* Global technician bar. This is the one surface that never scrolls away, so it

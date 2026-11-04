@@ -155,6 +155,9 @@ export default function LoginPage() {
   const [brand, setBrand] = useState({ company_name: "NexusMSP", login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"], login_experience: "nexus-atelier", powered_by_visible: true });
   const isLocalPreview = ["localhost", "127.0.0.1"].includes(window.location.hostname);
   const previewMode = searchParams.get("preview") === "1";
+  // A developer convenience must never read like a production sign-in option.
+  // Keep it available only while intentionally previewing a login treatment.
+  const showLocalAccountHelper = isLocalPreview && previewMode;
   const requestedExperience = searchParams.get("experience");
   const savedExperience = EXPERIENCE_IDS.includes(brand.login_experience) ? brand.login_experience : "nexus-atelier";
   const experience = previewMode && EXPERIENCE_IDS.includes(requestedExperience) ? requestedExperience : savedExperience;
@@ -320,12 +323,16 @@ export default function LoginPage() {
                 <p className="nexus-atelier-auth-kicker">Secure workspace access</p>
                 <h1 className="mt-2 text-[clamp(1.7rem,2.6vw,2.2rem)] font-semibold tracking-[-0.045em] text-white">Welcome back</h1>
                 <p className="mt-2 max-w-sm text-sm leading-6 text-slate-300/75">Use your technician account to enter your organisation’s protected workspace.</p>
+                <div className="nexus-atelier-access-strip" aria-label="Sign-in security information">
+                  <span><LockKeyhole className="h-3.5 w-3.5" />MFA when required</span>
+                  <span><Activity className="h-3.5 w-3.5" />SSO when enabled</span>
+                </div>
               </div>
               <form onSubmit={handleLogin} className="px-7 py-7 sm:px-8 sm:py-8" aria-busy={isLoading}>
                 {authError && <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-rose-400/25 bg-rose-500/[0.08] px-3.5 py-3 text-xs leading-relaxed text-rose-100" role="alert"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" /><div><p className="font-semibold">Sign-in unsuccessful</p><p className="mt-0.5 text-rose-200/75">{authError}</p></div></div>}
                 <div className="space-y-2.5">
                   <Label htmlFor="nexus-login-email" className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-300/75">Email</Label>
-                  <div className="nexus-atelier-field group relative h-12"><Mail className="pointer-events-none absolute inset-y-0 left-4 z-10 my-auto h-4 w-4 text-slate-500 transition group-focus-within:text-cyan-200" /><Input id="nexus-login-email" type="email" autoComplete="email" placeholder="you@company.com" value={loginData.email} onChange={(e) => { setLoginData({ ...loginData, email: e.target.value }); if (authError) setAuthError(""); }} required data-testid="login-email-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 pl-11 text-white placeholder:text-slate-500 focus:border-cyan-300/60 focus:ring-cyan-300/15" /></div>
+                  <div className="nexus-atelier-field group relative h-12"><Mail className="pointer-events-none absolute inset-y-0 left-4 z-10 my-auto h-4 w-4 text-slate-500 transition group-focus-within:text-cyan-200" /><Input id="nexus-login-email" type="email" autoComplete="email" autoFocus placeholder="you@company.com" value={loginData.email} onChange={(e) => { setLoginData({ ...loginData, email: e.target.value }); if (authError) setAuthError(""); }} required data-testid="login-email-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 pl-11 text-white placeholder:text-slate-500 focus:border-cyan-300/60 focus:ring-cyan-300/15" /></div>
                 </div>
                 <div className="mt-5 space-y-2.5">
                   <Label htmlFor="nexus-login-password" className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-300/75">Password</Label>
@@ -335,8 +342,9 @@ export default function LoginPage() {
                 {twoFactorRequired && <div className="mt-5 space-y-2.5 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.05] p-3.5"><Label htmlFor="nexus-login-2fa" className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-cyan-100"><ShieldCheck className="h-3.5 w-3.5" />Authenticator code</Label><Input id="nexus-login-2fa" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" value={twoFactorCode} onChange={(e) => { setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6)); if (authError) setAuthError(""); }} required maxLength={6} data-testid="login-2fa-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 font-mono tracking-[.35em] text-center text-white" /></div>}
                 <Button type="submit" className="nexus-atelier-submit mt-7 h-[3.25rem] w-full rounded-xl border border-cyan-200/25 bg-cyan-500 text-[15px] font-semibold text-slate-950 shadow-[0_16px_34px_-20px_rgba(34,211,238,.75)] transition-colors hover:bg-cyan-400 hover:text-slate-950" disabled={isLoading} data-testid="login-submit-button">{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying workspace</> : <>{twoFactorRequired ? "Verify & Sign In" : "Sign in"}<ArrowRight className="ml-2 h-4 w-4" /></>}</Button>
                 {ssoEnabled && <Button type="button" variant="outline" className="mt-3 h-11 w-full rounded-xl border-cyan-200/[0.14] bg-white/[0.025] text-slate-200 hover:bg-cyan-400/[0.06] hover:text-white" onClick={handleMicrosoftLogin} disabled={ssoLoading} data-testid="microsoft-sso-button">{ssoLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Sign in with Microsoft</Button>}
-                {isLocalPreview && <Button type="button" variant="ghost" className="mt-2 h-8 w-full text-xs text-slate-400 hover:bg-transparent hover:text-cyan-100" onClick={fillDemoCredentials} data-testid="demo-credentials-button">Use local account email</Button>}
+                {showLocalAccountHelper && <Button type="button" variant="ghost" className="mt-2 h-8 w-full text-xs text-slate-400 hover:bg-transparent hover:text-cyan-100" onClick={fillDemoCredentials} data-testid="demo-credentials-button">Use local account email</Button>}
                 <p className="mt-6 flex items-start justify-center gap-2 text-center text-[11px] leading-5 text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />Sign-in attempts and security challenges are audited.</p>
+                <p className="mt-2 text-center text-[11px] text-slate-500">Need access? Contact your Nexus administrator.</p>
               </form>
             </div>
           </section>
@@ -372,6 +380,9 @@ export default function LoginPage() {
           .nexus-atelier-auth-halo { position:absolute; width:27rem; height:27rem; border-radius:999px; background:rgba(12,115,216,.09); filter:blur(70px); pointer-events:none; }
           .nexus-atelier-auth-panel { animation:atelierPanelIn .72s cubic-bezier(.2,.78,.2,1) .12s both; }
           .nexus-atelier-auth-header { background:linear-gradient(135deg,rgba(15,126,213,.13),rgba(4,28,65,.05) 56%,rgba(0,197,255,.08)); }
+          .nexus-atelier-access-strip { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:1.1rem; }
+          .nexus-atelier-access-strip span { display:inline-flex; align-items:center; gap:.35rem; border:1px solid rgba(165,243,252,.12); border-radius:999px; background:rgba(2,10,24,.32); padding:.32rem .55rem; color:rgba(203,235,249,.68); font-size:.62rem; font-weight:650; letter-spacing:.045em; text-transform:uppercase; }
+          .nexus-atelier-access-strip svg { color:#65dfff; }
           .nexus-atelier-auth-kicker { color:rgba(109,221,255,.92); font-size:.64rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; }
           .nexus-atelier-field { border-radius:.75rem; transition:transform .2s ease; }
           .nexus-atelier-field:focus-within { transform:translateY(-1px); animation:atelierFieldFocus 2.4s ease-in-out infinite; }
@@ -643,7 +654,7 @@ export default function LoginPage() {
                     </>
                   )}
 
-                  {isLocalPreview && (
+                  {showLocalAccountHelper && (
                     <Button type="button" variant="ghost" className="w-full h-9 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50" onClick={fillDemoCredentials} data-testid="demo-credentials-button">
                       Use local account email
                     </Button>

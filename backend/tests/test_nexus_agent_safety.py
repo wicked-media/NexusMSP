@@ -68,6 +68,30 @@ from app.routers import (  # noqa: E402
     zero_trust,
 )
 from app.models import UserCreate  # noqa: E402
+
+
+def test_patch_result_summary_is_bounded_and_does_not_infer_compliance():
+    result = nexus_agent._patch_result_summary(json.dumps({
+        "phase": "install", "attempted": 3, "result_code": 2,
+        "reboot_required": True, "updates": [{"title": "private output"}],
+    }))
+    assert result == {"phase": "install", "attempted": 3, "result_code": 2, "reboot_required": True}
+    assert nexus_agent._patch_result_summary("invalid") is None
+    assert nexus_agent._patch_result_summary('{"phase":"unknown"}') is None
+    assert nexus_agent._patch_result_summary('{"phase":"install","attempted":true}') == {"phase": "install"}
+
+
+@pytest.mark.parametrize("status,exit_code,evidence,expected", [
+    ("ok", 0, {"phase": "no_updates", "attempted": 0}, "ok"),
+    ("ok", 0, {"phase": "install", "result_code": 2, "attempted": 3}, "ok"),
+    ("ok", 0, None, "failed"),
+    ("ok", 0, {"phase": "install", "result_code": 3, "attempted": 3}, "failed"),
+    ("ok", 0, {"phase": "install", "result_code": 2}, "failed"),
+    ("ok", 1, {"phase": "install", "result_code": 2, "attempted": 3}, "failed"),
+    ("timeout", 0, {"phase": "no_updates", "attempted": 0}, "failed"),
+])
+def test_patch_result_requires_consistent_endpoint_evidence(status, exit_code, evidence, expected):
+    assert nexus_agent._maintenance_result_status("install-patches", status, exit_code, evidence) == expected
 from app.services import scope_permissions  # noqa: E402
 
 
@@ -822,6 +846,40 @@ def test_command_result_requires_dispatch_nonce_and_single_terminal_transition(m
     assert duplicate.value.status_code == 409
 
 
+def test_patch_result_correlates_agent_command_with_distinct_asset_id(monkeypatch):
+    commands = ResultCommandCollection()
+    empty = EmptyCollection()
+    class Runs:
+        def __init__(self):
+            self.row = {"command_id": "cmd-result-1", "device_id": "asset-1", "window_id": "window-1", "action": "install-patches", "status": "queued"}
+        async def find_one(self, query, *_args, **_kwargs):
+            return dict(self.row) if all(self.row.get(k) == v for k, v in query.items()) else None
+        async def update_one(self, query, update):
+            assert query == {"command_id": "cmd-result-1"}
+            self.row.update(update["$set"])
+        def find(self, *_args, **_kwargs):
+            return ListCursor([self.row])
+    runs = Runs()
+    async def reconcile(_wid):
+        return None
+    monkeypatch.setattr(maintenance_windows, "reconcile_window_from_runs", reconcile)
+    monkeypatch.setattr(nexus_agent, "db", SimpleNamespace(
+        nexus_agents=AgentTokenCollection(), nexus_agent_commands=commands,
+        nexus_agent_audit=AuditCollection(), maintenance_window_runs=runs,
+        maintenance_windows=empty, terminal_sessions=empty, devices=empty,
+        device_events=empty, ransomware_canaries=empty, script_executions=empty,
+    ))
+    result = asyncio.run(nexus_agent.command_result(
+        nexus_agent.CommandResult(id="cmd-result-1", nonce="nonce-result-1", status="ok", exit_code=1,
+                                  stdout='{"phase":"install","result_code":3}'),
+        x_agent_token="valid-token",
+    ))
+    assert result == {"ok": True}
+    assert runs.row["device_id"] == "asset-1"
+    assert runs.row["status"] == "failed"
+    assert runs.row["patch_result"] == {"phase": "install", "result_code": 3}
+
+
 def test_agent_transport_enforces_mtls_only_after_proxy_trust_is_enabled(monkeypatch):
     fake_db = SimpleNamespace(
         nexus_agents=IdentityAgentCollection(),
@@ -1041,6 +1099,56 @@ def test_maintenance_window_waits_for_agent_results(monkeypatch):
     assert reconciled["status"] == "awaiting_results"
     assert windows.doc["status"] == "awaiting_results"
     assert windows.doc["summary_counts"]["queued"] == 1
+
+
+def test_maintenance_window_does_not_reconcile_during_dispatch(monkeypatch):
+    windows = MaintenanceWindowCollection()
+    windows.doc["dispatch_complete"] = False
+    monkeypatch.setattr(maintenance_windows, "db", SimpleNamespace(
+        maintenance_windows=windows,
+        maintenance_window_runs=MaintenanceRunsCollection(),
+    ))
+
+    reconciled = asyncio.run(maintenance_windows.reconcile_window_from_runs("window-1"))
+
+    assert reconciled["status"] == "running"
+    assert "summary_counts" not in windows.doc
+
+
+def test_maintenance_window_with_skipped_target_is_not_completed(monkeypatch):
+    windows = MaintenanceWindowCollection()
+    windows.doc["dispatch_complete"] = True
+    class SkippedRuns:
+        def find(self, *_args, **_kwargs):
+            return ListCursor([{"status": "skipped"}])
+    async def no_activity(*_args, **_kwargs):
+        pass
+    monkeypatch.setattr(maintenance_windows, "db", SimpleNamespace(
+        maintenance_windows=windows, maintenance_window_runs=SkippedRuns(),
+    ))
+    monkeypatch.setattr(maintenance_windows, "log_activity", no_activity)
+    monkeypatch.setattr(maintenance_windows, "_post_completion_to_ticket", no_activity)
+
+    result = asyncio.run(maintenance_windows.reconcile_window_from_runs("window-1"))
+
+    assert result["status"] == "failed"
+    assert result["summary_counts"]["skipped"] == 1
+
+
+def test_maintenance_schedule_normalizes_offsets_and_blocks_parallel_reboot():
+    scheduled = maintenance_windows._parse_dt("2026-11-01T10:00:00+11:00")
+    assert scheduled.isoformat() == "2026-10-31T23:00:00+00:00"
+    assert maintenance_windows._unsafe_parallel_actions(["install-patches", "reboot"])
+    assert maintenance_windows._unsafe_parallel_actions(["reboot", "install-winget"])
+    assert not maintenance_windows._unsafe_parallel_actions(["run-checks", "reboot"])
+
+
+@pytest.mark.parametrize("platform", ["linux", "macOS", ""])
+def test_windows_patch_command_skips_unsupported_or_unknown_platform(platform):
+    device = {"id": "asset-1", "nexus_agent_id": "agent-1", "os": platform}
+    result = asyncio.run(maintenance_windows._run_device_action(device, "install-patches", {"id": "window-1"}))
+    assert result["status"] == "skipped"
+    assert "Windows platform" in result["message"]
 
 
 class CommandConsoleDevices:

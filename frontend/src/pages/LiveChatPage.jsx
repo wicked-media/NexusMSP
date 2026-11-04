@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 
@@ -52,8 +53,11 @@ export default function LiveChatPage() {
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
   const [queueRefreshing, setQueueRefreshing] = useState(false);
   const [queueError, setQueueError] = useState("");
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [initialLoadError, setInitialLoadError] = useState("");
   const messagesEndRef = useRef(null);
   const typingAtRef = useRef(0);
+  const queueInitialisedRef = useRef(false);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchSessions = async () => {
@@ -64,8 +68,10 @@ export default function LiveChatPage() {
       const r = await axios.get(`${API}/live-chat/sessions`, { headers, params });
       setSessions(r.data || []);
       setQueueError("");
+      return true;
     } catch {
       setQueueError("The live queue could not refresh. Showing the most recent sessions.");
+      return false;
     }
   };
   const fetchStats = async () => {
@@ -79,12 +85,27 @@ export default function LiveChatPage() {
   };
   const refreshQueue = async () => {
     setQueueRefreshing(true);
-    await Promise.all([fetchSessions(), fetchStats()]);
+    const [sessionsLoaded] = await Promise.all([fetchSessions(), fetchStats()]);
     setQueueRefreshing(false);
+    return sessionsLoaded;
   };
 
-  useEffect(() => { refreshQueue(); fetchCanned(); fetchAgents(); }, []); // eslint-disable-line
-  useEffect(() => { refreshQueue(); }, [search, statusFilter]); // eslint-disable-line
+  const loadInitialData = async () => {
+    setInitialLoading(true);
+    setInitialLoadError("");
+    const [sessionsLoaded] = await Promise.all([refreshQueue(), fetchCanned(), fetchAgents()]);
+    if (!sessionsLoaded) setInitialLoadError("Nexus could not open the live chat queue. No conversations were changed.");
+    setInitialLoading(false);
+  };
+
+  useEffect(() => {
+    if (!queueInitialisedRef.current) {
+      queueInitialisedRef.current = true;
+      loadInitialData();
+      return;
+    }
+    refreshQueue();
+  }, [search, statusFilter]); // eslint-disable-line
   useEffect(() => {
     const timer = setInterval(() => { refreshQueue(); }, 15_000);
     return () => clearInterval(timer);
@@ -234,6 +255,10 @@ export default function LiveChatPage() {
     normal: "bg-muted text-muted-foreground",
     low: "bg-slate-500/15 text-slate-400 border-slate-500/30",
   }[p] || "bg-muted");
+
+  if (initialLoading) return <PageShell data-testid="live-chat-page"><div className="p-4 md:p-6"><WorkspaceLoadingState label="Opening the live chat queue" /></div></PageShell>;
+
+  if (initialLoadError) return <PageShell data-testid="live-chat-page"><WorkspaceErrorState title="Live chat queue is unavailable" description={initialLoadError} onRetry={loadInitialData} retryLabel="Retry live chat" className="mx-4 md:mx-6" /></PageShell>;
 
   return (
     <PageShell data-testid="live-chat-page">
