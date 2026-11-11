@@ -34,6 +34,14 @@ let webpackConfig = {
       },
     },
   },
+  jest: {
+    configure: {
+      // Keep the source alias identical when Jest runs outside webpack.
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/src/$1',
+      },
+    },
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
