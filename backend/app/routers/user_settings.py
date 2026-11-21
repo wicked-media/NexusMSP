@@ -186,6 +186,7 @@ async def get_notification_prefs(current_user: dict = Depends(get_current_user))
     settings = await db.user_settings.find_one({"user_id": current_user["id"]}, {"_id": 0})
     defaults = {
         "inapp_ticket_assigned": True, "inapp_ticket_updated": True,
+        "inapp_ticket_checkpoint_due": True,
         "inapp_ticket_escalated": True, "inapp_sla_breach": True, "inapp_sla_warning": True,
         "inapp_device_offline": True, "inapp_contract_renewal": True, "inapp_new_lead": True,
         "inapp_email_received": True,
@@ -196,8 +197,8 @@ async def get_notification_prefs(current_user: dict = Depends(get_current_user))
 @router.put("/user-settings/notifications")
 async def update_notification_prefs(data: dict, current_user: dict = Depends(get_current_user)):
     allowed_keys = {
-        "inapp_ticket_assigned", "inapp_ticket_updated", "inapp_ticket_escalated",
-        "inapp_sla_breach", "inapp_sla_warning", "inapp_device_offline",
+        "inapp_ticket_assigned", "inapp_ticket_updated", "inapp_ticket_checkpoint_due",
+        "inapp_ticket_escalated", "inapp_sla_breach", "inapp_sla_warning", "inapp_device_offline",
         "inapp_contract_renewal", "inapp_new_lead", "inapp_email_received",
     }
     safe_prefs = {key: bool(value) for key, value in data.items() if key in allowed_keys}

@@ -400,10 +400,7 @@ async def _record_domain_timeline(domain: str, event_type: str, summary: str, de
 
 @router.get("/dns-monitor/domains")
 async def get_monitored_domains(current_user: dict = Depends(get_current_user)):
-    domains = await db.dns_domains.find({}, {"_id": 0}).to_list(500)
-    if not domains:
-        domains = await _seed_dns_data()
-    return domains
+    return await db.dns_domains.find({}, {"_id": 0}).to_list(500)
 
 @router.post("/dns-monitor/domains")
 async def add_domain(data: dict, current_user: dict = Depends(get_current_user)):
@@ -1885,34 +1882,6 @@ async def create_nexus_dns_access_request(payload: NexusDnsAccessRequestPayload,
     await _dns_audit("access_requested", current_user, {"request_id": record["id"], "domain": domain, "status": status})
     return record
 
-async def _seed_dns_data():
-    now = datetime.now(timezone.utc)
-    domains = [
-        {"id": "dns-001", "domain": "acme.com", "client_id": "client-001", "client_name": "Acme Corporation", "monitoring_enabled": True, "check_interval_minutes": 30,
-         "records": {"A": [{"value": "203.45.67.10", "ttl": 3600}], "MX": [{"value": "mail.acme.com", "priority": 10, "ttl": 3600}], "TXT": [{"value": "v=spf1 include:_spf.google.com ~all", "ttl": 3600}], "NS": [{"value": "ns1.cloudflare.com", "ttl": 86400}, {"value": "ns2.cloudflare.com", "ttl": 86400}]},
-         "last_checked": (now - timedelta(minutes=15)).isoformat(), "status": "healthy", "alerts_count": 0, "created_at": (now - timedelta(days=90)).isoformat()},
-        {"id": "dns-002", "domain": "techstart.io", "client_id": "client-002", "client_name": "TechStart Inc", "monitoring_enabled": True, "check_interval_minutes": 60,
-         "records": {"A": [{"value": "45.67.89.12", "ttl": 300}], "AAAA": [{"value": "2607:f8b0:4004:800::200e", "ttl": 300}], "MX": [{"value": "aspmx.l.google.com", "priority": 1, "ttl": 3600}], "TXT": [{"value": "v=spf1 include:_spf.google.com ~all", "ttl": 3600}, {"value": "google-site-verification=abc123", "ttl": 3600}], "CNAME": [{"name": "www", "value": "techstart.io", "ttl": 3600}]},
-         "last_checked": (now - timedelta(minutes=45)).isoformat(), "status": "warning", "alerts_count": 1, "created_at": (now - timedelta(days=60)).isoformat()},
-        {"id": "dns-003", "domain": "globalfin.com", "client_id": "client-003", "client_name": "Global Finance Ltd", "monitoring_enabled": True, "check_interval_minutes": 15,
-         "records": {"A": [{"value": "91.23.45.67", "ttl": 3600}], "MX": [{"value": "globalfin-com.mail.protection.outlook.com", "priority": 0, "ttl": 3600}], "TXT": [{"value": "v=spf1 include:spf.protection.outlook.com -all", "ttl": 3600}, {"value": "MS=ms12345678", "ttl": 3600}], "NS": [{"value": "ns1-01.azure-dns.com", "ttl": 172800}]},
-         "last_checked": (now - timedelta(minutes=5)).isoformat(), "status": "healthy", "alerts_count": 0, "created_at": (now - timedelta(days=120)).isoformat()},
-        {"id": "dns-004", "domain": "hcplus.org", "client_id": "client-004", "client_name": "HealthCare Plus", "monitoring_enabled": True, "check_interval_minutes": 30,
-         "records": {"A": [{"value": "67.89.12.34", "ttl": 3600}], "MX": [{"value": "mail.hcplus.org", "priority": 10, "ttl": 3600}], "TXT": [{"value": "v=spf1 ip4:67.89.12.34 ~all", "ttl": 3600}]},
-         "last_checked": (now - timedelta(hours=2)).isoformat(), "status": "critical", "alerts_count": 2, "created_at": (now - timedelta(days=45)).isoformat()},
-        {"id": "dns-005", "domain": "retailmax.com", "client_id": "client-005", "client_name": "RetailMax", "monitoring_enabled": True, "check_interval_minutes": 60,
-         "records": {"A": [{"value": "34.56.78.90", "ttl": 3600}], "MX": [{"value": "aspmx.l.google.com", "priority": 1, "ttl": 3600}], "TXT": [{"value": "v=spf1 include:_spf.google.com ~all", "ttl": 3600}]},
-         "last_checked": (now - timedelta(minutes=30)).isoformat(), "status": "healthy", "alerts_count": 0, "created_at": (now - timedelta(days=30)).isoformat()},
-        {"id": "dns-006", "domain": "summitlegal.com", "client_id": "client-006", "client_name": "Summit Legal Group", "monitoring_enabled": True, "check_interval_minutes": 30,
-         "records": {"A": [{"value": "104.26.10.1", "ttl": 300}], "MX": [{"value": "mx1.summitlegal.com", "priority": 10, "ttl": 3600}], "TXT": [{"value": "v=spf1 include:spf.protection.outlook.com -all", "ttl": 3600}]},
-         "last_checked": (now - timedelta(minutes=20)).isoformat(), "status": "healthy", "alerts_count": 0, "created_at": (now - timedelta(days=75)).isoformat()},
-        {"id": "dns-007", "domain": "greenvolt.com", "client_id": "client-014", "client_name": "GreenVolt Energy", "monitoring_enabled": True, "check_interval_minutes": 15,
-         "records": {"A": [{"value": "52.18.200.45", "ttl": 60}], "MX": [{"value": "aspmx.l.google.com", "priority": 1, "ttl": 3600}], "TXT": [{"value": "v=spf1 include:_spf.google.com ~all", "ttl": 3600}], "CNAME": [{"name": "app", "value": "greenvolt.herokuapp.com", "ttl": 3600}]},
-         "last_checked": (now - timedelta(minutes=8)).isoformat(), "status": "warning", "alerts_count": 1, "created_at": (now - timedelta(days=50)).isoformat()},
-    ]
-    for d in domains:
-        await db.dns_domains.insert_one(d)
-    return [dict((k, v) for k, v in d.items() if k != "_id") for d in domains]
 
 async def _seed_dns_alerts():
     now = datetime.now(timezone.utc)

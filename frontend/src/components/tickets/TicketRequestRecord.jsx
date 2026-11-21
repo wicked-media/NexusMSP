@@ -27,6 +27,7 @@ export default function TicketRequestRecord({
   onRemoveTag,
   ticketCompleted,
   slaHours,
+  compact = false,
 }) {
   const record = buildTicketRequestRecord(ticket, deviceStatus);
   const requesterLabel = record.requester?.name || record.requester?.email || "Not recorded";
@@ -54,6 +55,78 @@ export default function TicketRequestRecord({
         ? `${slaHours}h remaining to the recorded SLA target`
         : `Overdue by ${Math.abs(slaHours)}h against the recorded SLA target`;
   const progress = slaHours === null ? null : Math.max(5, Math.min(100, (1 - slaHours / 24) * 100));
+  const tags = ticket.tags || [];
+
+  if (compact) {
+    return (
+      <Card className="overflow-hidden rounded-xl border border-cyan-400/15 bg-[linear-gradient(135deg,rgba(10,20,38,0.72),rgba(7,11,21,0.9))]" data-testid="ticket-request-record">
+        <CardContent className="p-0">
+          <div className="flex items-start gap-3 px-4 py-3.5">
+            <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-cyan-300/20 bg-cyan-400/[0.08]">
+              <FileText className="h-3.5 w-3.5 text-cyan-200" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-cyan-200">Original request</p>
+                <span className="text-[10px] text-zinc-600">/</span>
+                <span className="text-[10px] text-zinc-400">{record.source || "Source not recorded"}</span>
+                <span className="text-[10px] text-zinc-600">·</span>
+                <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500"><UserRound className="h-2.5 w-2.5" />{requesterLabel}</span>
+                <span className="text-[10px] text-zinc-600">·</span>
+                <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500"><MonitorCheck className="h-2.5 w-2.5" />{record.deviceName || "No endpoint"}</span>
+                <span className="text-[10px] text-zinc-600">·</span>
+                <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500"><Clock3 className="h-2.5 w-2.5" />{capturedLabel}</span>
+              </div>
+              <p className={`mt-1.5 whitespace-pre-wrap text-sm leading-6 text-zinc-200 ${hasFullRequest ? "line-clamp-2" : ""}`}>{description}</p>
+              {hasFullRequest && (
+                <details className="group mt-1.5">
+                  <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[10px] font-medium text-cyan-200/80 outline-none transition-colors hover:text-cyan-100 focus-visible:text-cyan-100">
+                    <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />Read full intake
+                  </summary>
+                  <p className="mt-2 whitespace-pre-wrap border-l border-cyan-300/20 pl-3 text-xs leading-5 text-zinc-300">{description}</p>
+                </details>
+              )}
+              <details className="group mt-2">
+                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-[10px] text-zinc-500 outline-none hover:text-zinc-300">
+                  <Tag className="h-3 w-3" />Labels{tags.length ? ` · ${tags.length}` : ""}
+                  <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => onRemoveTag(tag)}
+                      className="group inline-flex items-center gap-1 rounded border border-white/[0.08] bg-white/[0.035] px-1.5 py-0.5 text-[10px] text-zinc-400 transition-colors hover:border-rose-400/30 hover:text-rose-100"
+                      aria-label={`Remove ${tag} label`}
+                      title="Remove label"
+                    >
+                      {tag}<span aria-hidden="true" className="text-zinc-600 group-hover:text-rose-200">×</span>
+                    </button>
+                  ))}
+                  <Input
+                    className="h-6 w-24 border-white/[0.08] bg-black/20 px-1.5 text-[10px]"
+                    placeholder="Add label"
+                    value={tagInput}
+                    onChange={(event) => onTagInputChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        onAddTag();
+                      }
+                    }}
+                    aria-label="Add a case label"
+                    data-testid="tag-input"
+                  />
+                  <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-cyan-200 hover:bg-cyan-400/[0.08]" disabled={!tagInput.trim()} onClick={onAddTag}>Add</Button>
+                </div>
+              </details>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="relative overflow-hidden rounded-2xl border border-cyan-400/15 bg-[radial-gradient(circle_at_86%_0%,rgba(34,211,238,0.10),transparent_34%),linear-gradient(135deg,rgba(10,20,38,0.97),rgba(7,11,21,0.95))] shadow-[0_18px_45px_rgba(0,0,0,0.16)]" data-testid="ticket-request-record">

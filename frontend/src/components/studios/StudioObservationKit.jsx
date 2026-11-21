@@ -79,6 +79,39 @@ export function studioObservationView(endpoint) {
   return null;
 }
 
+
+/**
+ * Which projection may compose a studio's Overview tab.
+ *
+ * The Overview tab owns the admission contract, so only views that compose
+ * landing evidence take it over. Operational panels stay on the tab that owns
+ * the operation: "/proxmox/connection" is both Proxmox's overview endpoint and
+ * its settings endpoint, and delegating Overview to the operations panel would
+ * replace the contract with a duplicate of Settings.
+ */
+const OVERVIEW_PROJECTIONS = new Set([
+  "device-estate",
+  "agent-fleet",
+  "client-estate",
+  "client-portfolio",
+  "client-renewal-watch",
+  "backup-recovery",
+  "backup-verification",
+  "microsoft-studio",
+  "voice-estate",
+  "web-estate",
+  "network-evidence",
+  "monitoring-pulse",
+  "security-posture",
+  "patch-posture",
+]);
+
+export function studioOverviewView(endpoint) {
+  const view = studioObservationView(endpoint);
+  return OVERVIEW_PROJECTIONS.has(view) ? view : null;
+}
+
+
 /** Read the endpoint a tab's registry contract names, with its declared params. */
 export function useStudioObservation(spec) {
   const { token } = useAuth();

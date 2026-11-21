@@ -386,6 +386,7 @@ export const routeConfig = [
 
   // Public routes (no auth, no layout)
   { path: "/pay/:token", component: page("PublicPaymentPage"), auth: false, layout: false },
+  { path: "/feedback/:surveyId", component: page("CsatResponsePage"), auth: false, layout: false },
   { path: "/portal-app", component: page("PortalLoginPage"), auth: false, layout: false },
   { path: "/status-board/:clientId", component: page("StatusBoardPage"), auth: false, layout: false },
 ];

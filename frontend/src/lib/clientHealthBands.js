@@ -1,40 +1,47 @@
 /**
  * Client health bands — one definition for every Clients workspace surface.
  *
- * The authoritative health engine is `_calc_health` in
- * `backend/app/routers/clients.py`. It stores a 0-100 `health_score` and serves
- * the `risk_level` derived from these exact floors:
+ * The authoritative scale is `HEALTH_BANDS` in
+ * `backend/app/services/client_health_policy.py`, used by the canonical
+ * `compute_health` engine, the directory adapter (`_calc_health`) and the
+ * health radar. These floors must match it exactly; `clientHealthBands.test.js`
+ * reads the Python tuple and fails the build when they drift.
  *
- *   healthy    score >= 75
- *   attention  score >= 50
- *   at_risk    score >= 25
- *   critical   score <  25
+ *   thriving          score >= 85
+ *   healthy           score >= 70
+ *   needs_attention   score >= 50
+ *   at_risk           score >= 30
+ *   critical          score <  30
  *
- * Before this module the directory filter said "Healthy 85+", the health dial
- * used 85/70/50, the account banner used 85/60 and the portfolio attention
- * queue used 70/60. One account could therefore read "healthy" in the engine
- * and "needs attention" on screen, and a score of 80 was excluded from every
- * filter labelled healthy. The floors below are asserted against the engine in
- * `clientHealthBands.test.js`; change the engine and this module together
- * rather than adding a fifth set of numbers to a page.
+ * Before this module the directory said "Healthy 85+", the health dial used
+ * 85/70/50, the account banner used 85/60 and the portfolio attention queue
+ * used 70/60. One account could therefore read "healthy" in the engine and
+ * "needs attention" on screen. Change the Python bands and this module
+ * together rather than adding a second set of numbers to a page.
  */
 const BAND_DEFINITIONS = [
   {
-    key: "healthy",
-    floor: 75,
-    label: "Healthy",
-    description: "Recorded service, coverage and commercial evidence are all in range.",
-    // Ambient surface hue. `at_risk` shares the critical hue on purpose: the
-    // engine only rates an account at_risk when scored commitments are failing.
+    key: "thriving",
+    floor: 85,
+    label: "Thriving",
+    description: "Recorded service, coverage and commercial evidence are strong.",
     signal: "healthy",
-    // Ring colour for the health dial. Kept in one place so the dial agrees
-    // with the band the engine assigned.
     dial: "#34d399",
     tone: "text-emerald-300",
     badge: "border-emerald-400/30 bg-emerald-500/[0.10] text-emerald-100",
   },
   {
-    key: "attention",
+    key: "healthy",
+    floor: 70,
+    label: "Healthy",
+    description: "Recorded service, coverage and commercial evidence are in range.",
+    signal: "healthy",
+    dial: "#22d3ee",
+    tone: "text-sky-300",
+    badge: "border-sky-400/30 bg-sky-500/[0.10] text-sky-100",
+  },
+  {
+    key: "needs_attention",
     floor: 50,
     label: "Needs attention",
     description: "One or more scored dimensions have slipped and should be reviewed.",
@@ -45,7 +52,7 @@ const BAND_DEFINITIONS = [
   },
   {
     key: "at_risk",
-    floor: 25,
+    floor: 30,
     label: "At risk",
     description: "Scored evidence shows a service or commercial commitment failing.",
     signal: "critical",
@@ -75,7 +82,7 @@ export const CLIENT_HEALTH_BANDS = Object.freeze(
   })),
 );
 
-/** `{ healthy: 75, attention: 50, at_risk: 25, critical: 0 }` */
+/** `{ thriving: 85, healthy: 70, needs_attention: 50, at_risk: 30, critical: 0 }` */
 export const CLIENT_HEALTH_BAND_FLOORS = Object.freeze(
   Object.fromEntries(CLIENT_HEALTH_BANDS.map((band) => [band.key, band.floor])),
 );
@@ -92,10 +99,16 @@ export function normaliseRiskLevel(value) {
   return raw || null;
 }
 
+// `attention` was the pre-unification Clients-page key for the 50-69 band.
+// Read it as the canonical `needs_attention` so a rolling deploy cannot drop a
+// scored client out of its band.
+const BAND_ALIASES = Object.freeze({ attention: "needs_attention" });
+
 export function healthBandByKey(key) {
   const normalised = normaliseRiskLevel(key);
   if (!normalised) return null;
-  return CLIENT_HEALTH_BANDS.find((band) => band.key === normalised) || null;
+  const canonical = BAND_ALIASES[normalised] || normalised;
+  return CLIENT_HEALTH_BANDS.find((band) => band.key === canonical) || null;
 }
 
 /**

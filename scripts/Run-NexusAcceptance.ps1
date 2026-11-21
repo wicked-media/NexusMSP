@@ -322,7 +322,6 @@ if ($Browser) {
 $environmentNames = @(
     "APP_ENV",
     "NEXUS_TEST_ENVIRONMENT",
-    "NEXUS_SEED_DEMO_DATA",
     "NEXUS_RUN_BACKGROUND_WORKERS",
     "NEXUS_ACCEPTANCE_PORT",
     "NEXUS_ACCEPTANCE_DB_NAME",
@@ -349,7 +348,6 @@ try {
     # a local .env, integration credential, or existing Nexus database.
     [Environment]::SetEnvironmentVariable("APP_ENV", "test", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_TEST_ENVIRONMENT", "1", "Process")
-    [Environment]::SetEnvironmentVariable("NEXUS_SEED_DEMO_DATA", "false", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_RUN_BACKGROUND_WORKERS", "false", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_PORT", "$Port", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_DB_NAME", $acceptanceDatabase, "Process")

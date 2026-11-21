@@ -168,6 +168,9 @@ def test_session_list_exposes_native_risk(monkeypatch):
         def sort(self, *_args, **_kwargs):
             return self
 
+        def skip(self, _offset):
+            return self
+
         async def to_list(self, _limit):
             return deepcopy(rows)
 

@@ -2,13 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
-import httpx
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity, ticket_audit
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
-from app.services.webhook_security import redact_webhook_for_response, validate_legacy_webhook_url
 from app.models import *
 
 router = APIRouter()
@@ -278,91 +276,6 @@ async def delete_custom_field(field_id: str, request: Request, current_user: dic
         raise HTTPException(status_code=404, detail="Custom field not found")
     await log_activity(current_user, "custom_field_deleted", "custom_field", field_id, field.get("field_label") or "Custom field")
     return {"message": "Custom field deleted"}
-
-# ============== WEBHOOKS ENDPOINTS ==============
-
-async def _require_webhook_administration(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-    _permission: dict = Depends(require_action("platform.webhooks.manage")),
-) -> dict:
-    await assert_global_scope(current_user, operation="platform.webhooks.manage", request=request)
-    return current_user
-
-@router.get("/webhooks")
-async def get_webhooks(current_user: dict = Depends(_require_webhook_administration)):
-    webhooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
-    return [redact_webhook_for_response(webhook) for webhook in webhooks]
-
-@router.post("/webhooks")
-async def create_webhook(webhook_data: dict, current_user: dict = Depends(_require_webhook_administration)):
-    try:
-        endpoint_url = validate_legacy_webhook_url(webhook_data.get("url"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    webhook = Webhook(
-        name=webhook_data.get('name'),
-        url=endpoint_url,
-        secret=webhook_data.get('secret'),
-        events=webhook_data.get('events', []),
-        is_active=webhook_data.get('is_active', True),
-        headers=webhook_data.get('headers', {})
-    )
-    doc = webhook.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    await db.webhooks.insert_one(doc)
-    await log_activity(current_user, "webhook_created", "webhook", doc["id"], doc.get("name") or "Webhook")
-    return redact_webhook_for_response(doc)
-
-@router.put("/webhooks/{webhook_id}")
-async def update_webhook(webhook_id: str, webhook_data: dict, current_user: dict = Depends(_require_webhook_administration)):
-    update = dict(webhook_data)
-    if "url" in update:
-        try:
-            update["url"] = validate_legacy_webhook_url(update["url"])
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = await db.webhooks.update_one({"id": webhook_id}, {"$set": update})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    await log_activity(current_user, "webhook_updated", "webhook", webhook_id, "Webhook")
-    return {"message": "Webhook updated"}
-
-@router.delete("/webhooks/{webhook_id}")
-async def delete_webhook(webhook_id: str, current_user: dict = Depends(_require_webhook_administration)):
-    result = await db.webhooks.delete_one({"id": webhook_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    await log_activity(current_user, "webhook_deleted", "webhook", webhook_id, "Webhook")
-    return {"message": "Webhook deleted"}
-
-@router.post("/webhooks/{webhook_id}/test")
-async def test_webhook(webhook_id: str, current_user: dict = Depends(_require_webhook_administration)):
-    webhook = await db.webhooks.find_one({"id": webhook_id}, {"_id": 0})
-    if not webhook:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    
-    try:
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.post(
-                webhook['url'],
-                json={"event": "test", "message": "Webhook test from NexusOps"},
-                headers=webhook.get('headers', {}),
-                timeout=10
-            )
-        
-        await db.webhooks.update_one(
-            {"id": webhook_id},
-            {"$set": {"last_triggered": datetime.now(timezone.utc).isoformat(), "last_status": response.status_code}}
-        )
-        await log_activity(current_user, "webhook_tested", "webhook", webhook_id, "Webhook", metadata={"status_code": response.status_code})
-        return {"success": response.status_code < 400, "status_code": response.status_code}
-    except Exception:
-        await db.webhooks.update_one(
-            {"id": webhook_id},
-            {"$inc": {"failure_count": 1}}
-        )
-        return {"success": False, "error": "Webhook delivery failed"}
 
 # ============== SITES / LOCATIONS ENDPOINTS ==============
 

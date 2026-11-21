@@ -1,10 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timezone, timedelta
 import uuid
-import random as _random_mod
 import logging
 from math import isfinite
-_srand = _random_mod.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
@@ -17,6 +15,7 @@ from app.services.scope_permissions import (
     tenant_scoped_query,
 )
 from app.services.activity import log_activity, ticket_audit
+from app.services import ticket_checkpoint_notifications
 from app.services.integration_security import redact_connection_settings
 
 logger = logging.getLogger(__name__)
@@ -130,28 +129,50 @@ async def get_xero_contacts(current_user: dict = Depends(get_current_user)):
 
 @router.post("/xero/contacts/sync", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def sync_xero_contacts(current_user: dict = Depends(get_current_user)):
+    """Prepare the local Xero contact mirror from authoritative Nexus clients.
+
+    This deployment has no live Xero Accounting API connector.  Never invent
+    Xero contact IDs, balances, overdue amounts, or account numbers: those
+    values would look like reconciled accounting data while being fabricated.
+    """
     await assert_global_scope(current_user, operation="billing.integration.xero.contacts.sync")
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(100)
-    synced = 0
+    clients = await db.clients.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "email": 1, "xero_contact_id": 1, "account_number": 1}
+    ).to_list(1000)
+    prepared = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
     for client in clients:
         existing = await db.xero_contacts.find_one({"client_id": client["id"]}, {"_id": 0})
-        if not existing:
-            contact = {
-                "id": str(uuid.uuid4()),
-                "client_id": client["id"],
-                "client_name": client["name"],
-                "xero_contact_id": f"XC-{uuid.uuid4().hex[:8].upper()}",
-                "email": client.get("email", ""),
-                "name": client["name"],
-                "account_number": f"ACC-{str(synced + 1).zfill(4)}",
-                "balance_due": round(_srand.uniform(100, 5000), 2),
-                "overdue_amount": round(_srand.uniform(0, 1000), 2) if synced % 3 == 0 else 0,
-                "status": "ACTIVE",
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-            }
+        contact = {
+            "client_id": client["id"],
+            "client_name": client["name"],
+            "xero_contact_id": str((existing or {}).get("xero_contact_id") or client.get("xero_contact_id") or ""),
+            "email": client.get("email", ""),
+            "name": client["name"],
+            "account_number": str((existing or {}).get("account_number") or client.get("account_number") or ""),
+            # Unknown is not zero: these are not live Xero balances.
+            "balance_due": None,
+            "overdue_amount": None,
+            "status": "LOCAL_MIRROR",
+            "live_sync": False,
+            "sync_state": "prepared",
+            "synced_at": now_iso,
+        }
+        if existing:
+            await db.xero_contacts.update_one(
+                {"id": existing.get("id"), "client_id": client["id"]},
+                {"$set": contact},
+            )
+        else:
+            contact.update({"id": str(uuid.uuid4()), "created_at": now_iso})
             await db.xero_contacts.insert_one(contact)
-            synced += 1
-    return {"synced": synced, "message": f"Synced {synced} contacts to Xero"}
+        prepared += 1
+    return {
+        "prepared": prepared,
+        "synced": 0,
+        "live_sync": False,
+        "message": f"Prepared {prepared} local contact mirror record(s); live Xero sync is not available in this deployment",
+    }
 
 # ============== XERO INVOICES ==============
 
@@ -622,10 +643,14 @@ async def get_sync_history(current_user: dict = Depends(get_current_user)):
 @router.post("/xero/sync", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def trigger_xero_sync(current_user: dict = Depends(get_current_user)):
     await assert_global_scope(current_user, operation="billing.integration.xero.sync")
-    await _log_sync_event("full_sync", "Full sync triggered - contacts, invoices, and accounts refreshed")
     contacts_synced = await db.xero_contacts.count_documents({})
     invoices_synced = await db.xero_invoices.count_documents({})
-    return {"message": "Xero sync completed", "contacts_synced": contacts_synced, "invoices_synced": invoices_synced}
+    return {
+        "message": "No live Xero sync was performed; this deployment only has the local mirror. Use the explicit contact-mirror preparation action if needed.",
+        "live_sync": False,
+        "contacts_in_mirror": contacts_synced,
+        "invoices_in_mirror": invoices_synced,
+    }
 
 # ============== XERO DASHBOARD ==============
 
@@ -711,24 +736,9 @@ async def get_xero_dashboard(current_user: dict = Depends(get_current_user)):
 @router.get("/xero/accounts", dependencies=[Depends(require_action("billing.integration.manage"))])
 async def get_xero_accounts(current_user: dict = Depends(get_current_user)):
     await assert_global_scope(current_user, operation="billing.integration.xero.accounts")
-    accounts = await db.xero_accounts.find({}, {"_id": 0}).to_list(100)
-    if not accounts:
-        defaults = [
-            {"id": str(uuid.uuid4()), "code": "200", "name": "Sales", "type": "REVENUE", "status": "ACTIVE", "balance": 45230.50},
-            {"id": str(uuid.uuid4()), "code": "400", "name": "Managed Services", "type": "REVENUE", "status": "ACTIVE", "balance": 128500.00},
-            {"id": str(uuid.uuid4()), "code": "401", "name": "Break/Fix Revenue", "type": "REVENUE", "status": "ACTIVE", "balance": 23400.00},
-            {"id": str(uuid.uuid4()), "code": "410", "name": "Hardware Sales", "type": "REVENUE", "status": "ACTIVE", "balance": 67800.00},
-            {"id": str(uuid.uuid4()), "code": "610", "name": "Accounts Receivable", "type": "ASSET", "status": "ACTIVE", "balance": 34200.00},
-            {"id": str(uuid.uuid4()), "code": "800", "name": "Operating Expenses", "type": "EXPENSE", "status": "ACTIVE", "balance": 18900.00},
-            {"id": str(uuid.uuid4()), "code": "801", "name": "Software & Licensing", "type": "EXPENSE", "status": "ACTIVE", "balance": 8450.00},
-            {"id": str(uuid.uuid4()), "code": "810", "name": "Wages & Salaries", "type": "EXPENSE", "status": "ACTIVE", "balance": 52300.00},
-        ]
-        for a in defaults:
-            await db.xero_accounts.insert_one(a)
-        accounts = defaults
-    for a in accounts:
-        a.pop("_id", None)
-    return accounts
+    # Never seed invented account balances.  An empty chart is honest and
+    # forces the operator to connect or import real Xero accounts.
+    return await db.xero_accounts.find({}, {"_id": 0}).to_list(100)
 
 # ============== TICKET BULK ACTIONS ==============
 
@@ -1021,7 +1031,25 @@ async def bulk_ticket_action(
         if updates.get("status") == "closed" and str(ticket.get("status") or "").lower() != "closed":
             await _mark_bulk_project_task_for_review(ticket, current_user, now_iso)
 
+        settlement = {}
+        if updates.get("status") in {"resolved", "closed", "cancelled"}:
+            settlement = await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+                {
+                    **ticket,
+                    "status": updates["status"],
+                    "resolution_status": updates.get("resolution_status", ticket.get("resolution_status")),
+                },
+                tenant_id=platform_tenant_id(current_user),
+                actor=current_user,
+                database=db,
+            )
+
         audit_details = f"Bulk {action} operation {operation_id} applied"
+        if settlement.get("promise_cleared") or settlement.get("alerts_resolved"):
+            audit_details += (
+                f"; cleared promised update at {settlement.get('cleared_checkpoint_at') or 'the previous checkpoint'}"
+                f" and resolved {settlement.get('alerts_resolved', 0)} due alert(s)"
+            )
         await ticket_audit(ticket["id"], current_user, "bulk_updated", audit_details)
         await log_activity(
             current_user,
@@ -1100,183 +1128,3 @@ async def _log_sync_event(event_type: str, message: str):
     await db.xero_sync_history.insert_one(event)
     event.pop("_id", None)
     return event
-
-async def _seed_sync_history():
-    now = datetime.now(timezone.utc)
-    events = [
-        {"id": str(uuid.uuid4()), "event_type": "full_sync", "message": "Full sync completed - 12 contacts, 24 invoices synced", "timestamp": (now - timedelta(hours=2)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "invoice_created", "message": "Invoice INV-0015 created and synced to Xero", "timestamp": (now - timedelta(hours=5)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "payment_recorded", "message": "Payment $2,450.00 recorded on INV-0008", "timestamp": (now - timedelta(hours=8)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "contact_sync", "message": "3 new contacts synced from Xero", "timestamp": (now - timedelta(days=1)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "estimate_converted", "message": "Estimate EST-0003 converted to Invoice INV-0012", "timestamp": (now - timedelta(days=1, hours=4)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "reconciliation", "message": "Monthly reconciliation completed - $3,200 variance resolved", "timestamp": (now - timedelta(days=2)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "full_sync", "message": "Scheduled sync completed", "timestamp": (now - timedelta(days=3)).isoformat(), "status": "success"},
-        {"id": str(uuid.uuid4()), "event_type": "invoice_voided", "message": "Invoice INV-0004 voided - duplicate entry", "timestamp": (now - timedelta(days=4)).isoformat(), "status": "warning"},
-    ]
-    for e in events:
-        await db.xero_sync_history.insert_one(e)
-
-async def _seed_xero_estimates():
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(10)
-    if not clients:
-        return
-    now = datetime.now(timezone.utc)
-    statuses = ["DRAFT", "SENT", "APPROVED", "DECLINED", "DRAFT", "SENT"]
-    items_pool = [
-        [{"description": "Network Infrastructure Upgrade", "quantity": 1, "unit_price": 8500}, {"description": "Installation & Config", "quantity": 8, "unit_price": 150}],
-        [{"description": "Cloud Migration Project", "quantity": 1, "unit_price": 12000}, {"description": "Data Transfer", "quantity": 1, "unit_price": 2500}],
-        [{"description": "Cybersecurity Audit", "quantity": 1, "unit_price": 4500}, {"description": "Penetration Testing", "quantity": 1, "unit_price": 3000}],
-        [{"description": "VoIP System Deployment", "quantity": 20, "unit_price": 85}, {"description": "Training & Setup", "quantity": 4, "unit_price": 150}],
-        [{"description": "Server Replacement", "quantity": 2, "unit_price": 6500}, {"description": "Migration Services", "quantity": 12, "unit_price": 150}],
-    ]
-    for idx, client in enumerate(clients[:5]):
-        items = items_pool[idx % len(items_pool)]
-        sub_total = sum(i["quantity"] * i["unit_price"] for i in items)
-        tax = round(sub_total * 0.1, 2)
-        total = round(sub_total + tax, 2)
-        est = {
-            "id": str(uuid.uuid4()),
-            "estimate_number": f"EST-{str(idx + 1).zfill(4)}",
-            "title": items[0]["description"],
-            "client_id": client["id"],
-            "client_name": client["name"],
-            "line_items": items,
-            "sub_total": sub_total,
-            "tax": tax,
-            "total": total,
-            "status": statuses[idx % len(statuses)],
-            "valid_until": (now + timedelta(days=30 - idx * 5)).strftime("%Y-%m-%d"),
-            "notes": "Standard terms apply. 50% deposit required.",
-            "created_at": (now - timedelta(days=idx * 7)).isoformat(),
-        }
-        await db.xero_estimates.insert_one(est)
-
-async def _seed_xero_recurring():
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(10)
-    if not clients:
-        return
-    now = datetime.now(timezone.utc)
-    templates = [
-        {"description": "Managed IT Services - Monthly", "amount": 2500, "frequency": "monthly", "payment_terms": 14, "escalation_percent": 3, "auto_send": True, "auto_generate": True, "notes": "Includes remote monitoring, patch management, and unlimited helpdesk support.", "tax_rate": 10},
-        {"description": "Backup & DR Services", "amount": 450, "frequency": "monthly", "payment_terms": 14, "escalation_percent": 2, "auto_send": True, "auto_generate": True, "notes": "Cloud backup with 30-day retention, daily verification, quarterly DR test.", "tax_rate": 10},
-        {"description": "Cybersecurity Suite", "amount": 800, "frequency": "monthly", "payment_terms": 7, "escalation_percent": 5, "auto_send": False, "auto_generate": True, "notes": "EDR, SIEM monitoring, vulnerability scanning, security awareness training.", "tax_rate": 10},
-        {"description": "Cloud Hosting & Infrastructure", "amount": 1200, "frequency": "monthly", "payment_terms": 30, "escalation_percent": 0, "auto_send": True, "auto_generate": True, "notes": "Azure hosting, 99.9% SLA, includes OS patching and monitoring.", "tax_rate": 10},
-        {"description": "VoIP Phone System", "amount": 350, "frequency": "monthly", "payment_terms": 14, "escalation_percent": 2, "auto_send": True, "auto_generate": True, "notes": "20 handsets, unlimited domestic calls, Teams integration.", "tax_rate": 10},
-        {"description": "Network Support Retainer", "amount": 2800, "frequency": "quarterly", "payment_terms": 30, "escalation_percent": 3, "auto_send": False, "auto_generate": True, "notes": "Quarterly network health assessment, firewall management, switch/AP support.", "tax_rate": 10},
-        {"description": "Annual Microsoft 365 License Bundle", "amount": 8400, "frequency": "yearly", "payment_terms": 30, "escalation_percent": 5, "auto_send": True, "auto_generate": True, "notes": "Business Premium licenses x35 users. Annual renewal.", "tax_rate": 10},
-        {"description": "Weekly Maintenance Window", "amount": 375, "frequency": "weekly", "payment_terms": 7, "escalation_percent": 0, "auto_send": False, "auto_generate": True, "notes": "After-hours maintenance window: patching, updates, health checks.", "tax_rate": 10},
-    ]
-    for idx, client in enumerate(clients[:8]):
-        tmpl = templates[idx % len(templates)]
-        sub_total = tmpl["amount"] / 1.1
-        tax = round(sub_total * tmpl["tax_rate"] / 100, 2)
-        contract_start = (now - timedelta(days=_srand.randint(90, 540))).strftime("%Y-%m-%d")
-        contract_end = (now + timedelta(days=_srand.randint(180, 730))).strftime("%Y-%m-%d") if idx % 3 != 0 else ""
-        gen_count = _srand.randint(3, 24)
-        total_billed = tmpl["amount"] * gen_count
-        total_collected = round(total_billed * _srand.uniform(0.75, 1.0), 2)
-        rec = {
-            "id": str(uuid.uuid4()),
-            "client_id": client["id"],
-            "client_name": client["name"],
-            "description": tmpl["description"],
-            "frequency": tmpl["frequency"],
-            "line_items": [{"description": tmpl["description"], "quantity": 1, "unit_price": round(sub_total, 2)}],
-            "sub_total": round(sub_total, 2),
-            "tax": tax,
-            "tax_rate": tmpl["tax_rate"],
-            "amount": tmpl["amount"],
-            "payment_terms": tmpl["payment_terms"],
-            "contract_start": contract_start,
-            "contract_end": contract_end,
-            "escalation_percent": tmpl["escalation_percent"],
-            "auto_send": tmpl["auto_send"],
-            "auto_generate": tmpl["auto_generate"],
-            "notes": tmpl["notes"],
-            "email": client.get("email", f"billing@{client['name'].lower().replace(' ', '')}.com"),
-            "status": "active" if idx < 6 else "paused",
-            "next_generation": (now + timedelta(days=_srand.randint(1, 25))).strftime("%Y-%m-%d"),
-            "invoices_generated": gen_count,
-            "total_billed": total_billed,
-            "total_collected": total_collected,
-            "last_generated": (now - timedelta(days=_srand.randint(5, 30))).isoformat(),
-            "created_at": (now - timedelta(days=_srand.randint(90, 540))).isoformat(),
-        }
-        await db.xero_recurring.insert_one(rec)
-
-async def _seed_xero_demo():
-    existing = await db.xero_invoices.count_documents({})
-    if existing > 0:
-        return []
-
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
-    if not clients:
-        return []
-
-    now = datetime.now(timezone.utc)
-    invoices = []
-    statuses = ["PAID", "AUTHORISED", "DRAFT", "PAID", "PAID", "AUTHORISED"]
-    items_pool = [
-        {"description": "Managed IT Services - Monthly", "quantity": 1, "unit_price": 2500},
-        {"description": "Backup & Recovery - Monthly", "quantity": 1, "unit_price": 450},
-        {"description": "Cybersecurity Suite", "quantity": 1, "unit_price": 800},
-        {"description": "Network Monitoring", "quantity": 1, "unit_price": 350},
-        {"description": "Help Desk Support - Hourly", "quantity": 4, "unit_price": 150},
-        {"description": "Server Maintenance", "quantity": 1, "unit_price": 1200},
-        {"description": "Cloud Hosting - Monthly", "quantity": 1, "unit_price": 600},
-        {"description": "VoIP Phone System", "quantity": 10, "unit_price": 25},
-    ]
-
-    for idx, client in enumerate(clients[:8]):
-        for m in range(3):
-            date = (now - timedelta(days=30 * m)).strftime("%Y-%m-%d")
-            due_date = (now - timedelta(days=30 * m - 30)).strftime("%Y-%m-%d")
-            items = [items_pool[idx % len(items_pool)], items_pool[(idx + 1) % len(items_pool)]]
-            subtotal = sum(i["quantity"] * i["unit_price"] for i in items)
-            tax = round(subtotal * 0.1, 2)
-            total = round(subtotal + tax, 2)
-            status = statuses[(idx + m) % len(statuses)]
-            paid = total if status == "PAID" else (total * 0.5 if status == "AUTHORISED" and m > 0 else 0)
-
-            inv = {
-                "id": str(uuid.uuid4()),
-                "xero_invoice_id": f"XER-{uuid.uuid4().hex[:6].upper()}",
-                "invoice_number": f"INV-{str(idx * 3 + m + 1).zfill(4)}",
-                "client_id": client["id"],
-                "client_name": client["name"],
-                "date": date,
-                "due_date": due_date,
-                "status": status,
-                "line_items": items,
-                "sub_total": subtotal,
-                "tax": tax,
-                "total": total,
-                "amount_paid": paid,
-                "amount_due": round(total - paid, 2),
-                "currency": "AUD",
-                "reference": f"Monthly services {date[:7]}",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            await db.xero_invoices.insert_one(inv)
-            invoices.append(inv)
-
-    # Also seed contacts
-    clients_for_sync = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(100)
-    for idx, client in enumerate(clients_for_sync):
-        existing = await db.xero_contacts.find_one({"client_id": client["id"]}, {"_id": 0})
-        if not existing:
-            contact = {
-                "id": str(uuid.uuid4()),
-                "client_id": client["id"],
-                "client_name": client["name"],
-                "xero_contact_id": f"XC-{uuid.uuid4().hex[:8].upper()}",
-                "email": client.get("email", ""),
-                "name": client["name"],
-                "account_number": f"ACC-{str(idx + 1).zfill(4)}",
-                "balance_due": round(_srand.uniform(100, 5000), 2),
-                "overdue_amount": round(_srand.uniform(0, 1000), 2) if idx % 3 == 0 else 0,
-                "status": "ACTIVE",
-                "synced_at": datetime.now(timezone.utc).isoformat(),
-            }
-            await db.xero_contacts.insert_one(contact)
-    return [{k: v for k, v in inv.items() if k != "_id"} for inv in invoices]

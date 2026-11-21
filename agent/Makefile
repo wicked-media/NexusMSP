@@ -3,7 +3,9 @@ LDFLAGS  = -s -w -X main.Version=$(VERSION)
 
 .PHONY: all windows chat windows-chat windows-tray windows-remote linux edge-linux edge-windows test clean fmt vet tidy
 
-all: windows windows-chat windows-tray
+all: windows windows-chat windows-tray windows-remote
+	@printf '%s\n' "$(VERSION)" > dist/VERSION
+	@echo ">> wrote dist/VERSION ($(VERSION))"
 
 windows:
 	@mkdir -p dist
@@ -26,7 +28,7 @@ windows-tray:
 windows-remote:
 	@mkdir -p dist
 	@echo ">> building windows/amd64 nexus-remote-companion ($(VERSION))"
-	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/nexus-remote-companion.exe ./cmd/nexus-remote-companion
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS) -H=windowsgui" -o dist/nexus-remote-companion.exe ./cmd/nexus-remote-companion
 	@ls -lah dist/nexus-remote-companion.exe
 
 linux:

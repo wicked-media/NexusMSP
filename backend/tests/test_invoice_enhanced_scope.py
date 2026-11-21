@@ -335,7 +335,7 @@ def test_invoice_enhanced_reads_mask_foreign_clients_and_keep_results_scoped(mon
 
 
 async def _test_invoice_enhanced_reads_mask_foreign_clients_and_keep_results_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
-    database = _install_database(monkeypatch)
+    _install_database(monkeypatch)
     user = _restricted_client_a()
 
     with pytest.raises(HTTPException) as foreign_history:
@@ -354,8 +354,69 @@ async def _test_invoice_enhanced_reads_mask_foreign_clients_and_keep_results_sco
     assert [note["id"] for note in notes] == ["credit-a"]
 
 
+def test_clone_and_batch_create_are_client_scoped_and_server_priced(monkeypatch: pytest.MonkeyPatch):
+    asyncio.run(_test_clone_and_batch_create_are_client_scoped_and_server_priced(monkeypatch))
+
+
+async def _test_clone_and_batch_create_are_client_scoped_and_server_priced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = _install_database(monkeypatch)
+    user = _restricted_client_a()
+
+    with pytest.raises(HTTPException) as foreign_clone:
+        await enhanced.clone_invoice("invoice-b", current_user=user, request=None)
+    assert foreign_clone.value.status_code == 404
+    assert len(database.invoices.rows) == 2
+
+    cloned = await enhanced.clone_invoice("invoice-a", current_user=user, request=None)
+    assert cloned["client_id"] == "client-a"
+    assert cloned["status"] == "draft"
+    assert cloned["payment_status"] == "unpaid"
+    assert cloned["version"] == 1
+    assert cloned["invoice_number"].startswith("INV-")
+    assert cloned["invoice_number"] != "INV-A"
+    assert len(database.invoices.rows) == 3
+
+    with pytest.raises(HTTPException) as foreign_batch:
+        await enhanced.batch_create_invoices(
+            {
+                "client_ids": ["client-a", "client-b"],
+                "template": {
+                    "line_items": [{"description": "Support", "quantity": 2, "rate": 100, "amount": 1}],
+                    "tax_rate": 10,
+                    "due_days": 14,
+                },
+            },
+            current_user=user,
+            request=None,
+        )
+    assert foreign_batch.value.status_code == 404
+    assert len(database.invoices.rows) == 3
+
+    batch = await enhanced.batch_create_invoices(
+        {
+            "client_ids": ["client-a"],
+            "template": {
+                "line_items": [{"description": "Support", "quantity": 2, "rate": 100, "amount": 1}],
+                "tax_rate": 10,
+                "due_days": 14,
+            },
+        },
+        current_user=user,
+        request=None,
+    )
+    assert batch["invoices"][0]["client_name"] == "Client A"
+    assert batch["invoices"][0]["line_items"][0]["amount"] == 200.0
+    assert batch["invoices"][0]["subtotal"] == 200.0
+    assert batch["invoices"][0]["tax_amount"] == 20.0
+    assert batch["invoices"][0]["total"] == 220.0
+
+
 def test_invoice_enhanced_financial_routes_declare_stable_action_permissions():
     expected_permissions = {
+        ("/invoices/{invoice_id}/clone", "POST"): "billing.invoice.create",
+        ("/invoices/batch-create", "POST"): "billing.invoice.create",
         ("/invoices/{invoice_id}/email", "POST"): "billing.invoice.modify",
         ("/invoices/{invoice_id}/email-history", "GET"): "billing.portal.view",
         ("/credit-notes", "GET"): "billing.portal.view",

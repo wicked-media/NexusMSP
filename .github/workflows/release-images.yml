@@ -20,11 +20,27 @@ on:
         required: false
         default: "ghcr.io"
         type: string
+      agent_run_id:
+        description: "Optional successful Nexus Agent release run ID; empty resolves the newest signed run reachable from this commit"
+        required: false
+        default: ""
+        type: string
+      promotion_only:
+        description: "Recover an interrupted promotion from a recorded manifest; no image is rebuilt"
+        required: false
+        default: false
+        type: boolean
+      source_run_id:
+        description: "Interrupted release run ID that contains the nexus-promotion-<version>-<run-id> artifact (required when promotion_only is true)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
   packages: write
   id-token: write
+  actions: read
 
 concurrency:
   group: nexus-container-release-${{ github.ref }}
@@ -32,24 +48,17 @@ concurrency:
 
 env:
   REGISTRY: ${{ inputs.registry || 'ghcr.io' }}
+  CRANE_VERSION: v0.22.1
+  CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
 
 jobs:
   release-images:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.promotion_only) }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - component: api
-            image: nexusmsp-api
-            file: backend/Dockerfile.production
-            context: .
-          - component: web
-            image: nexusmsp-web
-            file: frontend/Dockerfile
-            context: ./frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve release version
         id: version
@@ -65,17 +74,113 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve and verify signed Windows Agent bundle
+        id: signed_agent
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_RUN_ID: ${{ inputs.agent_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "${REQUESTED_RUN_ID}" ] && [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "::error::A manual container release from a branch must pass agent_run_id; dispatch from the release tag to auto-resolve the signed bundle."
+            exit 1
+          fi
+
+          if [ -n "${REQUESTED_RUN_ID}" ]; then
+            RUN_ID="${REQUESTED_RUN_ID}"
+            RUN_RESULT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq '.status + "/" + .conclusion')
+            RUN_PATH=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq .path)
+            RUN_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" --jq .head_sha)
+            if [ "${RUN_RESULT}" != "completed/success" ]; then
+              echo "::error::Agent release run ${RUN_ID} is not a successful completed run (${RUN_RESULT})."
+              exit 1
+            fi
+            if [ "${RUN_PATH}" != ".github/workflows/nexus-agent-release.yml" ]; then
+              echo "::error::Run ${RUN_ID} is ${RUN_PATH}, not the Nexus Agent release workflow."
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "${RUN_SHA}" "${GITHUB_SHA}"; then
+              echo "::error::Agent release run ${RUN_ID} is not an ancestor of release commit ${GITHUB_SHA}."
+              exit 1
+            fi
+          else
+            RUN_ID=""
+            RUN_SHA=""
+            while IFS=$'\t' read -r CANDIDATE_ID CANDIDATE_SHA; do
+              [ -z "${CANDIDATE_ID}" ] && continue
+              if git merge-base --is-ancestor "${CANDIDATE_SHA}" "${GITHUB_SHA}"; then
+                RUN_ID="${CANDIDATE_ID}"
+                RUN_SHA="${CANDIDATE_SHA}"
+                break
+              fi
+            done < <(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/nexus-agent-release.yml/runs?status=success&per_page=50" --jq '.workflow_runs[] | [.databaseId, .head_sha] | @tsv')
+            if [ -z "${RUN_ID}" ]; then
+              echo "::error::No successful Nexus Agent release run is reachable from ${GITHUB_SHA}. Run the signed agent release first or pass agent_run_id."
+              exit 1
+            fi
+          fi
+
+          ARTIFACTS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[] | select(.name | startswith("nexus-agent-windows-")) | .name')
+          ARTIFACT_COUNT=$(printf '%s\n' "${ARTIFACTS}" | sed '/^$/d' | wc -l | tr -d ' ')
+          if [ "${ARTIFACT_COUNT}" -ne 1 ]; then
+            echo "::error::Agent release run ${RUN_ID} has ${ARTIFACT_COUNT} Windows release artifacts; exactly one is required."
+            exit 1
+          fi
+          ARTIFACT=$(printf '%s\n' "${ARTIFACTS}" | sed '/^$/d')
+
+          rm -rf signed-bundle
+          gh run download "${RUN_ID}" --name "${ARTIFACT}" --dir signed-bundle
+          VERSION=$(python3 scripts/verify_signed_agent_bundle.py --bundle signed-bundle --expected-commit "${RUN_SHA}")
+          if [ "${ARTIFACT}" != "nexus-agent-windows-${VERSION}" ]; then
+            echo "::error::Artifact ${ARTIFACT} does not match signed evidence version ${VERSION}."
+            exit 1
+          fi
+
+          {
+            echo "version=${VERSION}"
+            echo "run_id=${RUN_ID}"
+            echo "commit=${RUN_SHA}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Verified signed Windows Agent ${VERSION} from run ${RUN_ID} (${RUN_SHA})."
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Generate immutable image tags
-        id: meta
+      - name: Generate API release tags
+        id: meta_api
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-api
           tags: |
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha,prefix=sha-
+
+      - name: Generate web release tags
+        id: meta_web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-web
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=sha,prefix=sha-
+
+      - name: Generate API staging tag
+        id: staging_api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-api
+          tags: |
+            type=raw,value=staging-${{ github.run_id }}-${{ github.sha }}
+
+      - name: Generate web staging tag
+        id: staging_web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-web
+          tags: |
+            type=raw,value=staging-${{ github.run_id }}-${{ github.sha }}
 
       - name: Authenticate to GitHub Container Registry
         if: ${{ env.REGISTRY == 'ghcr.io' }}
@@ -93,43 +198,313 @@ jobs:
           username: ${{ secrets.NEXUS_REGISTRY_USERNAME }}
           password: ${{ secrets.NEXUS_REGISTRY_PASSWORD }}
 
-      - name: Build and publish ${{ matrix.component }} image
-        id: build
+      - name: Install crane for digest-preserving promotion
+        run: |
+          # crane adds a tag to the exact manifest digest. buildx imagetools
+          # create can wrap a single-platform manifest in a new index and change
+          # the digest, which would detach the Cosign signature.
+          CRANE_DIR="${RUNNER_TEMP}/crane"
+          CRANE_ARCHIVE="${RUNNER_TEMP}/crane.tar.gz"
+          mkdir -p "${CRANE_DIR}"
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" -o "${CRANE_ARCHIVE}"
+          echo "${CRANE_SHA256}  ${CRANE_ARCHIVE}" | sha256sum -c -
+          tar -xzf "${CRANE_ARCHIVE}" -C "${CRANE_DIR}" crane
+          chmod +x "${CRANE_DIR}/crane"
+          echo "${CRANE_DIR}" >> "${GITHUB_PATH}"
+          "${CRANE_DIR}/crane" version
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Build and stage API image
+        id: build_api
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
+          context: .
+          file: backend/Dockerfile.release
+          build-args: NEXUS_AGENT_VERSION=${{ steps.signed_agent.outputs.version }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.staging_api.outputs.tags }}
+          labels: ${{ steps.meta_api.outputs.labels }}
           cache-from: type=gha
           # Cache upload is an optimisation, never a reason to fail a valid image.
           cache-to: type=gha,mode=max,ignore-error=true
           provenance: true
           sbom: true
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign published image digest
+      - name: Sign staged API image digest
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          DIGEST: ${{ steps.build_api.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-api
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Build and stage web image
+        id: build_web
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.staging_web.outputs.tags }}
+          labels: ${{ steps.meta_web.outputs.labels }}
+          cache-from: type=gha
+          # Cache upload is an optimisation, never a reason to fail a valid image.
+          cache-to: type=gha,mode=max,ignore-error=true
+          provenance: true
+          sbom: true
+
+      - name: Sign staged web image digest
+        env:
+          DIGEST: ${{ steps.build_web.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-web
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Record promotion manifest
+        env:
+          API_DIGEST: ${{ steps.build_api.outputs.digest }}
+          API_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-api
+          API_TAGS: ${{ steps.meta_api.outputs.tags }}
+          STAGING_API_IMAGE: ${{ steps.staging_api.outputs.tags }}
+          WEB_DIGEST: ${{ steps.build_web.outputs.digest }}
+          WEB_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-web
+          WEB_TAGS: ${{ steps.meta_web.outputs.tags }}
+          STAGING_WEB_IMAGE: ${{ steps.staging_web.outputs.tags }}
+          VERSION: ${{ steps.version.outputs.version }}
+          AGENT_VERSION: ${{ steps.signed_agent.outputs.version }}
+          AGENT_RUN_ID: ${{ steps.signed_agent.outputs.run_id }}
+          AGENT_RUN_COMMIT: ${{ steps.signed_agent.outputs.commit }}
+        run: |
+          mkdir -p promotion
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          def lines(name):
+              return [line.strip() for line in os.environ.get(name, "").splitlines() if line.strip()]
+
+          manifest = {
+              "schema": 1,
+              "version": os.environ["VERSION"],
+              "release_commit": os.environ["GITHUB_SHA"],
+              "created_at": datetime.now(timezone.utc).isoformat(),
+              "api": {
+                  "image": os.environ["API_IMAGE"],
+                  "digest": os.environ["API_DIGEST"],
+                  "release_tags": lines("API_TAGS"),
+                  "staging_tags": lines("STAGING_API_IMAGE"),
+              },
+              "web": {
+                  "image": os.environ["WEB_IMAGE"],
+                  "digest": os.environ["WEB_DIGEST"],
+                  "release_tags": lines("WEB_TAGS"),
+                  "staging_tags": lines("STAGING_WEB_IMAGE"),
+              },
+              "agent": {
+                  "version": os.environ["AGENT_VERSION"],
+                  "run_id": os.environ["AGENT_RUN_ID"],
+                  "commit": os.environ["AGENT_RUN_COMMIT"],
+              },
+          }
+          Path("promotion/promotion-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload promotion manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-promotion-${{ steps.version.outputs.version }}-${{ github.run_id }}
+          path: promotion/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify and promote signed digests
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.build_api.outputs.digest }}
+          API_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-api
+          API_TAGS: ${{ steps.meta_api.outputs.tags }}
+          WEB_DIGEST: ${{ steps.build_web.outputs.digest }}
+          WEB_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-web
+          WEB_TAGS: ${{ steps.meta_web.outputs.tags }}
+        run: bash scripts/promote_signed_images.sh
 
       - name: Release evidence summary
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          API_DIGEST: ${{ steps.build_api.outputs.digest }}
+          API_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-api
+          STAGING_API_IMAGE: ${{ steps.staging_api.outputs.tags }}
+          STAGING_WEB_IMAGE: ${{ steps.staging_web.outputs.tags }}
+          WEB_DIGEST: ${{ steps.build_web.outputs.digest }}
+          WEB_IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/nexusmsp-web
           VERSION: ${{ steps.version.outputs.version }}
+          AGENT_VERSION: ${{ steps.signed_agent.outputs.version }}
+          AGENT_RUN_ID: ${{ steps.signed_agent.outputs.run_id }}
+          AGENT_RUN_COMMIT: ${{ steps.signed_agent.outputs.commit }}
         run: |
           {
             echo "## NexusMSP container release ${VERSION}"
-            echo "- Component: \`${{ matrix.component }}\`"
-            echo "- Immutable tag: \`${IMAGE}:${VERSION}\`"
             echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Digest: \`${IMAGE}@${DIGEST}\`"
+            echo "- Staging API: \`${STAGING_API_IMAGE}\`"
+            echo "- Staging web: \`${STAGING_WEB_IMAGE}\`"
+            echo "- API image: \`${API_IMAGE}:${VERSION}\`"
+            echo "- API digest: \`${API_IMAGE}@${API_DIGEST}\`"
+            echo "- Web image: \`${WEB_IMAGE}:${VERSION}\`"
+            echo "- Web digest: \`${WEB_IMAGE}@${WEB_DIGEST}\`"
+            echo "- Signed Windows Agent: \`${AGENT_VERSION}\` (run \`${AGENT_RUN_ID}\`, commit \`${AGENT_RUN_COMMIT}\`)"
             echo "- Supply-chain evidence: Buildx provenance + SBOM + keyless Cosign signature"
             echo ""
+            echo "Both images were built and signed under staging tags. Release tags were promoted only after both Cosign signatures verified."
             echo "Rollback pins the previous version tag or digest through NEXUS_API_IMAGE / NEXUS_WEB_IMAGE (see docs/RELEASE_RUNBOOK.md)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promotion-recovery:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.promotion_only }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate recovery inputs
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SOURCE_RUN_ID}" ]; then
+            echo "::error::promotion_only requires source_run_id."
+            exit 1
+          fi
+          if ! printf '%s' "${SOURCE_RUN_ID}" | grep -Eq '^[0-9]+$'; then
+            echo "::error::source_run_id must be a numeric workflow run ID."
+            exit 1
+          fi
+          if ! printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
+            echo "::error::Release version '${VERSION}' is not a valid semantic version."
+            exit 1
+          fi
+
+      - name: Download recorded promotion manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: nexus-promotion-${{ inputs.version }}-${{ inputs.source_run_id }}
+          path: promotion
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate recorded promotion manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          manifests = list(Path("promotion").rglob("promotion-manifest.json"))
+          if len(manifests) != 1:
+              raise SystemExit(f"expected exactly one promotion manifest; found {len(manifests)}")
+          manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+          if not isinstance(manifest, dict) or manifest.get("schema") != 1:
+              raise SystemExit("unsupported promotion manifest")
+          if manifest.get("version") != os.environ["VERSION"]:
+              raise SystemExit("promotion manifest version does not match the dispatch version")
+          release_commit = str(manifest.get("release_commit") or "")
+          if not re.fullmatch(r"[0-9a-f]{40}", release_commit):
+              raise SystemExit("promotion manifest has no valid release commit")
+
+          digest_re = re.compile(r"sha256:[0-9a-f]{64}")
+          tag_name_re = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
+          expected_images = {
+              "api": f"{os.environ['REGISTRY']}/{os.environ['GITHUB_REPOSITORY_OWNER']}/nexusmsp-api",
+              "web": f"{os.environ['REGISTRY']}/{os.environ['GITHUB_REPOSITORY_OWNER']}/nexusmsp-web",
+          }
+          exports = {
+              "VERSION": os.environ["VERSION"],
+              "RELEASE_COMMIT": release_commit,
+          }
+          for component in ("api", "web"):
+              item = manifest.get(component)
+              if not isinstance(item, dict):
+                  raise SystemExit(f"promotion manifest has no {component} record")
+              image = item.get("image")
+              if image != expected_images[component]:
+                  raise SystemExit(f"promotion manifest {component} image is not the expected release image")
+              digest = item.get("digest")
+              if not isinstance(digest, str) or not digest_re.fullmatch(digest):
+                  raise SystemExit(f"promotion manifest {component} digest is invalid")
+              refs = item.get("release_tags")
+              if not isinstance(refs, list) or not refs:
+                  raise SystemExit(f"promotion manifest {component} has no release tags")
+              tags = []
+              for ref in refs:
+                  if not isinstance(ref, str) or not ref.startswith(image + ":"):
+                      raise SystemExit(f"promotion manifest {component} has an invalid release tag ref")
+                  tag = ref[len(image) + 1:]
+                  if not tag_name_re.fullmatch(tag):
+                      raise SystemExit(f"promotion manifest {component} has an invalid tag name")
+                  tags.append(tag)
+              if len(tags) != len(set(tags)):
+                  raise SystemExit(f"promotion manifest {component} repeats a release tag")
+              exports[f"{component.upper()}_IMAGE"] = image
+              exports[f"{component.upper()}_DIGEST"] = digest
+              exports[f"{component.upper()}_TAGS"] = "\n".join(refs)
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              for key in ("VERSION", "RELEASE_COMMIT", "API_IMAGE", "API_DIGEST", "WEB_IMAGE", "WEB_DIGEST"):
+                  handle.write(f"{key}={exports[key]}\n")
+              for key in ("API_TAGS", "WEB_TAGS"):
+                  handle.write(f"{key}<<__NEXUS_PROMOTION_TAGS__\n")
+                  handle.write(exports[key] + "\n")
+                  handle.write("__NEXUS_PROMOTION_TAGS__\n")
+          print("Promotion manifest validated.")
+          PY
+
+      - name: Authenticate to GitHub Container Registry
+        if: ${{ env.REGISTRY == 'ghcr.io' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Authenticate to configured registry
+        if: ${{ env.REGISTRY != 'ghcr.io' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.NEXUS_REGISTRY_USERNAME }}
+          password: ${{ secrets.NEXUS_REGISTRY_PASSWORD }}
+
+      - name: Install crane for digest-preserving promotion
+        run: |
+          CRANE_DIR="${RUNNER_TEMP}/crane"
+          CRANE_ARCHIVE="${RUNNER_TEMP}/crane.tar.gz"
+          mkdir -p "${CRANE_DIR}"
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" -o "${CRANE_ARCHIVE}"
+          echo "${CRANE_SHA256}  ${CRANE_ARCHIVE}" | sha256sum -c -
+          tar -xzf "${CRANE_ARCHIVE}" -C "${CRANE_DIR}" crane
+          chmod +x "${CRANE_DIR}/crane"
+          echo "${CRANE_DIR}" >> "${GITHUB_PATH}"
+          "${CRANE_DIR}/crane" version
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Verify and promote recorded digests
+        shell: bash
+        run: bash scripts/promote_signed_images.sh
+
+      - name: Recovery summary
+        run: |
+          {
+            echo "## NexusMSP promotion recovery ${VERSION}"
+            echo "- Source release run: \`${{ inputs.source_run_id }}\`"
+            echo "- Release commit: \`${RELEASE_COMMIT}\`"
+            echo "- API: \`${API_IMAGE}@${API_DIGEST}\`"
+            echo "- Web: \`${WEB_IMAGE}@${WEB_DIGEST}\`"
+            echo "- No image was rebuilt; both Cosign signatures were re-verified before promotion."
           } >> "$GITHUB_STEP_SUMMARY"

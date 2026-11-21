@@ -56,6 +56,8 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
   const clientPanel = panelById(missionControl, "client-health");
   const critical = workstreamById(missionControl, "critical");
   const attention = workstreamById(missionControl, "attention");
+  // Null health means the estate has not been observed yet — not a zero score.
+  const assessed = summary.health_score !== null && summary.health_score !== undefined;
 
   const sections = {
     operations: {
@@ -63,12 +65,12 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
       label: "Operations",
       count: Number(critical.count || 0) + Number(attention.count || 0),
       route: "/devices",
-      tone: Number(critical.count || 0) > 0 ? "critical" : Number(attention.count || 0) > 0 ? "warning" : "healthy",
+      tone: Number(critical.count || 0) > 0 ? "critical" : Number(attention.count || 0) > 0 ? "warning" : assessed ? "healthy" : "neutral",
       headline: Number(critical.count || 0) > 0
         ? `${critical.count} critical item${Number(critical.count) === 1 ? " needs" : "s need"} ownership.`
         : Number(attention.count || 0) > 0
           ? `${attention.count} item${Number(attention.count) === 1 ? "" : "s"} should be scheduled.`
-          : "Connected operations are currently clear.",
+          : assessed ? "Connected operations are currently clear." : "No managed operations are connected yet.",
       detail: `${metricValue(operationsPanel, "Offline assets")} offline · ${metricValue(operationsPanel, "Failed backups")} backup failures`,
     },
     finance: {
@@ -76,7 +78,7 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
       label: "Finance",
       count: Number(billingPanel.count || 0),
       route: billingPanel.route || "/billing-recon",
-      tone: Number(billingPanel.count || 0) > 0 ? "warning" : "healthy",
+      tone: Number(billingPanel.count || 0) > 0 ? "warning" : assessed ? "healthy" : "neutral",
       headline: Number(brainMetrics.revenue_found || 0) > 0
         ? `$${Number(brainMetrics.revenue_found).toLocaleString(undefined, { maximumFractionDigits: 0 })} is ready for billing review.`
         : "No unbilled work is visible in connected records.",
@@ -87,7 +89,7 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
       label: "Security",
       count: Number(securityPanel.count || 0),
       route: securityPanel.route || "/security-dashboard",
-      tone: Number(securityPanel.count || 0) > 0 ? "critical" : "healthy",
+      tone: Number(securityPanel.count || 0) > 0 ? "critical" : assessed ? "healthy" : "neutral",
       headline: Number(securityPanel.count || 0) > 0
         ? `${securityPanel.count} security finding${Number(securityPanel.count) === 1 ? "" : "s"} need review.`
         : "No critical security exception is visible.",
@@ -98,10 +100,10 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
       label: "Customers",
       count: Number(clientPanel.count || 0),
       route: clientPanel.route || "/clients",
-      tone: Number(clientPanel.count || 0) > 0 ? "warning" : "healthy",
+      tone: Number(clientPanel.count || 0) > 0 ? "warning" : assessed ? "healthy" : "neutral",
       headline: Number(clientPanel.count || 0) > 0
         ? `${clientPanel.count} client-impact signal${Number(clientPanel.count) === 1 ? "" : "s"} need attention.`
-        : "The client portfolio is stable.",
+        : assessed ? "The client portfolio is stable." : "No client portfolio is connected yet.",
       detail: `${metricValue(clientPanel, "Active clients")} active clients · ${metricValue(clientPanel, "SLA breaches")} SLA breach${metricValue(clientPanel, "SLA breaches") === 1 ? "" : "es"}`,
     },
   };
@@ -111,13 +113,16 @@ export function buildNexusDailyBriefing({ missionControl, nexusBrain, user }) {
 
   return {
     lens,
-    healthScore: Number(summary.health_score || 0),
+    healthScore: assessed ? Number(summary.health_score) : null,
+    healthAssessed: assessed,
     healthLabel: summary.health_label || "Not assessed",
     attentionCount,
     automatedActions,
-    headline: attentionCount > 0
-      ? `${attentionCount} item${attentionCount === 1 ? "" : "s"} need your attention. Nexus has already completed ${automatedActions} evidenced action${automatedActions === 1 ? "" : "s"} in the last 24 hours.`
-      : `Everything connected to Nexus is stable. ${automatedActions} evidenced action${automatedActions === 1 ? "" : "s"} completed in the last 24 hours.`,
+    headline: !assessed
+      ? "Nothing is connected yet, so there is no operating health to report."
+      : attentionCount > 0
+        ? `${attentionCount} item${attentionCount === 1 ? "" : "s"} need your attention. Nexus has already completed ${automatedActions} evidenced action${automatedActions === 1 ? "" : "s"} in the last 24 hours.`
+        : `Everything connected to Nexus is stable. ${automatedActions} evidenced action${automatedActions === 1 ? "" : "s"} completed in the last 24 hours.`,
     focus: missionControl?.focus || null,
     sections: lens.order.map(id => sections[id]),
     evidenceNote: summary.evidence_note || nexusBrain?.evidence_note || "",

@@ -88,12 +88,30 @@ A backup is not accepted until an isolated restore has been timed and validated.
 
 ### Agent release evidence
 
-The production Docker build compiles the Windows Agent service, Client Chat and
-Tray from checked-in source; it must never copy a developer's `agent/dist` or
-per-device `config.json` into the runtime image. Before a fleet rollout, retain
-evidence for a clean source build, Windows Authenticode verification, installer
-contents and ACLs, pilot install, upgrade, rollback, and post-reboot heartbeat.
-Application-level update-manifest verification does not replace code signing. The signing path itself is implemented by `scripts/Sign-NexusAgent.ps1` and the `Nexus Agent release` workflow (Authenticode sign, verify and retained signing evidence); an unsigned build is a lab build and must never ship to managed endpoints.
+The source-build `backend/Dockerfile.production` compiles the Windows Agent
+service, Client Chat, Tray and Native Remote Companion from checked-in source for
+local and CI validation; it must never copy a developer's `agent/dist` or
+per-device `config.json` into the runtime image. The published API image uses
+`backend/Dockerfile.release` instead: the container release resolves the signed
+Windows Agent release artifact, verifies its version, commit, signer evidence and
+per-file SHA-256 sums, and fails closed before the runtime image is built unless
+all four components are Authenticode-signed and intact. Before a fleet rollout,
+retain evidence for the signed bundle, installer contents and ACLs, pilot
+install, upgrade, rollback, and post-reboot heartbeat. Application-level
+update-manifest verification does not replace code signing. The signing path
+itself is implemented by `scripts/Sign-NexusAgent.ps1` and the
+`Nexus Agent release` workflow; an unsigned build is a lab build and must never
+ship to managed endpoints.
+
+The promotion path has a deterministic local recovery drill
+(`scripts/promotion_recovery_drill.py`). CI runs it in the
+`promotion-recovery-drill` job and uploads
+`promotion-recovery-drill-evidence`; a local run records
+`artifacts/release-drills/promotion-recovery-drill-*.json`. It proves the
+recorded-digest retag path against a fake registry, including that corrupted
+recorded API and web digests are rejected before any tag, and does not replace
+a live interrupted-run recovery on a real registry.
+
 Local Client Chat requests are forced to technician approval; do not treat that
 defence as a replacement for the future OS-authenticated companion channel.
 

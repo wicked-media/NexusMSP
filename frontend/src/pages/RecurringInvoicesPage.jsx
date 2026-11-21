@@ -31,7 +31,7 @@ import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
-const STATUS_STYLES = { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", paused: "bg-amber-500/10 text-amber-400 border-amber-500/20", cancelled: "bg-red-500/10 text-red-400 border-red-500/20" };
+const STATUS_STYLES = { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", paused: "bg-amber-500/10 text-amber-400 border-amber-500/20", completed: "bg-sky-500/10 text-sky-300 border-sky-500/20", cancelled: "bg-red-500/10 text-red-400 border-red-500/20" };
 
 const buildRecurringForm = (client = {}) => ({
   client_id: client.id || "",
@@ -263,8 +263,22 @@ export default function RecurringInvoicesPage() {
     setSaving(true);
     try {
       const data = {
-        ...showEdit,
+        description: showEdit.description,
+        frequency: showEdit.frequency || "monthly",
+        payment_terms: showEdit.payment_terms || "net_30",
         tax_rate: parseFloat(showEdit.tax_rate) || 0,
+        currency: showEdit.currency || "AUD",
+        notes: showEdit.notes || "",
+        auto_send: Boolean(showEdit.auto_send),
+        auto_send_email: showEdit.auto_send_email || "",
+        include_pdf: showEdit.include_pdf !== false,
+        include_acronis_usage: Boolean(showEdit.include_acronis_usage),
+        include_pax8_usage: Boolean(showEdit.include_pax8_usage),
+        include_yeastar_usage: Boolean(showEdit.include_yeastar_usage),
+        start_date: showEdit.start_date,
+        end_date: showEdit.end_date || null,
+        contract_id: showEdit.contract_id || null,
+        invoice_name: showEdit.invoice_name || "",
         line_items: showEdit.line_items?.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 }))
       };
       if (data.indexation?.enabled) {

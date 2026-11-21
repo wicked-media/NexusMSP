@@ -375,7 +375,7 @@ export default function TechSettingsPage() {
   const badgeCompletion = Math.round((earnedBadges.length / BADGES.length) * 100);
   const nextBadge = BADGES.find(badge => !earnedBadges.includes(badge.id));
   const enabledNotificationCount = Object.values(notifPrefs).filter(Boolean).length;
-  const criticalNotificationCount = ["inapp_ticket_escalated", "inapp_sla_breach", "inapp_device_offline"].filter(key => notifPrefs[key]).length;
+  const criticalNotificationCount = ["inapp_ticket_escalated", "inapp_sla_breach", "inapp_device_offline", "inapp_ticket_checkpoint_due"].filter(key => notifPrefs[key]).length;
   const activeSection = SETTINGS_SECTIONS.find(section => section.key === activeTab) || SETTINGS_SECTIONS[0];
 
   return (
@@ -582,6 +582,7 @@ export default function TechSettingsPage() {
                   { title: "NexusMSP Notifications", items: [
                     { key: "inapp_ticket_assigned", label: "Ticket assigned", description: "When work is assigned directly to you" },
                     { key: "inapp_ticket_updated", label: "Ticket updates", description: "General updates on tickets you follow" },
+                    { key: "inapp_ticket_checkpoint_due", label: "Promised update due", description: "When a client-visible ticket promise reaches its promised update time" },
                     { key: "inapp_ticket_escalated", label: "Ticket escalations", description: "Priority changes and escalations" },
                     { key: "inapp_sla_breach", label: "SLA breaches", description: "Critical response or resolution breaches" },
                     { key: "inapp_sla_warning", label: "SLA warnings", description: "Tickets approaching their SLA target" },
@@ -595,7 +596,7 @@ export default function TechSettingsPage() {
                     <h4 className="text-sm font-semibold mb-2">{group.title}</h4>
                     <div className="space-y-2">
                       {group.items.map(item => {
-                        const isUrgent = ["inapp_ticket_escalated", "inapp_sla_breach", "inapp_device_offline"].includes(item.key);
+                        const isUrgent = ["inapp_ticket_escalated", "inapp_sla_breach", "inapp_device_offline", "inapp_ticket_checkpoint_due"].includes(item.key);
                         return (
                         <div key={item.key} className={`flex items-center justify-between gap-3 rounded-lg border p-2.5 transition-colors hover:bg-muted/30 ${isUrgent ? "border-rose-500/20 bg-rose-500/[0.025]" : ""}`} data-testid={`notif-${item.key}`}>
                           <div><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">{item.label}</span>{isUrgent && <Badge variant="outline" className="border-rose-500/30 bg-rose-500/[0.05] px-1.5 py-0 text-[9px] text-rose-400">Urgent</Badge>}</div>{item.description && <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>}</div>

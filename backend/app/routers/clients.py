@@ -4,16 +4,19 @@ from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.client_health_engine import compute_health
 from app.services.nexus_timeline import TIMELINE_CATEGORIES, build_client_timeline
 from app.services.scope_permissions import (
     assert_global_scope,
     assert_record_scope,
     assert_tenant_record_scope,
+    effective_scope,
     platform_tenant_id,
     scoped_query,
     tenant_scoped_query,
 )
 from app.models import *
+from app.services.ticket_checkpoint_notifications import notify_due_ticket_checkpoints
 
 router = APIRouter()
 
@@ -201,7 +204,7 @@ async def get_client_health(client_id: str, current_user: dict = Depends(get_cur
         current_user, db.clients, client_id,
         client_field="id", operation="client.health.read", resource_name="Client",
     )
-    return await _calc_health(client)
+    return await _calc_health(client, current_user)
 
 @router.get("/clients/health/all")
 async def get_all_client_health(current_user: dict = Depends(get_current_user)):
@@ -212,7 +215,7 @@ async def get_all_client_health(current_user: dict = Depends(get_current_user)):
     ).to_list(1000)
     results = []
     for c in clients:
-        h = await _calc_health(c)
+        h = await _calc_health(c, current_user)
         results.append(h)
     return results
 
@@ -313,7 +316,7 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
     results = []
     for c in clients:
         cid = c["id"]
-        health = await _calc_health(c)
+        health = await _calc_health(c, current_user)
         amap = asset_map.get(cid, {"total": 0, "online": 0, "assessed": 0, "pending_patches": 0})
         omap = overdue_map.get(cid, {"count": 0, "amount": 0})
         contract = active_contract_map.get(cid, {})
@@ -377,10 +380,13 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
             "created_at": c.get("created_at") if isinstance(c.get("created_at"), str) else (c["created_at"].isoformat() if c.get("created_at") else None),
         })
 
+    numeric_health = [r["health_score"] for r in results if isinstance(r["health_score"], (int, float)) and not isinstance(r["health_score"], bool)]
     summary = {
         "client_count": len(results),
         "total_mrr": round(sum(r["mrr"] for r in results), 2),
-        "avg_health": round(sum(r["health_score"] for r in results) / max(len(results), 1), 1),
+        "avg_health": round(sum(numeric_health) / len(numeric_health), 1) if numeric_health else None,
+        "assessed_clients": len(numeric_health),
+        "not_assessed": len(results) - len(numeric_health),
         "at_risk": sum(1 for r in results if r["risk_level"] in ("at_risk", "critical")),
         "churned": sum(1 for r in results if r["lifecycle"] == "churned"),
         "prospects": sum(1 for r in results if r["lifecycle"] == "prospect"),
@@ -576,86 +582,33 @@ async def get_client_activity_timeline(client_id: str, current_user: dict = Depe
     timeline.sort(key=lambda x: x.get("timestamp", "") or "", reverse=True)
     return timeline[:50]
 
-async def _calc_health(client):
-    client_id = client["id"]
-    now = datetime.now(timezone.utc)
-    scores = {}
-    
-    # 1. Ticket Health (30 pts) - fewer open, more resolved = better
-    open_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}})
-    total_tickets = await db.tickets.count_documents({"client_id": client_id})
-    resolved_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["resolved", "closed"]}})
-    
-    if total_tickets == 0:
-        scores["tickets"] = 25  # neutral if no tickets
-    else:
-        resolution_rate = resolved_tickets / total_tickets
-        open_ratio = open_tickets / max(total_tickets, 1)
-        scores["tickets"] = round(max(0, min(30, resolution_rate * 30 - open_ratio * 15)))
-    
-    # 2. SLA Compliance (20 pts)
-    sla_tickets = await db.tickets.find({"client_id": client_id, "sla_due": {"$exists": True}}, {"_id": 0, "sla_due": 1, "resolved_at": 1, "status": 1}).to_list(100)
-    if sla_tickets:
-        breached = sum(1 for t in sla_tickets if t.get("sla_due") and (t.get("resolved_at", now.isoformat()) > t["sla_due"]))
-        sla_rate = 1 - (breached / len(sla_tickets))
-        scores["sla"] = round(sla_rate * 20)
-    else:
-        scores["sla"] = 18
-    
-    # 3. Device Uptime (20 pts)
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "status": 1}).to_list(100)
-    if devices:
-        online = sum(1 for d in devices if d.get("status") == "online")
-        scores["devices"] = round((online / len(devices)) * 20)
-    else:
-        scores["devices"] = 15
-    
-    # 4. Payment Health (20 pts) - no overdue invoices = good
-    overdue = await db.invoices.count_documents({"client_id": client_id, "status": {"$in": ["overdue", "sent"]}, "due_date": {"$lt": now.isoformat()}})
-    total_invoices = await db.invoices.count_documents({"client_id": client_id})
-    if total_invoices > 0:
-        scores["payments"] = round(max(0, 20 - overdue * 5))
-    else:
-        scores["payments"] = 15
-    
-    # 5. Contract Status (10 pts)
-    active_contracts = await db.contracts.find({"client_id": client_id, "status": "active"}, {"_id": 0, "end_date": 1}).to_list(10)
-    if active_contracts:
-        expiring_soon = sum(1 for c in active_contracts if c.get("end_date") and c["end_date"] < (now + timedelta(days=30)).isoformat())
-        scores["contracts"] = 10 if not expiring_soon else 5
-    else:
-        scores["contracts"] = 5
+async def _calc_health(client, current_user):
+    """Adapt the canonical client-health score for the Clients workspace.
 
-    # 6. M365 hygiene (10 pts, only when CIPP tenant is linked; rebalance devices 20→15 and contracts 10→5)
-    if client.get("cipp_tenant_id"):
-        cached = await db.cipp_hygiene_cache.find_one({"tenant_id": client["cipp_tenant_id"]}, {"_id": 0})
-        hygiene_score_pct = ((cached or {}).get("hygiene") or {}).get("score")
-        if hygiene_score_pct is not None:
-            scores["m365_hygiene"] = round((hygiene_score_pct / 100) * 10)
-            # Pull 5 pts each from devices and contracts to keep total at 100
-            scores["devices"] = max(0, scores["devices"] - 5) if scores["devices"] >= 5 else scores["devices"]
-            scores["contracts"] = max(0, scores["contracts"] - 5) if scores["contracts"] >= 5 else scores["contracts"]
-    
-    total_score = sum(scores.values())
-    risk = "healthy" if total_score >= 75 else "attention" if total_score >= 50 else "at_risk" if total_score >= 25 else "critical"
-    
+    The score, status and evidence coverage come from the single canonical
+    engine; this function only reshapes them for the directory and the client
+    health detail panel.  It must never calculate a second score.
+    """
+    canonical = await compute_health(client, current_user)
+    breakdown = {key: value for key, value in (canonical.get("metrics") or {}).items() if key != "engagement"}
+    missing = canonical.get("missing_sources") or []
     return {
-        "client_id": client_id,
-        "client_name": client.get("name"),
-        "health_score": total_score,
-        "risk_level": risk,
-        "breakdown": scores,
-        "open_tickets": open_tickets,
-        "total_devices": len(devices) if 'devices' in dir() else await db.devices.count_documents({"client_id": client_id}),
-        "overdue_invoices": overdue if 'overdue' in dir() else 0,
-        "mrr": client.get("mrr", 0),
+        **canonical,
+        "risk_level": canonical["status"],
+        "breakdown": breakdown,
+        "assessed_dimensions": [key for key in ("ticket", "device", "payment", "backup", "security", "m365", "network") if key not in missing],
+        "open_tickets": canonical["details"]["open_tickets"],
+        "total_devices": canonical["details"]["devices"],
+        "overdue_invoices": canonical["details"]["overdue_invoices"],
     }
+
 
 # ============== NOTIFICATIONS ==============
 
 NOTIFICATION_PREFERENCE_KEYS = {
     "ticket_assigned": "inapp_ticket_assigned",
     "ticket_updated": "inapp_ticket_updated",
+    "ticket_checkpoint_due": "inapp_ticket_checkpoint_due",
     "ticket_escalated": "inapp_ticket_escalated",
     "sla_breach": "inapp_sla_breach",
     "sla_warning": "inapp_sla_warning",
@@ -668,6 +621,7 @@ NOTIFICATION_PREFERENCE_KEYS = {
 NOTIFICATION_PREFERENCE_DEFAULTS = {
     "inapp_ticket_assigned": True,
     "inapp_ticket_updated": True,
+    "inapp_ticket_checkpoint_due": True,
     "inapp_ticket_escalated": True,
     "inapp_sla_breach": True,
     "inapp_sla_warning": True,
@@ -689,12 +643,27 @@ async def _visible_notifications(current_user: dict, unread_only: bool = False) 
         {"$or": [{"user_id": {"$in": [user_id, "all"]}}, {"target_user_id": user_id}]}, {"_id": 0}
     ).sort("created_at", -1).to_list(200)
     visible = []
+    tenant_id = platform_tenant_id(current_user)
+    client_scope = effective_scope(current_user)
     for notification in notifications:
+        # Newer shared records carry an explicit tenant.  Legacy records without
+        # one remain readable by the historic local partition; a record bound to
+        # another tenant must never appear in this technician's inbox.
+        if notification.get("tenant_id") and str(notification["tenant_id"]) != tenant_id:
+            continue
+        # A shared operational alert can name a customer ticket.  Keep it out of
+        # a restricted technician's inbox unless that customer and site are in
+        # the same scope already enforced by the ticket route.
+        if notification.get("client_id") and client_scope["mode"] != "all":
+            if str(notification["client_id"]) not in client_scope["client_ids"]:
+                continue
+            if client_scope["site_ids"] and str(notification.get("site_id") or "") not in client_scope["site_ids"]:
+                continue
         # Shared notifications retain read/dismiss state per technician.  This keeps a
         # service-wide device or SLA alert available to other technicians after one
         # person has acknowledged it.
         is_shared = notification.get("user_id") == "all"
-        if is_shared and user_id in notification.get("dismissed_by", []):
+        if user_id in notification.get("dismissed_by", []):
             continue
         # A resolved shared action is no longer an outstanding item for any
         # operator, even if they did not personally open the original alert.
@@ -737,7 +706,16 @@ async def delete_notifications(data: dict, current_user: dict = Depends(get_curr
     ids = data.get("ids", [])
     if ids:
         scope = {"id": {"$in": ids}, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}, {"user_id": "all"}]}
-        await db.notifications.delete_many({**scope, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}]})
+        personal_scope = {"id": {"$in": ids}, "$or": [{"user_id": current_user["id"]}, {"target_user_id": current_user["id"]}]}
+        # A due-promise alert describes current ticket state, so a hard delete
+        # would let the next generator pass recreate it. Keep that one record as
+        # a per-technician dismissal instead; a later promise has a new dedupe
+        # key and can alert again.
+        await db.notifications.update_many(
+            {**personal_scope, "type": "ticket_checkpoint_due"},
+            {"$addToSet": {"dismissed_by": current_user["id"]}, "$set": {"read": True}},
+        )
+        await db.notifications.delete_many({**personal_scope, "type": {"$ne": "ticket_checkpoint_due"}})
         await db.notifications.update_many({**scope, "user_id": "all"}, {"$addToSet": {"dismissed_by": current_user["id"]}})
     return {"message": f"Dismissed {len(ids)} notifications"}
 
@@ -746,7 +724,10 @@ async def generate_notifications(current_user: dict = Depends(get_current_user))
     """Generate notifications based on current system state"""
     now = datetime.now(timezone.utc)
     notifs_created = 0
-    
+
+    checkpoint_result = await notify_due_ticket_checkpoints(limit=100)
+    notifs_created += checkpoint_result["created"]
+
     # SLA Breach notifications
     breaching = await db.tickets.find({"status": {"$in": ["open", "in_progress"]}, "sla_due": {"$exists": True, "$ne": None}}, {"_id": 0}).to_list(100)
     for t in breaching:

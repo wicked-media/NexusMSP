@@ -18,7 +18,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.database import db
-from app.routers.client_health import _compute_health
+from app.services.client_health_engine import compute_health
 from app.services.action_permissions import require_action
 from app.services.platform_foundation import emit_platform_event, request_correlation_id
 from app.services.scope_permissions import assert_global_scope
@@ -897,7 +897,7 @@ async def _load_executive_state(user: dict, window_days: int = WINDOW_DAYS) -> d
     available_hours = len(technicians) * HOURS_PER_FULL_TIME_MONTH * (window_days / 30)
     capacity_pct = round(recorded_hours / available_hours * 100, 1) if available_hours else None
 
-    health_scores = await asyncio.gather(*[_compute_health(client, user) for client in clients]) if clients else []
+    health_scores = await asyncio.gather(*[compute_health(client, user) for client in clients]) if clients else []
     assessed_health = [row for row in health_scores if isinstance(row.get("health_score"), (int, float))]
     at_risk = [row for row in assessed_health if row["health_score"] < 50]
     average_health = (

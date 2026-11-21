@@ -30,13 +30,40 @@ param(
   [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\agent-signing'),
 
   # Signing description embedded in each signature.
-  [string]$Description = 'NexusMSP Endpoint Agent'
+  [string]$Description = 'NexusMSP Endpoint Agent',
+
+  # Release provenance. The release workflow supplies both. Local signing can
+  # pass them explicitly or rely on VERSION and the current git commit.
+  [string]$AgentVersion = '',
+  [string]$Commit = ''
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $releaseComponents = @('nexus-agent.exe', 'nexus-client-chat.exe', 'nexus-agent-tray.exe', 'nexus-remote-companion.exe')
+
+if (-not $AgentVersion) {
+  $versionFile = Join-Path $DistDirectory 'VERSION'
+  if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
+    $AgentVersion = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+  }
+}
+if (-not $AgentVersion) {
+  throw 'AgentVersion is required so signing evidence can be bound to the distributed release.'
+}
+if (-not $Commit) {
+  try {
+    $Commit = (& git -C $PSScriptRoot rev-parse HEAD).Trim()
+  }
+  catch {
+    $Commit = ''
+  }
+}
+if ($Commit -notmatch '^[a-fA-F0-9]{40}$') {
+  throw "A full 40-character source commit is required in signing evidence; got '$Commit'."
+}
+$Commit = $Commit.ToLowerInvariant()
 
 $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
 if (-not $signtool) {
@@ -98,6 +125,8 @@ function Get-FileSha256 {
 
 $evidence = [ordered]@{
   tool              = 'signtool'
+  agent_version     = $AgentVersion
+  commit            = $Commit
   signed_at_utc     = $null
   description       = $Description
   timestamp_url     = $TimestampUrl

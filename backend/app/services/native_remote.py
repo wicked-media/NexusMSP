@@ -154,8 +154,31 @@ def _agent_capabilities(agent: dict[str, Any]) -> set[str]:
     return {str(value).strip().lower() for value in values if value}
 
 
-async def device_readiness(device: dict[str, Any], tenant_id: str | None = None) -> dict[str, Any]:
-    """Return the native companion state for one canonical managed device."""
+READINESS_AGENT_PROJECTION = {
+    "_id": 0,
+    "id": 1,
+    "client_id": 1,
+    "tenant_id": 1,
+    "last_seen": 1,
+    "nexus_shield_capabilities": 1,
+    "agent_runtime_capabilities": 1,
+    # Readiness is reported by the authenticated agent heartbeat.  Keep it in
+    # this explicit projection so every readiness decision, single-device or
+    # fleet-wide, uses the same evidence persisted for the endpoint.
+    "native_remote_evidence": 1,
+}
+
+
+def _readiness_from_agent(
+    device: dict[str, Any],
+    agent: dict[str, Any] | None,
+    expected_tenant: str,
+) -> dict[str, Any]:
+    """Derive companion readiness from one already-loaded Agent record.
+
+    This stays pure so the fleet view can batch-load Agents rather than issuing
+    one query per endpoint while making exactly the same trust decision.
+    """
     agent_id = str(device.get("nexus_agent_id") or "").strip()
     client_id = str(device.get("client_id") or "").strip()
     if not agent_id or not client_id:
@@ -164,23 +187,7 @@ async def device_readiness(device: dict[str, Any], tenant_id: str | None = None)
             "state": "not_enrolled",
             "detail": "Install and link the Nexus Agent before starting native remote access.",
         }
-    expected_tenant = str(tenant_id or "").strip()
-    agent = await db.nexus_agents.find_one(
-        tenant_scoped_query({"tenant_id": expected_tenant or "nexus-local"}, {"id": agent_id, "client_id": client_id, "is_active": True}),
-        {
-            "_id": 0,
-            "id": 1,
-            "tenant_id": 1,
-            "last_seen": 1,
-            "nexus_shield_capabilities": 1,
-            "agent_runtime_capabilities": 1,
-            # Readiness is reported by the authenticated agent heartbeat.  Keep
-            # it in this explicit projection so the server-side decision uses
-            # the same evidence that is persisted for the endpoint.
-            "native_remote_evidence": 1,
-        },
-    )
-    if not agent:
+    if not agent or str(agent.get("id") or "") != agent_id or str(agent.get("client_id") or "") != client_id:
         return {"ready": False, "state": "agent_unavailable", "detail": "The linked Nexus Agent is inactive."}
     agent_tenant = str(agent.get("tenant_id") or "nexus-local").strip()
     if expected_tenant and agent_tenant != expected_tenant:
@@ -224,6 +231,65 @@ async def device_readiness(device: dict[str, Any], tenant_id: str | None = None)
         "unattended_ready": UNATTENDED_RUNTIME_CAPABILITY in _agent_capabilities(agent),
         "checked_at": _iso(_now()),
     }
+
+
+async def device_readiness(device: dict[str, Any], tenant_id: str | None = None) -> dict[str, Any]:
+    """Return the native companion state for one canonical managed device."""
+    agent_id = str(device.get("nexus_agent_id") or "").strip()
+    client_id = str(device.get("client_id") or "").strip()
+    if not agent_id or not client_id:
+        return _readiness_from_agent(device, None, str(tenant_id or "").strip())
+    expected_tenant = str(tenant_id or "").strip()
+    agent = await db.nexus_agents.find_one(
+        tenant_scoped_query({"tenant_id": expected_tenant or "nexus-local"}, {"id": agent_id, "client_id": client_id, "is_active": True}),
+        READINESS_AGENT_PROJECTION,
+    )
+    return _readiness_from_agent(device, agent, expected_tenant)
+
+
+async def fleet_device_readiness(
+    devices: list[dict[str, Any]],
+    tenant_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Assess native remote readiness for a scoped fleet with one Agent read.
+
+    The fleet view is a derived read model: it never mutates a device, issues a
+    grant or widens access.  Batching the Agent lookup keeps an all-client fleet
+    view bounded while preserving the same tenant, client and heartbeat rules
+    used when a technician opens an individual endpoint.
+    """
+    expected_tenant = str(tenant_id or "").strip()
+    agent_ids = {
+        str(device.get("nexus_agent_id") or "").strip()
+        for device in devices
+        if str(device.get("nexus_agent_id") or "").strip()
+    }
+    agents: list[dict[str, Any]] = []
+    if agent_ids:
+        agents = await db.nexus_agents.find(
+            tenant_scoped_query(
+                {"tenant_id": expected_tenant or "nexus-local"},
+                {"id": {"$in": sorted(agent_ids)}, "is_active": True},
+            ),
+            READINESS_AGENT_PROJECTION,
+        ).to_list(max(1, len(agent_ids)))
+    agents_by_id = {str(agent.get("id") or ""): agent for agent in agents}
+
+    result: list[dict[str, Any]] = []
+    for device in devices:
+        agent_id = str(device.get("nexus_agent_id") or "").strip()
+        readiness = _readiness_from_agent(device, agents_by_id.get(agent_id), expected_tenant)
+        result.append({
+            "device_id": device.get("id"),
+            "device_name": device.get("name") or device.get("hostname") or "Unnamed endpoint",
+            "client_id": device.get("client_id"),
+            "client_name": device.get("client_name"),
+            "site_id": device.get("site_id"),
+            "device_type": device.get("device_type"),
+            "device_status": device.get("status"),
+            **readiness,
+        })
+    return result
 
 
 async def issue_grant(*, session: dict[str, Any], user: dict[str, Any], mode: str, consent_required: bool = True) -> dict[str, Any]:

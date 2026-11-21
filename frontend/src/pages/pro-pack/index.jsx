@@ -582,16 +582,16 @@ export function Security2FAPage() {
   const [disableMode, setDisableMode] = useState(false);
   const [password, setPassword] = useState("");
   useEffect(() => {
-    axios.get(`${API}/pro-pack/2fa`, { headers })
+    axios.get(`${API}/user-settings/2fa`, { headers })
       .then(r => setVerified(Boolean(r.data?.enabled)))
       .catch(() => toast.error("Could not load 2FA status"))
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const start = async () => { try { const r = await axios.post(`${API}/pro-pack/2fa/setup`, {}, { headers }); setSetup(r.data); setCode(""); } catch { toast.error("Setup failed"); } };
-  const verify = async () => { try { await axios.post(`${API}/pro-pack/2fa/verify`, { code }, { headers }); toast.success("2FA is now protecting your sign-in"); setSetup(null); setVerified(true); } catch (e) { toast.error(e.response?.data?.detail || "Invalid code"); } };
+  const start = async () => { try { const r = await axios.post(`${API}/user-settings/2fa/setup`, {}, { headers }); setSetup(r.data); setCode(""); } catch { toast.error("Setup failed"); } };
+  const verify = async () => { try { await axios.post(`${API}/user-settings/2fa/verify`, { code }, { headers }); toast.success("2FA is now protecting your sign-in"); setSetup(null); setVerified(true); } catch (e) { toast.error(e.response?.data?.detail || "Invalid code"); } };
   const disable = async () => {
     try {
-      await axios.delete(`${API}/pro-pack/2fa`, { headers, data: { password } });
+      await axios.post(`${API}/user-settings/2fa/disable`, { password }, { headers });
       setSetup(null); setVerified(false); setDisableMode(false); setPassword(""); toast.success("2FA disabled");
     } catch (e) { toast.error(e.response?.data?.detail || "Could not disable 2FA"); }
   };
@@ -604,7 +604,7 @@ export function Security2FAPage() {
         {setup && !verified && (
           <>
             <p className="text-sm">1. Add the entry to your authenticator app (Google Authenticator, 1Password, Authy):</p>
-            <code className="block p-3 bg-muted/30 rounded text-xs font-mono break-all">{setup.otpauth_uri}</code>
+            <code className="block p-3 bg-muted/30 rounded text-xs font-mono break-all">{setup.provisioning_uri || setup.otpauth_uri}</code>
             <p className="text-sm">2. Or enter manually — secret: <code className="font-mono">{setup.secret}</code></p>
             <p className="text-sm">3. Enter the 6-digit code from your app:</p>
             <div className="flex flex-wrap gap-2"><Input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} className="w-36 font-mono text-center text-lg tracking-[0.25em]" data-testid="totp-input" /><Button onClick={verify} disabled={code.length !== 6} data-testid="verify-2fa">Verify & enable</Button><Button variant="ghost" onClick={() => setSetup(null)}>Cancel</Button></div>

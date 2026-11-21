@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { differenceInHours, formatDistanceToNow } from "date-fns";
 import { TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES } from "@/lib/ticketWorkspaceHelpers";
+import { buildTicketQueueNextMove } from "@/lib/ticketCasePulse";
 import { TICKET_QUEUE_STATUSES } from "@/config/ticketConfig";
 
 /* ─────────────────────────────────────────────────────────────────
@@ -116,6 +117,59 @@ const QUEUE_STATUS_SHORTCUTS = TICKET_QUEUE_STATUSES.reduce((acc, key, index) =>
   return acc;
 }, {});
 
+/* The queue's next move is a short, single imperative. It uses the same
+   persisted facts as the detail pulse, but never claims to know the contents
+   of a conversation the list response does not include. */
+const QUEUE_MOVE_ICONS = {
+  claim: UserPlus,
+  recover: AlertTriangle,
+  first_update: MessageSquare,
+  checkpoint: Timer,
+  next_checkpoint: Timer,
+  promised: Timer,
+  checkpoint_due: AlertTriangle,
+  endpoint: Monitor,
+  protect: AlertTriangle,
+  catch_up: Activity,
+  add_update: MessageSquare,
+  complete: CheckCircle2,
+};
+const QUEUE_MOVE_TONES = {
+  claim: "border-violet-400/25 bg-violet-400/[0.08] text-violet-200",
+  critical: "border-rose-400/25 bg-rose-400/[0.08] text-rose-200",
+  attention: "border-amber-400/25 bg-amber-400/[0.08] text-amber-200",
+  healthy: "border-cyan-400/20 bg-cyan-400/[0.06] text-cyan-200",
+  complete: "border-emerald-400/20 bg-emerald-400/[0.06] text-emerald-200",
+};
+
+function QueueMoveBadge({ move, className = "", onClick, disabled = false, ticketId, testId }) {
+  const Icon = QUEUE_MOVE_ICONS[move.key] || Activity;
+  const tone = QUEUE_MOVE_TONES[move.tone] || QUEUE_MOVE_TONES.healthy;
+  const content = (
+    <>
+      <Icon className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{move.label}</span>
+    </>
+  );
+  const classes = `inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-[1px] font-mono text-[9px] uppercase leading-none tracking-[0.1em] ${tone} ${className}`;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onClick(); }}
+        disabled={disabled}
+        className={`${classes} cursor-pointer transition-[filter,opacity] hover:brightness-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 disabled:cursor-wait disabled:opacity-60`}
+        title={move.detail}
+        aria-label={`${move.label}${ticketId ? ` for ${ticketId}` : ""}: ${move.detail}`}
+        data-testid={testId}
+      >
+        {content}
+      </button>
+    );
+  }
+  return <span className={classes} title={move.detail}>{content}</span>;
+}
+
 /* ─────────────────────────────────────────────────────────────────
    Priority left-border accent (sticky 2px)
    ───────────────────────────────────────────────────────────────── */
@@ -157,13 +211,13 @@ export function TicketRow({
   ticket, density = "comfortable", isSelected, onToggleSelect, onOpen, viewers,
   noteCount, attachmentCount, statusConfig, onQuickAction,
   onStatusChange, onRequestTerminal, statusPending = false,
-  recentlyChanged = false, index = 0,
+  recentlyChanged = false, index = 0, onSignalAction, signalPending = false,
 }) {
   const d = DENSITY[density];
   const sc = statusConfig[ticket.status] || { label: ticket.status };
-  const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && !["closed", "resolved"].includes(ticket.status);
+  const isClosed = ["closed", "resolved", "completed"].includes(ticket.status);
+  const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && !isClosed;
   const slaHrs = ticket.sla_due ? differenceInHours(new Date(ticket.sla_due), new Date()) : null;
-  const isClosed = ["closed", "resolved"].includes(ticket.status);
   const isBlocked = !!ticket.blocked_by_ticket_number;
   const hasLinkedDevice = Boolean(ticket.device_id || ticket.asset_id || ticket.device_ids?.length);
   const serviceKit = ticket.service_kit || (ticket.service_kit_id ? { id: ticket.service_kit_id } : null);
@@ -207,6 +261,9 @@ export function TicketRow({
         : slaHrs < 4
           ? "text-amber-400"
           : "text-zinc-500";
+  const ageLabel = ticket.created_at ? formatDistanceToNow(new Date(ticket.created_at), { addSuffix: false }) : null;
+  const queueMove = buildTicketQueueNextMove(ticket);
+  const signalAction = onSignalAction && queueMove.key !== "complete" ? () => onSignalAction(ticket, queueMove) : undefined;
 
   return (
     <div
@@ -233,7 +290,7 @@ export function TicketRow({
       tabIndex={0}
       role="button"
       aria-label={`Open ${ticket.ticket_number || "ticket"}: ${ticket.title || "Untitled ticket"}`}
-      className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer outline-none transition-colors focus-visible:bg-cyan-500/[0.06] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-400/40 [&>span:has(+.ticket-client-brand)]:md:hidden
+      className={`group/row relative flex items-center gap-2 sm:gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer outline-none transition-colors focus-visible:bg-cyan-500/[0.06] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-400/40 [&>span:has(+.ticket-client-brand)]:md:hidden
         ${TICKET_PRIORITY_STYLES[ticket.priority]?.border || "border-l-zinc-700"}
         ${isSelected ? "bg-violet-500/[0.08]" : isOverdue ? "bg-rose-500/[0.025] hover:bg-rose-500/[0.055]" : ticket.priority === "critical" ? "bg-amber-500/[0.02] hover:bg-amber-500/[0.05]" : "hover:bg-white/[0.025]"}
         ${isClosed ? "opacity-55" : ""}
@@ -242,21 +299,23 @@ export function TicketRow({
       data-testid={`ticket-row-${ticket.id}`}
     >
       {/* Checkbox — fades in on hover or when selected */}
-      <div className={`flex-shrink-0 transition-opacity ${isSelected ? "opacity-100" : "opacity-0 group-hover/row:opacity-100"}`} onClick={e => e.stopPropagation()}>
+      <div className={`hidden shrink-0 transition-opacity sm:flex ${isSelected ? "opacity-100" : "opacity-0 group-hover/row:opacity-100"}`} onClick={e => e.stopPropagation()}>
         <Checkbox checked={isSelected} onCheckedChange={() => onToggleSelect?.(ticket.id)} data-testid={`ticket-checkbox-${ticket.id}`} className="h-3.5 w-3.5" />
       </div>
 
       {/* Ticket # — monospace, always-visible */}
-      <code className={`${d.number} font-mono ${isOverdue ? "text-rose-300" : "text-zinc-500"} tabular-nums w-[78px] shrink-0`} data-testid={`ticket-badge-${ticket.id}`}>
+      <code className={`${d.number} font-mono ${isOverdue ? "text-rose-300" : "text-zinc-500"} tabular-nums w-[64px] shrink-0 sm:w-[78px]`} data-testid={`ticket-badge-${ticket.id}`}>
         {ticket.ticket_number}
       </code>
 
       {/* Type icon */}
-      <Icon className={`${d.icon} ${iconTint} shrink-0`} />
+      <Icon className={`${d.icon} ${iconTint} hidden shrink-0 sm:block`} />
 
-      {/* Title + tags */}
-      <div className="flex-1 min-w-0 flex items-center gap-2">
-        <span className={`${d.title} truncate ${isOverdue || ticket.priority === "critical" ? "font-semibold text-zinc-100" : noteCount === 0 && !isClosed ? "font-medium text-zinc-100" : "text-zinc-200"}`}>
+      {/* Title + tags. On phones the next move sits directly beneath the title,
+          so it remains visible without stealing the title's scarce width. */}
+      <div className="flex-1 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+        <span className={`${d.title} line-clamp-2 min-w-0 sm:line-clamp-1 ${isOverdue || ticket.priority === "critical" ? "font-semibold text-zinc-100" : noteCount === 0 && !isClosed ? "font-medium text-zinc-100" : "text-zinc-200"}`}>
           {ticket.title}
         </span>
         {ticket.escalated && <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" title="Escalated" />}
@@ -271,12 +330,22 @@ export function TicketRow({
           </Badge>
         )}
         {ticket.csat_sent && <Bookmark className="w-3 h-3 text-amber-400/70 shrink-0" title="CSAT sent" />}
+        </div>
+        <div className="mt-1 hidden items-center gap-1.5 sm:flex xl:hidden" data-testid={`ticket-queue-move-${ticket.id}`}>
+          <QueueMoveBadge move={queueMove} className="max-w-[128px]" onClick={signalAction} disabled={signalPending} ticketId={ticket.id} testId={`ticket-signal-tablet-${ticket.id}`} />
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 sm:hidden">
+          <QueueMoveBadge move={queueMove} className="max-w-[128px]" onClick={signalAction} disabled={signalPending} ticketId={ticket.id} testId={`ticket-signal-mobile-${ticket.id}`} />
+          <span className={`whitespace-nowrap font-mono text-[9px] ${slaLabel ? slaTone : "text-zinc-600"}`}>
+            {slaLabel || (ageLabel ? `Opened ${ageLabel}` : "No target")}
+          </span>
+        </div>
       </div>
 
       {/* Client — muted */}
-      <span className="hidden md:inline-block text-zinc-500 truncate w-[160px] shrink-0 text-[11px]">{ticket.client_name || "—"}</span>
+      <span className="hidden xl:inline-block text-zinc-500 truncate w-[160px] shrink-0 text-[11px]">{ticket.client_name || "—"}</span>
 
-      <span className="ticket-client-brand hidden md:flex w-[160px] shrink-0 items-center gap-2 truncate text-[11px] text-zinc-500 [&+span]:md:hidden">
+      <span className="ticket-client-brand hidden xl:flex w-[160px] shrink-0 items-center gap-2 truncate text-[11px] text-zinc-500 [&+span]:xl:hidden">
         {ticket.client_logo_url ? (
           <img src={ticket.client_logo_url} alt="" className="h-5 w-5 shrink-0 rounded-md border border-white/10 bg-white object-contain p-0.5" />
         ) : (
@@ -286,7 +355,7 @@ export function TicketRow({
       </span>
 
       {/* Counts */}
-      <div className="hidden lg:flex items-center gap-2.5 text-zinc-500 text-[10px] font-mono shrink-0">
+      <div className="hidden xl:flex items-center gap-2.5 text-zinc-500 text-[10px] font-mono shrink-0">
         {noteCount != null && (
           <span className="inline-flex items-center gap-0.5" title={`${noteCount} notes`}>
             <MessageSquare className="w-3 h-3" />{noteCount}
@@ -339,23 +408,42 @@ export function TicketRow({
       )}
 
       {/* Assignee avatar */}
-      <Avatar className={`${d.avatar} shrink-0 ring-1 ring-white/10`}>
+      <Avatar
+        className={`${d.avatar} shrink-0 ring-1 ring-white/10 ${ticket.assignee_name ? "" : "border border-dashed border-amber-300/25"}`}
+        title={ticket.assignee_name ? `Assigned to ${ticket.assignee_name}` : "Unassigned"}
+      >
         <AvatarImage src={ticket.assignee_avatar} />
-        <AvatarFallback className="bg-zinc-900 text-zinc-300">{(ticket.assignee_name || "?").slice(0, 1).toUpperCase()}</AvatarFallback>
+        {ticket.assignee_name ? (
+          <AvatarFallback className="bg-zinc-900 text-zinc-300">{ticket.assignee_name.slice(0, 1).toUpperCase()}</AvatarFallback>
+        ) : (
+          <AvatarFallback className="bg-amber-400/[0.08] text-amber-200" aria-label="Unassigned"><UserPlus className="h-3 w-3" /></AvatarFallback>
+        )}
       </Avatar>
 
-      {/* SLA / age */}
+      {/* SLA + next move — one compact horizon cell on wide rows. */}
+      <div className="hidden xl:flex w-[142px] shrink-0 flex-col items-end gap-1" data-testid={`ticket-next-move-${ticket.id}`}>
+        <QueueMoveBadge move={queueMove} onClick={signalAction} disabled={signalPending} ticketId={ticket.id} testId={`ticket-signal-${ticket.id}`} />
+        <span
+          className={`${slaLabel ? slaTone : "text-zinc-600"} ${isOverdue ? "nx-sla-overdue" : ""} flex max-w-full items-center gap-0.5 font-mono text-[10px] leading-none tabular-nums`}
+          title={queueMove.detail}
+        >
+          <Timer className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+          <span className="truncate">{slaLabel || (ageLabel ? `Opened ${ageLabel}` : "No target")}</span>
+        </span>
+      </div>
+
+      {/* SLA / age — retained for medium screens where the combined cell is hidden. */}
       {slaLabel ? (
-        <span className={`hidden sm:inline-block ${slaTone} ${isOverdue ? "nx-sla-overdue" : ""} font-mono text-[10px] tabular-nums w-[60px] text-right shrink-0`} data-testid={`ticket-sla-${ticket.id}`}>
+        <span className={`hidden sm:inline-block xl:hidden ${slaTone} ${isOverdue ? "nx-sla-overdue" : ""} font-mono text-[10px] tabular-nums w-[60px] text-right shrink-0`} data-testid={`ticket-sla-${ticket.id}`}>
           <Timer className="inline-block w-2.5 h-2.5 mr-0.5 -mt-px" />{slaLabel}
         </span>
       ) : (
-        <span className="hidden sm:inline-block text-zinc-600 font-mono text-[10px] tabular-nums w-[60px] text-right shrink-0">
-          {ticket.created_at && formatDistanceToNow(new Date(ticket.created_at), { addSuffix: false })}
+        <span className="hidden sm:inline-block xl:hidden text-zinc-600 font-mono text-[10px] tabular-nums w-[60px] text-right shrink-0">
+          {ageLabel}
         </span>
       )}
 
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-700 opacity-0 transition-opacity group-hover/row:opacity-100" />
+      <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-zinc-700 opacity-0 transition-opacity group-hover/row:opacity-100 sm:block" />
 
       {/* One-shot acknowledgement of a recorded queue change. It is an overlay
           rather than a class on the row so no entrance animation restarts. */}

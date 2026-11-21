@@ -575,6 +575,7 @@ Last 15 unread items. Types include:
 - `chat_mention` — someone @mentioned you
 - `chat_broadcast` — `@channel` ping in a channel you're in
 - `ticket_assigned` — work routed to you
+- `ticket_checkpoint_due` — a client-visible ticket promise reached its promised update time; it resolves when a client-visible update is published (which also clears the fulfilled promise) or when the ticket is closed or resolved (which clears any remaining promise)
 - `sla_breach` — SLA red zone hit
 - `patch_anomaly` — broadcast failed/skipped
 

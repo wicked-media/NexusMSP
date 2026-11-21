@@ -890,7 +890,7 @@ Unchanged â€” same as before.
 ## Tinker
 - Add/remove tabs: `ClientsPage.jsx` â†’ search for `{ v: "overview", l: "Overview" }`.
 - Adjust `_aggregate_subscriptions()` in `client_360.py` to pull from more SaaS sources (Dropbox, DocuSign, etc.) â€” just add another DB lookup + append to `subs[]`.
-- Health score weights: `clients.py` â†’ `compute_health_score()`.
+- Health score weights: `services/client_health_engine.py` -> `compute_health()`. The directory and radar only adapt that result.
 
 ## API endpoints
 - `GET /api/clients/{id}/full-profile` â€” kitchen-sink aggregator

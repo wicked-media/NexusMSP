@@ -79,10 +79,28 @@ class _Collection:
             if not _matches(row, query):
                 continue
             row.update(deepcopy(update.get("$set", {})))
+            for field in update.get("$unset", {}):
+                row.pop(field, None)
             for field, increment in update.get("$inc", {}).items():
                 row[field] = row.get(field, 0) + increment
+            for field, value in update.get("$addToSet", {}).items():
+                current = row.setdefault(field, [])
+                if value not in current:
+                    current.append(value)
             return SimpleNamespace(matched_count=1, modified_count=1)
         return SimpleNamespace(matched_count=0, modified_count=0)
+
+    async def update_many(self, query: dict[str, Any], update: dict[str, Any], **_kwargs: Any):
+        matched = [row for row in self.rows if _matches(row, query)]
+        for row in matched:
+            row.update(deepcopy(update.get("$set", {})))
+            for field in update.get("$unset", {}):
+                row.pop(field, None)
+            for field, value in update.get("$addToSet", {}).items():
+                current = row.setdefault(field, [])
+                if value not in current:
+                    current.append(value)
+        return SimpleNamespace(matched_count=len(matched), modified_count=len(matched))
 
 
 class _Database(SimpleNamespace):
@@ -150,6 +168,7 @@ class _Database(SimpleNamespace):
             blueprints=_Collection([{"id": "blueprint-a", "fields": []}]),
             project_tasks=_Collection(),
             ticket_audit_log=_Collection(),
+            notifications=_Collection(),
             activity_logs=_Collection(),
             scope_denials=_Collection(),
             permission_denials=_Collection(),
@@ -407,3 +426,46 @@ async def _test_bulk_ticket_status_resolved_remains_resolved_not_closed(monkeypa
     assert ticket["status"] == "resolved"
     assert ticket["resolution_status"] == "resolved"
     assert "closed_at" not in ticket
+
+
+
+def test_bulk_close_settles_the_ticket_promise_and_due_alert(monkeypatch: pytest.MonkeyPatch):
+    asyncio.run(_test_bulk_close_settles_the_ticket_promise_and_due_alert(monkeypatch))
+
+
+async def _test_bulk_close_settles_the_ticket_promise_and_due_alert(monkeypatch: pytest.MonkeyPatch):
+    database = _install(monkeypatch)
+    database.tickets.rows[0]["next_checkpoint_at"] = "2026-11-15T11:00:00+00:00"
+    database.tickets.rows[0]["next_checkpoint_set_at"] = "2026-11-15T10:00:00+00:00"
+    database.notifications.rows.append({
+        "id": "due-alert",
+        "user_id": "tech-a",
+        "tenant_id": "tenant-a",
+        "client_id": "client-a",
+        "type": "ticket_checkpoint_due",
+        "ref_id": "ticket-a",
+        "read": False,
+    })
+
+    result = await xero.bulk_ticket_action(
+        {
+            "ticket_ids": ["ticket-a"],
+            "action": "close",
+            "resolution_summary": "Replaced the failed drive and verified the array.",
+            "closure_reason": "Resolved",
+        },
+        request=None,
+        current_user=_restricted_user(),
+    )
+
+    assert result["updated"] == 1
+    ticket = database.tickets.rows[0]
+    assert ticket["status"] == "closed"
+    assert ticket["resolution_status"] == "closed"
+    assert "next_checkpoint_at" not in ticket
+    assert "next_checkpoint_set_at" not in ticket
+    alert = database.notifications.rows[0]
+    assert alert["read"] is True
+    assert alert["resolved_at"]
+    assert alert["resolution"] == "ticket_closed"
+    assert "cleared promised update" in database.ticket_audit_log.rows[-1]["details"]

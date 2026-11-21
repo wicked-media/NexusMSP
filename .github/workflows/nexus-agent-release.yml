@@ -73,6 +73,8 @@ jobs:
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-agent.exe ./cmd/nexus-agent
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/nexus-client-chat.exe ./cmd/nexus-chat
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS -H=windowsgui" -o dist/nexus-agent-tray.exe ./cmd/nexus-tray
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS -H=windowsgui" -o dist/nexus-remote-companion.exe ./cmd/nexus-remote-companion
+          printf '%s\n' "$VERSION" > dist/VERSION
 
       - name: Enforce signing for releases
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.sign) || github.event_name == 'push' }}
@@ -91,7 +93,7 @@ jobs:
           try {
             [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:NEXUS_AGENT_SIGNING_CERTIFICATE))
             $securePassword = ConvertTo-SecureString $env:NEXUS_AGENT_SIGNING_PASSWORD -AsPlainText -Force
-            ./scripts/Sign-NexusAgent.ps1 -DistDirectory agent/dist -CertificatePath $pfxPath -CertificatePassword $securePassword
+            ./scripts/Sign-NexusAgent.ps1 -DistDirectory agent/dist -CertificatePath $pfxPath -CertificatePassword $securePassword -AgentVersion "${{ steps.version.outputs.version }}" -Commit $env:GITHUB_SHA
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           finally {
@@ -114,6 +116,8 @@ jobs:
             agent/dist/nexus-agent.exe
             agent/dist/nexus-client-chat.exe
             agent/dist/nexus-agent-tray.exe
+            agent/dist/nexus-remote-companion.exe
+            agent/dist/VERSION
             agent/dist/UNSIGNED.txt
             artifacts/agent-signing/agent-signing-evidence-*.json
             artifacts/agent-signing/SHA256SUMS.txt
@@ -125,6 +129,7 @@ jobs:
         run: |
           {
             echo "## Nexus Agent ${{ steps.version.outputs.version }}"
+            echo "- Components: Agent, Client Chat, Tray, Native Remote Companion"
             echo "- Commit: \`${GITHUB_SHA}\`"
             if [ -n "$NEXUS_AGENT_SIGNING_CERTIFICATE" ]; then
               echo "- Authenticode: signed and verified (evidence uploaded)"

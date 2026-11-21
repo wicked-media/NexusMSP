@@ -78,8 +78,12 @@ export default function WebhookBuilderPage() {
 
   const handleTest = async (id) => {
     setTestingId(id);
-    try { const r = await axios.post(`${API}/webhook-builder/${id}/test`, {}, { headers }); toast.success(`Test: ${r.data.message} (${r.data.response_time_ms}ms)`); fetchData(); }
-    catch { toast.error("Test failed"); }
+    try {
+      const r = await axios.post(`${API}/webhook-builder/${id}/test`, {}, { headers });
+      if (r.data.success) toast.success(`Test delivered in ${r.data.response_time_ms}ms`);
+      else toast.error(r.data.message || "Test delivery failed");
+      fetchData();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Test failed"); }
     finally { setTestingId(null); }
   };
 

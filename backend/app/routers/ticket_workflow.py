@@ -9,6 +9,8 @@ Ticket workflow polish:
 
 from fastapi import APIRouter, Depends, Body, HTTPException
 from datetime import datetime, timezone, timedelta
+import html
+import logging
 import uuid
 
 from app.database import db
@@ -21,6 +23,7 @@ from app.services.scope_permissions import assert_tenant_record_scope, platform_
 MAINTENANCE_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 from app.services.time_utils import now_iso as _now
@@ -201,13 +204,55 @@ async def get_maintenance_window(ticket_id: str, current_user: dict = Depends(ge
 
 @router.post("/tickets/{ticket_id}/send-csat")
 async def send_csat(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    """Generate a CSAT survey link for the ticket and log that it was sent.
-    Actual email delivery is best-effort via the existing email layer."""
+    """Issue a ticket-linked CSAT survey and try to email its capability link.
+
+    "Sent" is only recorded when the mail provider accepted the message.  With no
+    mailbox connected the survey link is still created and returned to the caller,
+    and the ticket records ``csat_link_created_at`` instead of a false send.
+    """
     ticket = await _ticket_in_scope(ticket_id, current_user, "ticket_workflow.send_csat")
-    if not ticket.get("contact_email") and not ticket.get("requester_email"):
+    contact_email = (ticket.get("contact_email") or ticket.get("requester_email") or "").strip()
+    if not contact_email:
         raise HTTPException(400, "Ticket has no contact email")
 
+    from app.services.public_url import configured_public_base_url
+
     survey_id = uuid.uuid4().hex
+    survey_path = f"/feedback/{survey_id}"
+    survey_url = f"{configured_public_base_url()}{survey_path}"
+    issued_at = _now()
+    ticket_number = ticket.get("ticket_number") or ticket_id
+
+    from app.routers.email_utils import send_email
+
+    html_body = (
+        '<div style="font-family: system-ui, sans-serif; padding: 24px; max-width: 560px; margin: auto;">'
+        "<h2>How did we do?</h2>"
+        f"<p>Your ticket <strong>{html.escape(str(ticket_number))}</strong> is ready for feedback.</p>"
+        f'<p><a href="{html.escape(survey_url, quote=True)}" '
+        'style="display:inline-block;padding:12px 20px;background:#0f766e;color:#ffffff;border-radius:8px;text-decoration:none;">'
+        "Rate the service</a></p>"
+        '<p style="color:#64748b;font-size:12px;">This one-time link stops working once the survey is answered.</p></div>'
+    )
+    try:
+        delivery = await send_email(
+            contact_email,
+            f"How did we do? Feedback for {ticket_number}",
+            html_body,
+            category="notifications",
+            client_id=ticket.get("client_id"),
+            related_type="ticket",
+            related_id=ticket_id,
+            initiated_by=current_user.get("id"),
+            initiated_by_name=current_user.get("name"),
+            thread_key=f"csat:{survey_id}",
+        )
+    except Exception as exc:  # provider/SMTP failure must not lose the survey link
+        logger.warning("CSAT email for ticket %s failed: %s", ticket_id, exc)
+        delivery = {"status": "failed", "message": "Email delivery failed"}
+
+    delivery_status = delivery.get("status") or "failed"
+    mailed = delivery_status == "sent"
     survey = {
         "id": survey_id,
         "tenant_id": platform_tenant_id(current_user),
@@ -215,20 +260,42 @@ async def send_csat(ticket_id: str, current_user: dict = Depends(get_current_use
         "ticket_number": ticket.get("ticket_number"),
         "client_id": ticket.get("client_id"),
         "client_name": ticket.get("client_name"),
-        "contact_email": ticket.get("contact_email") or ticket.get("requester_email"),
+        "contact_email": contact_email,
         "status": "sent",
-        "sent_at": _now(),
+        "sent_at": issued_at,
         "sent_by_id": current_user.get("id"),
         "sent_by_name": current_user.get("name"),
+        "survey_path": survey_path,
+        "survey_url": survey_url,
+        "delivery_status": delivery_status,
+        "delivery_message": delivery.get("message") or "",
     }
     await db.csat_surveys.insert_one(dict(survey))
+    ticket_update = {"csat_link_created_at": issued_at}
+    if mailed:
+        ticket_update.update({"csat_sent": True, "csat_sent_at": issued_at})
     await db.tickets.update_one(
         tenant_scoped_query(current_user, {"id": ticket_id}),
-        {"$set": {"csat_sent": True, "csat_sent_at": survey["sent_at"]}},
+        {"$set": ticket_update},
     )
-    await _audit(ticket_id, current_user, "csat_sent", f"to {survey['contact_email']}")
+    await _audit(
+        ticket_id,
+        current_user,
+        "csat_sent" if mailed else "csat_link_created",
+        f"to {contact_email}" if mailed else f"link ready ({delivery_status}); not emailed",
+    )
     survey.pop("_id", None)
-    return {"success": True, "survey": survey}
+    return {
+        "success": True,
+        "survey": survey,
+        "survey_path": survey_path,
+        "survey_url": survey_url,
+        "delivery": {
+            "status": delivery_status,
+            "mailed": mailed,
+            "message": delivery.get("message") or "",
+        },
+    }
 
 
 @router.post("/csat/{survey_id}/respond")

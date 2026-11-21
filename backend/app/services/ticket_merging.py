@@ -14,6 +14,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import db
+from app.services import ticket_checkpoint_notifications
 from app.services.scope_permissions import (
     assert_tenant_record_scope,
     platform_tenant_id,
@@ -130,11 +131,23 @@ async def merge_tickets(
                 }
             },
         )
+        merge_detail = f"Merged into {primary.get('ticket_number') or primary_id}"
+        settlement = await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+            {**source, "status": "closed", "resolution_status": "closed"},
+            tenant_id=platform_tenant_id(current_user),
+            actor=current_user,
+            database=db,
+        )
+        if settlement.get("promise_cleared") or settlement.get("alerts_resolved"):
+            merge_detail += (
+                f"; cleared promised update at {settlement.get('cleared_checkpoint_at') or 'the previous checkpoint'}"
+                f" and resolved {settlement.get('alerts_resolved', 0)} due alert(s)"
+            )
         await _audit(
             source_id,
             current_user,
             "ticket_merged_into",
-            f"Merged into {primary.get('ticket_number') or primary_id}",
+            merge_detail,
             now,
         )
         await _audit(

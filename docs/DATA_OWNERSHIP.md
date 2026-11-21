@@ -49,6 +49,7 @@ TLS ingress certificate and ACME account material (Docker volume `nexus-caddy-da
 | Compliance policies, frameworks, programmes, remediation issues and attached evidence | MongoDB (`compliance_policies`, `compliance_custom_frameworks`, `compliance_programs`, `compliance_issues`, `audit_logs`) | Evidence bytes are private local retention under `private_uploads/compliance_evidence`, with an optional private Supabase artifact replica; `upload_quarantine` records scan/release disposition. Built-in framework and policy templates remain static code definitions. | Keep MongoDB metadata / private binary artifact | Tenant-owned policy and custom-framework records use actor-derived tenant IDs; policies may be tenant-global or linked to stable client/site IDs. Lists preserve same-tenant global policies while restricting client policies, and direct policy/framework access is tenant-bound; global configuration mutations require all-client scope. Programmes and issues carry stable client and optional site IDs. Lists, scans, linked programme validation, direct issue changes and evidence downloads enforce tenant/client/site scope. New attachments are signature-checked and malware-scanned before private retention; the public static URL is blocked. Legacy public-directory files remain retrievable only through the authenticated scoped route and are not migrated automatically. Sensitive policy, framework, programme, issue, and evidence actions are audited without exposing storage paths. | Yes, by tenant/client/site/record and actor |
 | Client Health calculations and snapshots | MongoDB (`health_snapshots`, `health_snapshots_client`) | Scores are derived from tenant/client-scoped tickets, devices, invoices, contracts, backup jobs, security alerts and provider caches; source evidence remains authoritative | Keep MongoDB | Live health views are not a new source of truth. Snapshot rows carry the actor-derived tenant and stable client ID where applicable; all aggregate, detail and trend reads reapply tenant and technician client scope. | Yes, by tenant/client/actor |
 | Living QBR drafts and client-facing exports | MongoDB (`qbrs`) | The QBR snapshot and branded PDF are derived views; clients, tickets, devices, backup status, alerts and invoices remain authoritative evidence | Keep MongoDB | A saved QBR records its owning platform tenant and stable client ID. Generation, lookup and export reapply tenant and client scope. Cross-client pattern aggregates are tenant-bound MSP intelligence available only to an all-client technician; they are omitted for restricted technicians and never identify another customer. | Yes, by tenant/client/actor |
+| Ticket next-update promise | MongoDB (`tickets.next_checkpoint_at`, `next_checkpoint_set_at`, `next_checkpoint_set_by`, `next_checkpoint_set_by_name`) | The customer-visible `ticket_comments` update remains the authority for what the client was told; queue and service-pulse views derive timing from the ticket field | Keep MongoDB | One ticket owns one current promise of the next client-visible update. It is written only with a customer-visible conversation update, through the idempotent conversation action, and a replay cannot move or overwrite a newer promise. The timestamp is operational evidence, not a separate reminder, calendar event or second conversation store. A missing value means no promise was recorded, never that no update is due. Due-promise `notifications` are derived, deduplicated delivery evidence keyed by the exact promised timestamp; a notification never changes the promise by itself. When a client-visible update is published, its older due alert is marked resolved/read and an older fulfilled promise is cleared; a newer promise is retained. Closing or resolving the ticket clears any remaining promise and resolves its outstanding due alerts with `ticket_closed`/`ticket_resolved` evidence. A technician dismissal is retained so a still-due promise is not re-alerted, while a new promise still produces a new alert. | Yes, by authenticated platform tenant, stable ticket ID and client scope |
 | Core clients, contacts, sites, users, tickets, contracts, invoices, products, projects and workflow records | MongoDB | None | Keep MongoDB; review before future relational migration | Existing live application documents and linked operational records | Client scope is widespread; formal tenant ownership is incomplete |
 | Customer invoices and split-billing ledgers | MongoDB (`invoices`) | Payment, email, Xero and PDF-capability records are derived execution evidence | Keep MongoDB | The invoice owns its client, immutable commercial totals, payment state and payer allocations. A split parent is retained as the audit ledger while its generated payer invoices remain separate authoritative receivables linked by stable Nexus invoice and client IDs. New records carry the authenticated platform tenant; reads require tenant, client and billing-action scope. | Yes, by tenant and stable client ID |
 | Sales leads, lead intake and lead workflow records | MongoDB (`leads`, `lead_intake_items`, `lead_intake_events`, `lead_activities`, `lead_tasks`, `lead_recent_views`, `lead_saved_views`) | Scores, forecasts, funnel views and the recent-activity ticker are derived at request time | Keep MongoDB | `lead_intake_items` owns the reviewed inbound-opportunity queue and bounded source preview; `lead_intake_events` preserves its append-only receipt and disposition evidence. An intake item never creates a lead, client or ticket until an authorised technician makes an explicit decision. `leads` owns opportunity identity, qualification, value, assignment and conversion linkage. Activities and tasks own workflow evidence; personal views own only filter preferences. The recent-activity ticker returns only authorised, persisted `lead_activities` from its disclosed time window and reports an empty state rather than synthesized activity. New records carry the authenticated platform tenant and all reads/writes are constrained to that tenant. | Yes, by authenticated platform tenant and stable lead or intake ID |
@@ -110,6 +111,7 @@ The following static collection families were found through `db.<collection>` us
 | Ticket AI-triage evidence | `ai_triage_logs` | Keep MongoDB | A tenant/ticket/client-bound record of a technician-requested triage suggestion. It is advisory only; a later authorised technician action remains responsible for any assignment, priority, or category change. |
 | Ticket merge preferences and history | Tenant-scoped `settings` (`auto_merge`), `dismissed_merges`, `merge_logs` | Keep MongoDB | Merge preferences, technician dismissals and merge history are tenant-bound operational evidence. Ticket mutations remain solely in the canonical merge service, which verifies both tenant and client scope before changing records. |
 | Ticket attachment metadata and evidence | `ticket_attachments` | MongoDB metadata + private filesystem/Supabase artifact replicas | MongoDB owns attachment identity, tenant/ticket/client scope, source and audit linkage. Binary evidence is retained only in the non-static private attachment directory and optional private Supabase Storage; it is never served from the public uploads mount. |
+| Invoice attachment metadata and evidence | `invoice_attachments` | MongoDB metadata + private filesystem/Supabase artifact replicas | MongoDB owns attachment identity, tenant/invoice/client scope, source and audit linkage. Binary evidence follows the same quarantine, malware-scan and private artifact path as ticket attachments and is never served from the public uploads mount. The invoice remains authoritative for billing, payment and document state; an attachment is retained evidence only. |
 | Upload quarantine evidence | `upload_quarantine` | Private temporary filesystem staging + ClamAV verdict | MongoDB owns the client/target-bound disposition and safe reason code. Staged bytes never become an authoritative record and are removed after release, rejection, failure or stale-startup cleanup. Scanner response text and private paths are not returned or audited. |
 | Xero webhook idempotency evidence | `xero_webhook_events` | MongoDB | Derived operational receipt ledger only. It stores a stable provider event ID and receipt timestamp to prevent a signed callback being applied more than once; invoices remain the authoritative billing record. |
 | Payment-link and provider-settlement evidence | `payment_links`, `payment_transactions`, `billing_portal_links`, `payment_reminders` | MongoDB | Derived operational capability, checkout-reservation, provider-session and delivery evidence. The bound `invoices`/`xero_invoices` and `clients` records remain authoritative financial and customer truth; payment records retain stable `invoice_id` and `client_id`, provider IDs, lifecycle, deterministic retry/reservation state and audit provenance. |
@@ -193,6 +195,297 @@ The following static collection families were found through `db.<collection>` us
 | Operation evidence and incident evidence packs | MongoDB (`operation_evidence` documents: tenant, stable `EVD-*` ID, operation, target type/ID, client ID, method, actor kind, outcome, required checks, observed checks, derived verdict, per-tenant hash chain; `evidence_packs` documents: tenant, stable `PCK-*` ID, title, subject, window, included evidence IDs, manifest, verdict summary, integrity root hash, generator, timestamp) | `nexus_verify_execution` remains the authoritative approval/challenge gate for protected provider actions *before* they run, and `nexus_ledger` remains the financial hash-chained ledger. This store owns only generic proof of what an operation actually achieved | Keep MongoDB | A verdict is `verified` only when the operation reported success AND every required check carries a real observation AND all of them passed; a success with unobserved checks is `partial` and with none is `unverified`. The verdict is always re-derived from stored checks, never read from a caller claim. Entries are hash-chained per tenant so tampering is detectable, and packs are manifests only — never secrets, credentials or raw payload dumps. | Yes, by authenticated tenant and stable target/client IDs |
 | Platform operational mode | MongoDB (`operational_mode_state` documents: tenant, mode, written reason, frozen capabilities, frozen clients, actor, updated at; `operational_mode_events` documents: append-only `{from_mode, to_mode, reason, scope, actor, timestamp}`) | Nothing else stores this decision; Nexus Autopilot keeps its own separate kill switch and the durable automation runtime keeps its own approval pauses, and neither is re-implemented here | Keep MongoDB | The platform's declared operational intent: `normal`, `observe_only` (detect/diagnose/recommend, execute nothing), or `frozen` for named capability classes and/or named customers — a freeze is the intersection, not the union. A mode change requires a written reason and is appended with actor and previous state. The response states plainly which layers consult it and which do NOT yet, so declared policy is never described as enforced policy. | Yes, by authenticated tenant; changes are admin-gated |
 | Proxmox VE connection, guest inventory and executed power actions | MongoDB (`proxmox_servers` owns the client-scoped connection including the encrypted API token; `proxmox_vm_actions` owns one proposed guest power action with its canonical descriptor, approval link, task UPID, observed state, verification verdict and idempotency key) | Proxmox VE is the external authority for real node and guest state. `proxmox_vms` (guest inventory) and `proxmox_backups` / `proxmox_backup_schedules` / `proxmox_restore_logs` (Nexus-side job requests) are provider-bound records or requests, not copies of provider truth — `proxmox_vms` has exactly one writer (`app/services/proxmox_inventory.py`), reached by the operator route `POST /api/proxmox/servers/{id}/sync` and by the durable `proxmox-inventory` worker loop on the platform's `proxmox_inventory_sync` schedule (default 30 minutes, clamped to 5-1440); it stores the provider's own report with its `source`/`observed_at` and removes a guest the provider no longer reports. The scheduled pass has no authenticated user, so it writes each connection's rows inside the tenant partition that owns that connection and attributes the audit entry and the `virtualization.inventory.observed` event to a named system actor (`system-proxmox-inventory`) rather than a technician. `proxmox_servers` additionally carries Nexus-owned reconciliation bookkeeping (`last_sync_at`, `last_sync_status`, `last_sync_error`, `last_sync_trigger`, `last_sync_counts`): it records staleness of the projection and is never provider truth, and the `proxmox_inventory_sync` settings document owns only the platform-wide schedule. `activity_logs` and `virtualization.vm.action.*` platform events are derived audit evidence | Keep MongoDB connection metadata, action evidence and job requests / no provider-state authority | The connection document is a customer-scoped integration secret: the token is encrypted through the secret vault, excluded from every read projection, decrypted only in request memory and never returned in a response, log or event. `proxmox_vm_actions` is the authoritative Nexus record of *proposed* work: status is `simulated` (a plan, no provider call), `not_configured` (blocked, nothing executed), `pending_approval` (destructive, awaiting independent admin approval), `executing`, `completed` (provider task finished OK **and** observed state matched the pre-action expectation), `completed_unverified` (task OK, observed state mismatched — both retained), `outcome_unknown` (task did not finish inside the verification window) or `execution_failed` (provider or task failure). Only `completed` may be rendered as success; simulation and blocked attempts are recorded as evidence of work not done. Destructive actions execute exactly once through a conditional status claim after approval. Action status never becomes a second authority for guest state — Proxmox remains that authority and every observation carries `observed_at`/`source`. Backup and restore records say `requested` with `execution: not_connected` because no Proxmox backup API is wired yet. | Yes, by authenticated tenant and stable client, VM and action IDs |
+
+## Collection ownership backfill — 2026-11-12
+
+This section records the authoritative writer for every MongoDB collection the backend writes but which the placement map above did not name. It was derived from static write evidence (`insert_one`, `insert_many`, `update_one`, `update_many`, `replace_one`, `delete_one`, `delete_many`, `find_one_and_update`, `find_one_and_replace`, `find_one_and_delete`, `bulk_write`) across `backend/app/`, `server.py` and `worker.py`.
+
+**Coverage:** 537 collections have write evidence. 263 are already recorded above; the 274 below are added by this backfill. 245 have exactly one writer module and 29 are written by more than one module.
+
+**What the owner column means:** the module that performs the writes today, and therefore the code a change to that collection must start from. It is recorded as it is, not as it should be: most of these writers are routers that reach MongoDB directly, which is the route-layer debt tracked in `AGENTS.md` rather than a service boundary this document can grant. Naming a writer is not evidence that tenant or client scope is enforced — that evidence remains the scope suites listed in `PILOT_ROUTE_SCOPE_MATRIX.md`. A scope marker shows only that the writer references the identifier.
+
+**Not claimed here:** read-only projections. 59 further collections are read but never written by this codebase; where they hold data another system owns, that ownership still needs its own row and this backfill does not assert one.
+
+**Shared writers, now resolved:** the 29 collections that previously carried more than one writer were reviewed module by module, and each now names one authoritative owner plus the secondary writers it permits, or records that the collection is a legacy duplicate whose data belongs elsewhere. The review changed one earlier assumption: the writes to device, network and knowledge collections that appeared to come from `infrastructure.py` and startup `seed.py` were randomised demo producers, not domain owners. Both were removed on 2026-11-13, so the rows below name the sole real owner and no longer carry a demo writer.
+
+**Reachability is not asserted.** A write found in a module is recorded even when the handler that performs it has no registered route; this table names the code that owns the collection, not proof that a caller can reach it. One case in the table is confirmed retired rather than merely unreachable: `passwords`, whose route decorators are commented out while the plaintext storage code and model remain (see its row).
+
+| Collection | Authoritative writer | Observed writes | Ownership note |
+|---|---|---|---|
+| `achievement_definitions` | `backend/app/routers/achievements.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`. |
+| `acronis_alerts` | `backend/app/routers/acronis.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `acronis_billing_snapshots` | `backend/app/routers/acronis.py` | `update_one` x2 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `acronis_customer_links` | `backend/app/routers/acronis.py` | `update_one` x3 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `acronis_customers` | `backend/app/routers/acronis.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `acronis_resources` | `backend/app/routers/acronis.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `acronis_cleanup_log` | `backend/app/routers/acronis_advanced.py` | `insert_one` x2 | Single writer. Scope markers present in the writer: `tenant_id`. |
+| `custom_fields` | `backend/app/routers/admin.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `on_call_rotations` | `backend/app/routers/admin.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `copilot_history` | `backend/app/routers/ai_copilot.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `ai_resolution_queue` | `backend/app/routers/ai_resolution.py` | `update_one` x3, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `standup_digests` | `backend/app/routers/ai_wave_a.py` | `insert_one` x2 | Defines and writes the on-demand standup digest (snapshot plus user). `server.py`'s scheduled standup job builds and inserts the same document independently — one of the two must call the other so the shape has a single definition. |
+| `alert_rule_state` | `backend/app/routers/alert_rules.py` | `update_one` x2, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `alert_rules` | `backend/app/routers/alert_rules.py` | `update_one` x3, `insert_one` x3, `delete_one` x1, `delete_many` x1 | Owns rule schema and lifecycle (create, update, delete, trigger counters). `workflow_automation.py` may insert a disabled draft rule when a marketplace artifact of that kind is installed; its lifecycle is still governed here. |
+| `alert_suppression_rules` | `backend/app/routers/alert_suppression.py` | `insert_one` x2, `update_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `approval_audit` | `backend/app/routers/approval_workflows.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `auto_generated_docs` | `backend/app/routers/auto_documentation.py` | `update_one` x2, `update_many` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `backup_recovery_simulations` | `backend/app/routers/backup_center.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `invoice_activity_log` | `backend/app/routers/billing_dashboard.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `invoice_comments` | `backend/app/routers/billing_pro.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `product_stock_movements` | `backend/app/routers/products.py` | `insert_one` x2 | Duplicate movement ledger. Inventory truth is `products.quantity_in_stock` with the `stock_movements` ledger owned by this module; `billing_pro.py` (purchase-order receipt) and `pro_pack.py` (stocktake commit) write this second ledger instead. Retire it into `stock_movements`. |
+| `recurring_indexation_log` | `backend/app/routers/billing_pro.py` | `insert_one` x2 | Owns the indexation record and the manual apply path. `server.py`'s scheduled indexation applies the same recurring-invoice update and writes its own log entry — duplicate application logic to consolidate. |
+| `retainer_transactions` | `backend/app/routers/billing_pro.py` | `insert_one` x2 | Single writer. Scope markers present in the writer: `client_id`. |
+| `retainers` | `backend/app/routers/billing_pro.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `stock_transfers` | `backend/app/routers/billing_pro.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `warehouses` | `backend/app/routers/billing_pro.py` | `update_one` x3, `insert_one` x2, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `campaigns` | `backend/app/routers/campaigns.py` | `update_one` x2, `insert_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `change_freezes` | `backend/app/routers/change_freezes.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `change_guardian_previews` | `backend/app/routers/change_guardian.py` | `insert_one` x1, `update_one` x1 | Creates the preview and owns its lifecycle; `device_intel.py` writes one update onto an existing preview. |
+| `help_center_metadata` | `backend/app/routers/chat_help.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `chat_read_state` | `backend/app/routers/chat_presence.py` | `update_one` x2 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `work_activity_audit` | `backend/app/routers/chat_presence.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `chat_typing` | `backend/app/routers/chat_pro.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `cipp_digests` | `backend/app/routers/cipp_hygiene.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `client_budgets` | `backend/app/routers/client_budget.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `health_alert_config` | `backend/app/routers/client_health.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `client_notes` | `backend/app/routers/client_profile.py` | `update_one` x2, `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `report_templates` | `backend/app/routers/client_reports.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `coffee_breaks` | `backend/app/routers/coffee_break.py` | `update_one` x3, `update_many` x1, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `confidence_verifications` | `backend/app/routers/confidence.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`, `site_id`. |
+| `contract_types` | `backend/app/routers/contracts.py` | `insert_many` x1, `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `control_plane_action_plans` | `backend/app/routers/control_plane.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `channel_tenants` | `backend/app/routers/channel_mode.py` | `update_one` x4, `insert_one` x1 | Owns the channel tenant record (create and update). `deployment_hub.py` writes deployment state onto the existing tenant record. |
+| `nexus_edge_connectivity_checks` | `backend/app/routers/deployment_hub.py` | `update_many` x2, `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `nexus_jump_access_requests` | `backend/app/routers/deployment_hub.py` | `update_many` x1, `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `nexus_jump_lab_gateways` | `backend/app/routers/deployment_hub.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `network_scans` | `backend/app/routers/device_discovery.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `device_saved_views` | `backend/app/routers/device_pulse.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `device_diagnoses` | `backend/app/routers/device_smart.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `payment_promises` | `backend/app/routers/diff_features.py` | `update_one` x2, `insert_one` x1 | Owns promise create/update. `power_features.py`'s reconcile job marks overdue promises broken; that transition is written outside its owner. |
+| `client_applications` | `backend/app/routers/dns_monitor.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `dns_alerts` | `backend/app/routers/dns_monitor.py` | `update_one` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `dns_domains` | `backend/app/routers/dns_monitor.py` | `insert_one` x2, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `dns_history` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_access_requests` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_audit` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_deployments` | `backend/app/routers/dns_monitor.py` | `insert_one` x3, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_domain_profiles` | `backend/app/routers/dns_monitor.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_domain_timeline` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_events` | `backend/app/routers/dns_monitor.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_exceptions` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_lookalikes` | `backend/app/routers/dns_monitor.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_playbook_previews` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_policies` | `backend/app/routers/dns_monitor.py` | `insert_one` x2, `update_one` x2 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_policy_forecasts` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_private_zones` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_settings` | `backend/app/routers/dns_monitor.py` | `update_one` x2 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_shadow_decisions` | `backend/app/routers/dns_monitor.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_simulations` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dns_toolkit_runs` | `backend/app/routers/dns_monitor.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `doc_branding_settings` | `backend/app/routers/doc_branding.py` | `update_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `doc_branding_templates` | `backend/app/routers/doc_branding.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `doc_scans` | `backend/app/routers/doc_scanner.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `email_signatures` | `backend/app/routers/email_signatures.py` | `update_many` x3, `update_one` x2, `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `escalation_log` | `backend/app/routers/escalation_matrix.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `escalation_rules` | `backend/app/routers/escalation_matrix.py` | `insert_one` x2, `update_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `estimate_audit` | `backend/app/routers/estimates.py` | `delete_many` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `ticket_worksheets` | `backend/app/routers/estimates.py` | `update_one` x4 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `executive_reports` | `backend/app/routers/executive_reports.py` | `delete_many` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `field_audit_log` | `backend/app/routers/field_enhanced.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_checklists` | `backend/app/routers/field_enhanced.py` | `insert_one` x2, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_equipment` | `backend/app/routers/field_enhanced.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_materials` | `backend/app/routers/field_enhanced.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_notes` | `backend/app/routers/field_enhanced.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_notifications` | `backend/app/routers/field_enhanced.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_photos` | `backend/app/routers/field_enhanced.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_quotes` | `backend/app/routers/field_enhanced.py` | `update_one` x3, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `field_site_info` | `backend/app/routers/field_enhanced.py` | `update_one` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `gamification` | `backend/app/routers/gamification.py` | `update_one` x3 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `git_scripts` | `backend/app/routers/git_scripts.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `growth_opportunities` | `backend/app/routers/growth.py` | `update_one` x2, `delete_many` x1, `insert_many` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `hudu_password_reveals` | `backend/app/routers/hudu.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `hudu_suggestions` | `backend/app/routers/hudu.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `huntress_actions` | `backend/app/routers/huntress.py` | `insert_one` x3 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `software_licenses` | `backend/app/routers/infrastructure.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `acronis_subscriptions` | `backend/app/routers/integrations.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `routing_rules` | `backend/app/routers/intelligent_routing.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `credit_notes` | `backend/app/routers/invoice_enhanced.py` | `update_one` x3, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `tax_profiles` | `backend/app/routers/invoice_enhanced.py` | `insert_one` x2, `update_many` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `invoice_reminder_log` | `backend/app/routers/invoice_reminders.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `invoice_payment_plans` | `backend/app/routers/invoice_smart.py` | `insert_one` x1, `delete_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `invoice_webhooks` | `backend/app/routers/invoice_smart.py` | `insert_one` x1, `delete_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `late_fee_policies` | `backend/app/routers/invoice_smart.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `invoice_themes` | `backend/app/routers/invoice_themes.py` | `insert_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `billing_settlements` | `backend/app/routers/invoices.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `passwords` | `backend/app/routers/it_docs.py` (retired — no registered route) | `insert_one`, `update_one`, `delete_one` | **Legacy credential collection, not an approved store.** Every `/passwords` route decorator in `it_docs.py` is commented out (`Retired: password storage is handled by Keeper/Hudu, not NexusMSP`), so no registered HTTP path reaches these handlers, but the handler bodies and the `PasswordEntry` model still persist a plaintext `password`, `username` and `otp_secret` with no encryption boundary and no tenant partition. Existing databases may therefore hold customer credential material today. Retention or purge must be decided, and the collection must not be re-enabled before the encrypted-vault boundary is applied. |
+| `kiosk_lookups` | `backend/app/routers/kiosk.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `kiosks` | `backend/app/routers/kiosk.py` | `insert_one` x1, `delete_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `kb_articles` | `backend/app/routers/knowledge_base.py` | `update_one` x6, `insert_one` x5, `delete_one` x1 | Owns article CRUD including delete. `hudu.py` imports and updates articles from Hudu. The randomised demo writers were removed on 2026-11-13. |
+| `late_payment_predictions` | `backend/app/routers/late_payment.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `late_payment_reminders` | `backend/app/routers/late_payment.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `chat_canned_responses` | `backend/app/routers/live_chat.py` | `insert_one` x2, `update_many` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `m365_ca_deployments` | `backend/app/routers/m365.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `m365_ca_templates` | `backend/app/routers/m365.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `m365_scripted_alerts` | `backend/app/routers/m365.py` | `delete_many` x1, `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `m365_standard_configs` | `backend/app/routers/m365.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `m365_standard_run_summaries` | `backend/app/routers/m365.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `m365_standard_runs` | `backend/app/routers/m365.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `m365_standards` | `backend/app/routers/m365.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `magic_links` | `backend/app/routers/magic_portal.py` | `update_one` x3 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_mail_shield_connections` | `backend/app/routers/mail_shield.py` | `update_one` x2 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `nexus_mail_shield_connector_settings` | `backend/app/routers/mail_shield.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `nexus_mail_shield_policies` | `backend/app/routers/mail_shield.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `nexus_mail_shield_signals` | `backend/app/routers/mail_shield.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `backup_drills` | `backend/app/routers/mega_features.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `insurance_vault_snapshots` | `backend/app/routers/mega_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `patch_broadcasts` | `backend/app/routers/mega_features.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `teams_status` | `backend/app/routers/microsoft_config.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `email_logs` | `backend/app/routers/morning_check_email.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `morning_check_runs` | `backend/app/routers/morning_checks.py` | `update_one` x3, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `bandwidth_alerts` | `backend/app/routers/bandwidth_monitor.py` (no creation path) | `delete_many` x1, `update_one` x1 | **No creation path exists in the backend.** This collection is only listed and resolved here and deleted by `networking.py` when a site is removed; nothing inserts it, so alert creation is unimplemented and no producer is recorded. |
+| `bandwidth_data` | `backend/app/routers/networking.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `network_clients` | `backend/app/routers/networking.py` | `insert_one` x4, `update_one` x1, `delete_many` x1 | Owns client-inventory upsert and site-delete cleanup. The development-only demo generators were removed on 2026-11-13. |
+| `network_devices` | `backend/app/routers/networking.py` | `insert_one` x7, `update_one` x2, `delete_many` x1, `delete_one` x1 | Owns network-device CRUD (five insert paths, update and delete). The development-only demo generators were removed on 2026-11-13. |
+| `network_dpi` | `backend/app/routers/networking.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `network_port_profiles` | `backend/app/routers/networking.py` | `delete_many` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `network_wlans` | `backend/app/routers/networking.py` | `insert_one` x1, `update_one` x1, `delete_one` x1, `delete_many` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `device_events` | `backend/app/routers/nexus_agent.py` | `insert_one` x4 | Owns agent-reported device events. The development-only demo generators were removed on 2026-11-13. |
+| `device_network` | `backend/app/routers/nexus_agent.py` | `insert_one` x2, `delete_many` x1, `insert_many` x1 | Owns the per-heartbeat replacement of an endpoint's interfaces (`delete_many` then `insert_many`). The development-only demo generators were removed on 2026-11-13. |
+| `device_performance` | `backend/app/routers/nexus_agent.py` | `insert_one` x5 | Owns live agent telemetry samples. `devices.py`'s `device_heartbeat` still records samples on the legacy device path; the demo writers were removed on 2026-11-13. |
+| `nexus_agent_audit` | `backend/app/routers/nexus_agent.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `nexus_agent_certificates` | `backend/app/routers/nexus_agent.py` | `update_many` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `nexus_agent_enrollment_tokens` | `backend/app/routers/nexus_agent.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `nexus_agent_heartbeats` | `backend/app/routers/nexus_agent.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `nexus_agent_installers` | `backend/app/routers/nexus_agent.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `nexus_agent_settings` | `backend/app/routers/nexus_agent.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `autopilot_decisions` | `backend/app/routers/nexus_autopilot.py` | `insert_one` x4 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `autopilot_policies` | `backend/app/routers/nexus_autopilot.py` | `replace_one` x3 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `autopilot_simulations` | `backend/app/routers/nexus_autopilot.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `ticket_handoffs` | `backend/app/routers/nexus_connect.py` | `update_one` x3, `find_one_and_update` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `nexus_dmarc_domains` | `backend/app/routers/nexus_dmarc.py` | `update_one` x4, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_dmarc_reports` | `backend/app/routers/nexus_dmarc.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_dmarc_settings` | `backend/app/routers/nexus_dmarc.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_spf_assessments` | `backend/app/routers/nexus_dmarc.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_spf_change_plans` | `backend/app/routers/nexus_dmarc.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_shield_security_missions` | `backend/app/routers/nexus_shield.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_shield_xdr_cases` | `backend/app/routers/nexus_shield.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `job_emails` | `backend/app/routers/job_conversation.py` | `insert_one` x2 | Owns the job-conversation email record (outbound). `o365_mailbox.py` appends inbound replies routed back to a job. |
+| `processed_inbound_emails` | `backend/app/routers/o365_mailbox.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `onboarding_sessions` | `backend/app/routers/onboarding.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `onboarding_workflows` | `backend/app/routers/onboarding.py` | `update_one` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `onboarding_enhanced` | `backend/app/routers/onboarding_enhanced.py` | `update_one` x6, `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `pax8_companies` | `backend/app/routers/pax8.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `pax8_company_links` | `backend/app/routers/pax8.py` | `update_one` x3, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `pax8_products` | `backend/app/routers/pax8.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `pax8_subscriptions` | `backend/app/routers/pax8.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `nexus_elevate_policy_audit` | `backend/app/routers/permission_elevation.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `permission_elevations` | `backend/app/routers/permission_elevation.py` | `insert_one` x2, `update_one` x2 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `po_audit_log` | `backend/app/routers/purchase_orders.py` | `insert_one` x2 | Owns purchase-order audit evidence. `po_enhanced.py` is a legacy parallel PO surface with no UI caller in this repository that writes the same log. |
+| `po_notes` | `backend/app/routers/po_enhanced.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `po_templates` | `backend/app/routers/po_enhanced.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `remote_session_records` | `backend/app/routers/portal_v2.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `rustdesk_sessions` | `backend/app/routers/portal_v2.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `postmortems` | `backend/app/routers/postmortem.py` | `insert_one` x3, `delete_one` x1 | Owns postmortem create/delete. `diff_features.py` auto-generates a postmortem from a war room. The startup demo seeder was removed on 2026-11-13. |
+| `apology_queue` | `backend/app/routers/power_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `churn_risk` | `backend/app/routers/power_features.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `insurance_vault_schedule` | `backend/app/routers/power_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `ops_tick_log` | `backend/app/routers/power_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `sla_auto_pages` | `backend/app/routers/power_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `ticket_quality_audits` | `backend/app/routers/power_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `trmm_scheduled_broadcasts` | `backend/app/routers/power_features.py` | `update_many` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `device_health` | `backend/app/routers/predictive.py` | `update_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `device_health_history` | `backend/app/routers/predictive.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `predictive_alerts` | `backend/app/routers/predictive.py` | `update_one` x2, `update_many` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `pricing_calcs` | `backend/app/routers/pricing_calc.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `api_tokens` | `backend/app/routers/pro_pack.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `dr_plan_tests` | `backend/app/routers/pro_pack.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `dr_plans` | `backend/app/routers/pro_pack.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `service_catalog` | `backend/app/routers/pro_pack.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `stocktake_scans` | `backend/app/routers/pro_pack.py` | `insert_one` x1, `delete_many` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `product_instances` | `backend/app/routers/products.py` | `delete_many` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `stock_movements` | `backend/app/routers/products.py` | `insert_one` x8, `delete_many` x1 | Owner of the movement ledger and the `products.quantity_in_stock` authority (movements are deleted with their product). Append-only producers for their own operations: `purchase_orders.py` (receipt/return), `stocktake.py` (adjustment), `on_call.py` (workshop consumption). |
+| `client_price_overrides` | `backend/app/routers/products_invoices_plus.py` | `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`, `site_id`. |
+| `product_kits` | `backend/app/routers/products_invoices_plus.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`, `site_id`. |
+| `ticket_products` | `backend/app/routers/products_invoices_plus.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`, `site_id`. |
+| `project_milestones` | `backend/app/routers/projects.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `po_serials` | `backend/app/routers/purchase_orders.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `xero_supplier_bills` | `backend/app/routers/purchase_orders.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `qbr_reports` | `backend/app/routers/qbr_generator.py` | `delete_many` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `brain_bucket` | `backend/app/routers/quirky_features.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `daily_quests` | `backend/app/routers/quirky_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `launch_events` | `backend/app/routers/quirky_features.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `canary_triggers` | `backend/app/routers/ransomware_canary.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `ransomware_canaries` | `backend/app/routers/ransomware_canary.py` | `update_one` x3, `insert_one` x2 | Owns canary create/update lifecycle; `nexus_agent.py` creates an endpoint canary and reports its status back. |
+| `ransomware_scenarios` | `backend/app/routers/ransomware_tabletop.py` | `delete_many` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `tabletop_drills` | `backend/app/routers/ransomware_tabletop.py` | `update_one` x2, `update_many` x1, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `invoice_templates` | `backend/app/routers/recurring_invoices.py` | `insert_one` x2, `update_one` x2, `delete_one` x1, `delete_many` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `recurring_prebill_log` | `backend/app/routers/recurring_smart.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `remediation_playbooks` | `backend/app/routers/remediation_playbooks.py` | `delete_many` x1, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `rental_devices` | `backend/app/routers/rentals.py` | `update_one` x3, `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `rentals` | `backend/app/routers/rentals.py` | `update_one` x3, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `agent_deployments` | `backend/app/routers/rustdesk.py` | `update_one` x3 | Single writer. Scope markers present in the writer: `client_id`. |
+| `rustdesk_devices` | `backend/app/routers/rustdesk.py` | `update_one` x6, `insert_one` x3, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `schedule_entries` | `backend/app/routers/scheduling.py` | `insert_one` x1, `update_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `script_ticket_integrations` | `backend/app/routers/script_ticket.py` | `insert_one` x2 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `device_groups` | `backend/app/routers/scripting.py` | `update_one` x2, `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `scheduled_task_runs` | `backend/app/routers/scripting.py` | `insert_one` x2 | Single writer. Scope markers present in the writer: `client_id`, `site_id`. |
+| `healing_runbooks` | `backend/app/routers/self_healing.py` | `update_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `self_healing_events` | `backend/app/routers/self_healing.py` | `update_one` x3, `insert_one` x2 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `client_sentiments` | `backend/app/routers/sentiment.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `sentiment_history` | `backend/app/routers/sentiment.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `shadow_it_baselines` | `backend/app/routers/shadow_it.py` | `update_one` x2 | Single writer. Scope markers present in the writer: `client_id`. |
+| `shadow_it_findings` | `backend/app/routers/shadow_it.py` | `update_one` x3, `delete_many` x1, `insert_many` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `tech_skills` | `backend/app/routers/skills_matrix.py` | `update_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `sla_penalties` | `backend/app/routers/sla_penalties.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `sla_generated_reports` | `backend/app/routers/sla_report_gen.py` | `delete_many` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `sms_messages` | `backend/app/routers/sms.py` | `insert_one` x2, `update_one` x2 | Single writer. Scope markers present in the writer: `client_id`. |
+| `sms_templates` | `backend/app/routers/sms.py` | `insert_one` x2, `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `sms_webhook_log` | `backend/app/routers/sms.py` | `insert_one` x2 | Single writer. Scope markers present in the writer: `client_id`. |
+| `automation_settings` | `backend/app/routers/soc.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`, `site_id`. |
+| `splynx_links` | `backend/app/routers/splynx.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `splynx_suspensions` | `backend/app/routers/splynx.py` | `update_one` x3 | Single writer. Scope markers present in the writer: `client_id`. |
+| `stocktake_audit` | `backend/app/routers/stocktake.py` | `delete_many` x1, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `stocktake_sessions` | `backend/app/routers/stocktake.py` | `update_one` x3, `insert_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `client_subscriptions` | `backend/app/routers/suped.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `team_pins` | `backend/app/routers/team_pins.py` | `insert_one` x1, `delete_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `permission_audit` | `backend/app/routers/tech_intel.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `tech_invites` | `backend/app/routers/technician_invites.py` | `update_one` x5, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `technician_profiles` | `backend/app/routers/technicians_profile.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `ticket_categories` | `backend/app/routers/ticket_categories.py` | `update_one` x4, `insert_one` x3 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `ticket_pings` | `backend/app/routers/ticket_ping.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`. |
+| `ticket_counters` | `backend/app/routers/ticket_suggestions.py` | `find_one_and_update` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`. |
+| `csat_surveys` | `backend/app/routers/ticket_workflow.py` | `insert_one` x3, `update_one` x2 | Owns survey issue/respond and the `sent`→`responded` vocabulary. `tickets.py` auto-creates a survey on close. Only a 1–5 score with status `responded` or `completed` counts as a response, so legacy score-only demo rows stay stored but never appear in a dashboard; startup seeding no longer creates ratings. The legacy `tech_performance.py` reporter (a 1–5 scale scored as NPS) and its `pending`→`completed` public responder are retired with HTTP 410. `GET /csat/{id}/public` is the unauthenticated capability lookup and returns only the id, ticket number, client name and an `open` marker; `POST /csat/{id}/respond` is the single response writer. A ticket records `csat_sent` only when the mail provider accepted the survey email, and `csat_link_created_at` when only the link was issued. |
+| `unifi_actions` | `backend/app/routers/unifi_controllers.py` | `insert_one` x2 | Owns the action-audit shape, which records controller, client and tenant. `unifi.py` appends site-manager actions with `tenant_id` but no `client_id`, so those rows carry no client binding. |
+| `usage_billing` | `backend/app/routers/usage_billing.py` | `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `user_2fa` | `backend/app/routers/user_settings.py` | `update_one` x4, `delete_one` x2 | Owns TOTP enrolment and is the surface `TechSettingsPage` calls. The duplicate `/pro-pack/2fa/*` implementation was retired on 2026-11-12 and the pro-pack UI now calls these endpoints, so this module is the collection's only writer. |
+| `warranties` | `backend/app/routers/infrastructure.py` | `insert_one` x3, `delete_one` x2, `delete_many` x1, `update_one` x1 | Owner of `/api/warranties`. The duplicate `vendors.py` handlers and the `_LEGACY_HTTP_OPERATION_OWNERS` declarations they required were retired on 2026-11-12; `vendors.py` keeps only the read-only `/warranties/stats` aggregation, so this module is the collection's only writer. |
+| `vulnerability_finding_overrides` | `backend/app/routers/vulnerability_scanner.py` | `update_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `war_rooms` | `backend/app/routers/warroom.py` | `update_one` x12, `insert_one` x1 | Owns war-room create and update (11 updates); `diff_features.py` links a generated postmortem onto the room. |
+| `webhooks` | `backend/app/routers/webhook_builder.py` | `update_one` x6, `insert_one` x3, `delete_one` x2 | Owns the webhook record and is the only surface the UI calls (`/webhook-builder/*`). The `/webhooks` routes in `admin.py` were retired on 2026-11-12 (they had no UI caller and a different shape: `events`/`is_active` vs `trigger`/`status`), so this module is now the collection's only writer. Endpoints are validated on creation and edit under the same public-address policy as delivery, so a hook cannot be saved with an address that would be refused when tested. The list endpoint returns only recorded hooks and no longer seeds demo integrations, so an empty collection is reported as empty rather than filled with fabricated records. A test delivery is a real outbound request: the destination must pass the governed URL policy and resolve only to public addresses, it runs with a 10 s timeout without following redirects, and the recorded status code, duration and outcome are the measured result. |
+| `nexus_work_sessions` | `backend/app/routers/work_sessions.py` | `update_one` x3, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workflow_pack_installations` | `backend/app/routers/workflow_automation.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `workshop_audit_log` | `backend/app/routers/workshop.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workshop_bench` | `backend/app/routers/workshop.py` | `insert_one` x1, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workshop_checklists` | `backend/app/routers/workshop.py` | `insert_one` x2, `update_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workshop_notes` | `backend/app/routers/workshop.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workshop_notifications` | `backend/app/routers/workshop.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workshop_photos` | `backend/app/routers/workshop.py` | `insert_one` x1, `delete_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `workshop_quotes` | `backend/app/routers/workshop.py` | `update_one` x4, `insert_one` x1 | Single writer. Scope markers present in the writer: `client_id`. |
+| `xero_accounts` | `backend/app/routers/xero.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `permission_denials` | `backend/app/services/action_permissions.py` | `insert_one` x4 | Owns denial evidence (permission id, role, method, path, correlation id). `module_permissions.py` writes a reduced record and `invoice_smart.py`/`products_invoices_plus.py` insert directly; all should call this service. |
+| `ticket_notes` | `backend/app/routers/tickets.py` (designated; does not yet write it) | `insert_one` x4, `update_one` x1 | **Designated owner; the ticket domain does not write this collection today.** The authoritative note store is `ticket_comments` (14 references in `tickets.py`, 11 writer modules). `ticket_notes` is a legacy parallel store with five append paths and a split schema: writers set `content`/`user_name` while legacy readers query `body`/`author`, which nothing writes. |
+| `core_foundation_state` | `backend/app/services/core_relationships.py` | `update_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `core_integrity_runs` | `backend/app/services/core_relationships.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `platform_event_deliveries` | `backend/app/services/event_backbone.py` | `find_one_and_update` x2, `insert_one` x1, `update_one` x1, `delete_many` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`.  Outbound attempts first resolve the subscription endpoint under the event delivery policy and refuse any destination that resolves to a loopback, private, link-local, multicast, reserved or unspecified address; such a refusal is recorded as a permanent failure and dead-lettered rather than retried as a transient network error. |
+| `platform_event_replays` | `backend/app/services/event_backbone.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `platform_event_sequences` | `backend/app/services/event_backbone.py` | `find_one_and_update` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`. |
+| `platform_event_subscriptions` | `backend/app/services/event_backbone.py` | `update_one` x2, `insert_one` x1 | Single writer. Scope markers present in the writer: `tenant_id`, `client_id`.  Webhook endpoints are validated against the delivery policy on creation and edit, so a destination that is not publicly routable is refused with the reason at configuration time instead of being stored and dead-lettered on first delivery. |
+| `finance_idempotency` | `backend/app/services/finance_integrity.py` | `update_one` x3, `insert_one` x1 | Single writer. No `tenant_id`/`client_id` marker found in the writer — verify scope before this surface is offered to a pilot tenant. |
+| `remote_repairs` | `backend/app/services/remote_runtime.py` | `insert_one` x1 | Single writer. Scope markers present in the writer: `platform_tenant`, `tenant_id`, `client_id`, `site_id`. |
+| `scope_denials` | `backend/app/services/scope_permissions.py` | `insert_one` x3 | Owns scope-denial evidence and is imported by 189 routers. `unifi.py` and `unifi_controllers.py` insert their own rows with a reduced shape instead of calling it. |
+| `device_disks` | `backend/app/routers/nexus_agent.py` | `delete_many` x2, `insert_one` x1, `insert_many` x1 | Owns the per-heartbeat disk-inventory replacement. The development-only startup seeding that replaced the collection with demo disks was removed on 2026-11-13. |
+| `skills` | — (no runtime writer) | — | Legacy demo-only collection. The startup seeder was removed on 2026-11-13, so existing rows stay readable but nothing recreates or fabricates them. |
+| `vendor_scores` | — (no runtime writer) | — | Legacy demo-only collection. The startup seeder was removed on 2026-11-13; vendor records are created through the vendors workflow, never fabricated. |
 
 ## Tenant partition compatibility
 
@@ -361,3 +654,96 @@ an alternate action path.
 Windows event and service information is retained only as a bounded, agent-
 reported operational summary on the owning `devices` record. Raw event messages,
 user content and command output are not replicated into this projection.
+
+# Syncro one-time migration
+
+Syncro is a one-time migration source, not an ongoing system of record. The
+migration connector owns three supporting collections and no customer domain:
+
+- `syncro_migration_jobs` owns job state, selected entities, counts, progress,
+  cancellation intent and the operator who requested the run. A job can be
+  re-run; it is never treated as an authoritative business record.
+- `syncro_migration_records` owns the immutable raw payload and checksum for each
+  source record, keyed by `(tenant_id, entity, syncro_id)`. It is the evidence
+  that a field Nexus does not yet map was still migrated.
+- `syncro_migration_failures` owns per-record mapping failures and a bounded raw
+  excerpt. A failure never deletes the archived source record.
+
+The canonical collections remain authoritative for their own domains: `clients`,
+`contacts`, `devices`, `products`, `contracts`, `tickets`, `ticket_attachments`,
+`ticket_comments`,
+`invoices`, `invoice_attachments`, `recurring_invoices`, `time_entries`, `leads`,
+`vendors` and `purchase_orders`. Each migrated record carries an immutable `syncro_*` external
+identifier and `tenant_id`; Nexus IDs remain the primary keys. Provider-only
+records that have no Nexus domain owner yet (users, ticket blueprints and wiki
+pages) remain in the raw archive until a native owner is approved.
+Re-running a migration updates the same canonical record by that external
+identifier and never creates a duplicate solely because a Syncro display name
+changed. Nexus does not delete source or destination records during a run.
+
+A ticket or invoice that was created directly in Nexus during the transition may
+not yet carry a `syncro_*` ID. Migration links such a record by its normalised
+ticket or invoice number instead of inserting a second record. The match is
+tenant-wide, but it is accepted only when exactly one candidate exists, the
+candidate belongs to the same stable `client_id`, and the candidate is not
+already linked to a different Syncro source. An ambiguous number, a number
+owned by another client, or a number already claimed by another Syncro record
+is a recorded failure; migration does not guess, merge across clients, or
+create a duplicate. Explicit Syncro IDs remain the primary identity when
+present.
+
+Syncro payments are mapped into the owning Nexus invoice's `payments` array,
+which remains the single authoritative invoice payment history; migration does
+not create a second payments collection. Each entry carries an immutable
+`syncro_payment_id` and `syncro_invoice_id`, and re-running the migration
+updates that entry in place rather than appending it again. The invoice keeps
+ownership of its total, `amount_paid` and `payment_status`; a payment entry
+never derives or overwrites those totals. Advanced local reconciliation and
+settlement state is preserved, and a pending entry moves to matched when Syncro
+reports reconciliation. Source-owned amount, date, method, reference and notes
+are refreshed. Negative source amounts are retained as refund entries rather
+than discarded.
+
+The post-migration reconciliation report is derived on demand from the
+`syncro_migration_records` archive and the canonical `invoices` collection. It
+compares archived source invoice totals, source `amount_paid` and archived
+payment sums with the Nexus invoice totals, `amount_paid` and embedded
+`invoices.payments` entries. It is evidence, not a new financial ledger: the
+report writes no records, owns no collection and never changes an invoice or
+payment. The job authorises the read, but the comparison is tenant-wide so a
+payment-only re-run is checked against invoices migrated earlier. Missing,
+extra, wrong-invoice and duplicate payment entries, duplicate source-linked
+invoices, and bounded archive truncation are reported explicitly rather than
+silently netted out. Amounts are grouped and compared by currency; the report never converts
+between currencies. An invoice whose Syncro and Nexus currency codes differ is
+flagged, and aggregate totals cannot hide offsetting cross-currency
+differences. The same rows can be exported as a CSV attachment; the export is
+generated in memory and writes no records.
+
+Ticket, invoice and purchase-order attachments use their existing Nexus owners.
+Ticket files use `ticket_attachments` and invoice files use
+`invoice_attachments`; both follow the private attachment path including normal
+scan/quarantine release and optional private artifact replication. Purchase
+order files remain metadata on `purchase_orders.attachments` and are written to
+the existing private `purchase-orders` evidence directory. Each file carries its
+immutable `syncro_attachment_id` and parent `syncro_*` ID, so a re-run links the
+same file instead of storing it again. Source attachment metadata is archived
+under the `ticket_attachments`, `invoice_attachments` and
+`purchase_order_attachments` migration entities; only the canonical Nexus
+attachment record owns the binary. A missing download URL, scanner rejection or
+scanner outage is recorded per file and does not stop the job. Syncro does not
+document a generic attachment-list endpoint, so only files present on the
+ticket, invoice or purchase-order detail response can be migrated.
+
+## Billing and purchasing integrity decisions (November 2026)
+
+- **Recurring billing:** new `recurring_invoices` records carry the authenticated platform tenant, an explicit `billing_anchor_day`, and an `end_date` that stops generation after the final covered period. Generated invoices inherit the template tenant and carry their own version marker. The next billing period advances from the period just billed, never from the day the scheduler happened to run.
+- **Supplier bills:** `xero_supplier_bills` records are local prepared documents with `tenant_id` and `client_id`. This deployment has no live Xero ACCPAY posting worker, so these records are not authoritative Xero bills and must not be presented as queued or synced.
+- **Xero mirror:** the local Xero mirror is workflow evidence only. The deployment has no live Xero Accounting API connector. Contact preparation must use authoritative Nexus client fields and must never invent Xero contact IDs, balances, overdue amounts or chart-of-accounts balances.
+- **Invoice scope:** invoice clone, batch creation, revenue analytics, ageing, late-fee runs and reminder runs enforce client or global scope before reading or writing financial records. Untrusted line totals are recomputed from quantity and rate on the server.
+- **Usage billing:** the overview is derived on demand from scoped `recurring_invoices` and active `assets`. There is no `usage_billing` plan collection and no seeded demo plan. User and storage quantities remain `null` until a metered source supplies them; synthetic counts and overages are not stored or displayed.
+- **Provider usage:** Acronis, Pax8 and Yeastar lines are resolved at generation time. If a stream is enabled but the provider is unlinked, errors, or returns no billable lines, generation fails closed instead of producing a base invoice that silently omits usage. Generated invoices retain the resolved provider lines and delivery outcome.
+- **Proration:** applied mid-cycle adjustments are persisted in `billing_proration_adjustments`, keyed by recurring invoice and caller idempotency key. A charge creates a draft `invoices` record with `source=proration_adjustment`; a reduction creates an issued `credit_notes` record. The recurring template is not mutated, so a one-period adjustment cannot repeat on later invoices.
+- **Reminders:** `invoice_reminders` settings and `invoice_reminder_log` are the single reminder policy and delivery history. The legacy payment-reminder settings and send endpoints are compatibility adapters over that programme; they do not own a second schedule or send loop.
+- **Supplier matching:** `purchase_orders.vendor_invoice_match` may include per-line quantity, unit price, tax and shipping comparisons. A line-level variance makes the match a `variance` even when the invoice total happens to agree with the PO, because offsetting line errors still need review.
+- **MRR movement:** analytics are derived from recurring start/termination dates and `recurring_indexation_log`; they are reconstructable active-base estimates, not general-ledger postings. Line-item edits made outside indexation are reported as a limitation rather than invented as expansion or contraction.

@@ -46,7 +46,7 @@ import SecurityPosturePanel from "@/components/studios/SecurityPosturePanel";
 import SocAlertsPanel from "@/components/studios/SocAlertsPanel";
 import VoiceEstatePanel from "@/components/studios/VoiceEstatePanel";
 import WebEstatePanel from "@/components/studios/WebEstatePanel";
-import { studioObservationView } from "@/components/studios/StudioObservationKit";
+import { studioObservationView, studioOverviewView } from "@/components/studios/StudioObservationKit";
 
 /**
  * The Studio spine: one shared nine-tab shell every Studio renders on.
@@ -661,7 +661,7 @@ export default function StudioShell({ studioId }) {
           const spec = studio.tabs[tabId];
           return (
             <TabsContent key={tabId} value={tabId}>
-              {tabId === "overview" && spec?.state === "wired" && spec?.endpoint && studioObservationView(spec.endpoint)
+              {tabId === "overview" && spec?.state === "wired" && spec?.endpoint && studioOverviewView(spec.endpoint)
                 ? <StudioObservationPanel studio={studio} spec={spec} />
                 : tabId === "overview"
                   ? <OverviewPanel studio={studio} />

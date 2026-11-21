@@ -93,7 +93,17 @@ TRAY_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_TRAY_COMPANION_BINARY"]) if 
 REMOTE_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_REMOTE_COMPANION_BINARY"]) if os.environ.get("NEXUS_REMOTE_COMPANION_BINARY") else (
     _CONTAINER_REMOTE_COMPANION_BINARY if _CONTAINER_REMOTE_COMPANION_BINARY.exists() else _LOCAL_REMOTE_COMPANION_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.13-companion-health"
+# A signed release image carries the exact bundle version in agent/dist/VERSION.
+# That file is authoritative over deployment defaults; source-built images write
+# the same file from their NEXUS_AGENT_VERSION build argument.
+_AGENT_RELEASE_VERSION_FILE = Path(os.environ.get("NEXUS_AGENT_VERSION_FILE") or "/app/agent/dist/VERSION")
+_LOCAL_AGENT_RELEASE_VERSION_FILE = _LOCAL_AGENT_BINARY.parent / "VERSION"
+AGENT_VERSION = (
+    agent_runtime.read_agent_release_version(_AGENT_RELEASE_VERSION_FILE)
+    or agent_runtime.read_agent_release_version(_LOCAL_AGENT_RELEASE_VERSION_FILE)
+    or (os.environ.get("NEXUS_AGENT_VERSION") or "").strip()
+    or "0.1.13-companion-health"
+)
 MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
@@ -2724,6 +2734,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     remote_companion_bytes = REMOTE_COMPANION_BINARY_PATH.read_bytes() if REMOTE_COMPANION_BINARY_PATH.exists() else None
     includes_client_chat = bool(chat_companion_bytes)
     includes_agent_tray = bool(tray_companion_bytes)
+    includes_native_remote = bool(remote_companion_bytes)
     # Nexus Elevate is delivered through the protected agent service together
     # with the user-session Client Chat companion; it is not a separate agent.
     includes_nexus_elevate = includes_client_chat
@@ -2788,6 +2799,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "package_format": "zip",
         "includes_client_chat": includes_client_chat,
         "includes_agent_tray": includes_agent_tray,
+        "includes_native_remote": includes_native_remote,
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
@@ -2808,6 +2820,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "agent_sha256": agent_binary_sha256,
         "includes_client_chat": includes_client_chat,
         "includes_agent_tray": includes_agent_tray,
+        "includes_native_remote": includes_native_remote,
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
@@ -2840,6 +2853,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "package_format": "zip",
         "includes_client_chat": includes_client_chat,
         "includes_agent_tray": includes_agent_tray,
+        "includes_native_remote": includes_native_remote,
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,

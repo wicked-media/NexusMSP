@@ -56,14 +56,26 @@ pnpm --dir frontend exec playwright install chromium
 .\scripts\Run-NexusAcceptance.ps1 -UseLocalMongo -Browser
 ```
 
-The browser runner binds the React development server only to
+The browser runner builds the React production bundle and serves it only on
 `127.0.0.1:13000` by default; use `-FrontendPort` to select another unused
-loopback port. It provisions a fresh administrator, two clients, two
-client-restricted technicians, their account-owned readiness attestations and
-the workflow records needed by the eight golden-path checks. Each technician
-signs in through the real login page. Cross-client probes run from separate
-browser contexts, and provider-disabled paths must report an honest unavailable
-or pending state rather than fabricated success.
+loopback port. `frontend/playwright.config.js` runs `pnpm build` and starts
+`frontend/scripts/serve-build.js`, which applies the same browser-history
+fallback as the production ingress. It provisions a fresh administrator, two
+clients, two client-restricted technicians, their account-owned readiness
+attestations and the workflow records needed by the eight golden-path checks.
+Each technician authenticates through the real browser login form; there is no
+API-session fallback, so a login regression fails the gate instead of silently
+degrading it. Cross-client probes run from separate browser contexts, and
+provider-disabled paths must report an honest unavailable or pending state
+rather than fabricated success.
+
+The API and browser suites must each run against their **own fresh database**.
+Both bootstrap the first administrator, which closes public registration for
+that database; running the browser suite after the API suite against the same
+database makes the browser fixture fail at `/auth/register` with HTTP 403. That
+is an isolation mistake in the harness invocation, not a product failure. The
+2026-11-18 run provisioned a separate `nexus_acceptance_*` database for each
+suite.
 
 The generated HTML report, JSON result and per-workflow screenshots are written
 under `test_reports/browser-acceptance/`. They are local execution evidence and
@@ -99,9 +111,10 @@ environment at an existing database.
 - `NEXUS_TEST_ENVIRONMENT=1` makes the API fail closed unless `DB_NAME` starts
   with `nexus_acceptance_`; it also prevents the acceptance API from loading a
   local backend `.env` file.
-- `NEXUS_SEED_DEMO_DATA=false` is enforced in acceptance, test, and production
-  runtimes. Normal development continues to seed demo data unless explicitly
-  disabled.
+- Startup demo seeding was removed on 2026-11-13. No runtime — development,
+  acceptance, test, or production — manufactures sample customers, devices,
+  tickets or other business records. A fresh database is empty until the first
+  administrator registers and real records are created.
 - Background workers are disabled, so the harness does not run schedulers,
   webhooks, providers, or other long-running automation.
 - The authenticated test refuses to make mutable requests unless both
@@ -150,3 +163,56 @@ Microsoft readiness without secret disclosure, and Web Studio pending-connector
 evidence. It also exposed and drove a fix for PyMongo `Database` truth-value
 evaluation in Microsoft provider visibility. Provider-success acceptance still
 requires the dedicated vendor sandboxes listed in the production checklist.
+
+## Latest execution — 2026-11-18
+
+The explicit local-Mongo path was used because the Docker daemon was not
+accessible in this VM and no Podman runtime was present. The PowerShell wrapper
+could not be executed because `pwsh` is absent; its underlying API acceptance
+test was run directly against the same disposable API contract. A fresh
+`nexus_acceptance_*` database for the API suite, a second fresh database for
+the browser suite, API 3.0.0 on `127.0.0.1:18000`, and the React **production
+build** served on `127.0.0.1:13000` were started independently. The build was
+compiled with `REACT_APP_BACKEND_URL=http://127.0.0.1:18000`. The eight serial
+golden workflows ran with one worker against the second disposable database.
+
+**API acceptance: 1 passed in 2.93s** (`pytest tests/test_two_client_api_acceptance.py -q`)
+on its own fresh database, covering the two-client authenticated scope contract.
+The harness, not the test module, owns database and process cleanup.
+
+**Browser result: 8/8 passed**, with 0 skipped, 0 unexpected and 0 flaky in
+128.97s / 2m09s (`expected: 8`, `unexpected: 0`, `skipped: 0`, `flaky: 0`). The
+production bundle was built by Node 22.23.5, the CI-major runtime. The login
+waits use 15-second bounds and the fixed pre-fill 300ms sleep was removed after
+the verification-integrity audit; the gate still passed. The
+workflows covered ticket delivery/history, retired third-party remote transport
+fail-closed behaviour, purchase-order receipt and foreign-order denial,
+invoice/provider handoff scope, contract and global reconciliation boundaries,
+unconfigured PBX and foreign-link denial, Microsoft saved-configuration versus
+provider evidence, and Web Studio connector intent scope.
+
+**Authentication evidence is complete.** All eight workflows authenticated the
+generated client-restricted technicians through the real browser login form and
+also exercised the administrator or foreign-technician login paths where the
+workflow requires them. No workflow used an API-session fallback or seeded
+browser storage; the previous dev-shell fallback was removed so a login failure
+now fails the acceptance gate. Running the gate against the production bundle
+also removes the on-demand CRA compilation that caused the intermittent
+pre-render seen in the 2026-11-17 run.
+
+Evidence is retained under `test_reports/browser-acceptance/`:
+`results.json`, the HTML report at `html/index.html`, eight workflow screenshots
+under `html/data/`, and `playwright-nineteenth.log`. The full local verification
+matrix, including exact backend/frontend counts, lint, audits, build, Go builds
+and the promotion drill, is recorded in the 2026-11-18 cycle record of
+`NEXUS_PRODUCTION_READINESS_CHECKLIST.md`; raw logs are under
+`test_reports/full-matrix-2026-11-18/`. These directories are local and ignored
+by Git. No deployment or production-readiness claim follows from this run;
+provider sandbox acceptance, container builds and deployment-host gates remain
+separate. Container image builds were attempted but are blocked by this
+account's missing subordinate-ID range; API and web failed at image layer
+registration, and the production/release API builds were not attempted. A prior
+CI run on commit `17758d3` passed API, production API and web on `ubuntu-latest`,
+but it had no release API step and does not cover the current worktree's
+uncommitted Dockerfile/workflow changes. The exact commands and errors are in
+the readiness checklist's 2026-11-18 cycle record.

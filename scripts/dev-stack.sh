@@ -90,15 +90,14 @@ pkill -f 'uvicorn server:app' 2>/dev/null || true
 mkdir -p "$MONGO_DATA" "$ROOT/backend/uploads/preview" "$ROOT/.local"
 
 # Test-only runtime configuration. Secrets are generated per boot so nothing
-# sensitive is committed or reused. NEXUS_SEED_DEMO_DATA is intentionally left
-# unset so the development seeder populates demo clients/devices/tickets.
+# sensitive is committed or reused. Demo seeding no longer exists: the database
+# starts empty, and the first registration bootstraps the administrator account.
 export MONGO_URL="mongodb://127.0.0.1:27017"
 export DB_NAME="nexusops_preview"
 export JWT_SECRET="$("$PY" -c 'import secrets; print(secrets.token_urlsafe(48))')"
 export NEXUS_SECRET_ENCRYPTION_KEY="$("$PY" -c 'import secrets; print(secrets.token_hex(32))')"
 export NEXUS_RUN_BACKGROUND_WORKERS="false"
 export NEXUS_UPLOADS_DIR="$ROOT/backend/uploads/preview"
-unset NEXUS_SEED_DEMO_DATA
 
 echo "[dev-stack] starting mongod..."
 "$MONGO_BIN" --dbpath "$MONGO_DATA" --bind_ip 127.0.0.1 --port 27017 \

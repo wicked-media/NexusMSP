@@ -36,6 +36,7 @@ from typing import Optional
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import ticket_audit
+from app.services import ticket_checkpoint_notifications
 from app.services.chat_access import (
     channel_visibility_query,
     enrich_channels,
@@ -661,7 +662,20 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
         await assert_client_scope(current_user, t.get("client_id"), operation="chat:update_ticket", mask_not_found=True)
         await db.tickets.update_one({"id": t["id"]}, {"$set": {field: value, "updated_at": _now_iso()}})
-        await ticket_audit(t["id"], current_user, "updated", f"{field.replace('_', ' ')} changed to {value} from Team Chat")
+        audit_details = f"{field.replace('_', ' ')} changed to {value} from Team Chat"
+        if field == "status" and value in {"resolved", "closed", "cancelled"}:
+            settlement = await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+                {**t, "status": value},
+                tenant_id=platform_tenant_id(current_user),
+                actor=current_user,
+                database=db,
+            )
+            if settlement.get("promise_cleared") or settlement.get("alerts_resolved"):
+                audit_details += (
+                    f"; cleared promised update at {settlement.get('cleared_checkpoint_at') or 'the previous checkpoint'}"
+                    f" and resolved {settlement.get('alerts_resolved', 0)} due alert(s)"
+                )
+        await ticket_audit(t["id"], current_user, "updated", audit_details)
         emoji = {"closed": "🔒", "resolved": "✅", "in_progress": "🟡", "on_hold": "⏸️", "open": "🔓", "pending": "⏳",
                  "critical": "🚨", "high": "🔥", "medium": "🟦", "low": "🟢"}.get(value, "🔧")
         return await _post_system_msg(channel_id, f"{emoji} {ticket_no} — {field} → **{value}** by {current_user.get('name')}")
@@ -673,7 +687,19 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
         await assert_client_scope(current_user, t.get("client_id"), operation="chat:close_ticket", mask_not_found=True)
         await db.tickets.update_one({"id": t["id"]}, {"$set": {"status": "closed", "updated_at": _now_iso()}})
-        await ticket_audit(t["id"], current_user, "updated", "Status changed to closed from Team Chat")
+        settlement = await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+            {**t, "status": "closed"},
+            tenant_id=platform_tenant_id(current_user),
+            actor=current_user,
+            database=db,
+        )
+        audit_details = "Status changed to closed from Team Chat"
+        if settlement.get("promise_cleared") or settlement.get("alerts_resolved"):
+            audit_details += (
+                f"; cleared promised update at {settlement.get('cleared_checkpoint_at') or 'the previous checkpoint'}"
+                f" and resolved {settlement.get('alerts_resolved', 0)} due alert(s)"
+            )
+        await ticket_audit(t["id"], current_user, "updated", audit_details)
         return await _post_system_msg(channel_id, f"🔒 {ticket_no} closed by {current_user.get('name')}")
 
     if cmd == "sla" and args:

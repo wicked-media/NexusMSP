@@ -1,5 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timezone, timedelta
+import calendar
+import math
 import uuid
 from pymongo.errors import DuplicateKeyError
 from app.database import db
@@ -10,10 +12,131 @@ from app.services.scope_permissions import (
     assert_client_scope,
     assert_global_scope,
     assert_record_scope,
+    platform_tenant_id,
     scoped_query,
 )
 
 router = APIRouter()
+
+RECURRING_FREQUENCIES = {"weekly", "fortnightly", "monthly", "quarterly", "annually"}
+
+
+def _finite_number(value: object, field: str, *, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool):
+        raise HTTPException(status_code=422, detail=f"{field} must be a number")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"{field} must be a number") from None
+    if not math.isfinite(parsed) or not minimum <= parsed <= maximum:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field} must be between {minimum:g} and {maximum:g}",
+        )
+    return parsed
+
+
+def _normalise_tax_rate(value: object, fallback: float = 0.0) -> float:
+    return _finite_number(
+        value if value is not None else fallback,
+        "tax_rate",
+        minimum=0.0,
+        maximum=100.0,
+    )
+
+
+def _normalise_recurring_lines(raw_lines: object) -> list[dict]:
+    if not isinstance(raw_lines, list) or not raw_lines:
+        raise HTTPException(status_code=400, detail="At least one recurring invoice line is required")
+    if len(raw_lines) > 200:
+        raise HTTPException(status_code=422, detail="A recurring invoice supports at most 200 lines")
+    lines: list[dict] = []
+    for index, raw in enumerate(raw_lines, start=1):
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=422, detail=f"Line {index} must be an object")
+        line = dict(raw)
+        description = str(line.get("description") or "").strip()
+        if not description:
+            raise HTTPException(status_code=400, detail="Each recurring invoice line needs a description")
+        quantity = _finite_number(
+            line.get("quantity", 0), f"Line {index} quantity", minimum=0.0001, maximum=1_000_000
+        )
+        rate = _finite_number(
+            line.get("rate", 0), f"Line {index} rate", minimum=0.0, maximum=1_000_000_000
+        )
+        line["description"] = description
+        line["quantity"] = quantity
+        line["rate"] = rate
+        line["amount"] = round(quantity * rate, 2)
+        lines.append(line)
+    return lines
+
+
+def _parse_recurring_date(value: object, field: str) -> datetime:
+    text = str(value or "").strip()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"{field} must be a valid YYYY-MM-DD date") from None
+
+
+def _recurring_write_filter(document: dict) -> dict:
+    criteria = {"id": document.get("id"), "client_id": document.get("client_id")}
+    version = document.get("version")
+    criteria["version"] = version if version is not None else {"$exists": False}
+    return criteria
+
+
+def _recurring_anchor_day(ri: dict) -> int:
+    try:
+        anchor = int(ri.get("billing_anchor_day") or 0)
+    except (TypeError, ValueError):
+        anchor = 0
+    if 1 <= anchor <= 31:
+        return anchor
+    try:
+        return datetime.strptime(str(ri.get("start_date") or ""), "%Y-%m-%d").day
+    except (TypeError, ValueError):
+        return 1
+
+
+async def _validated_recurring_contract(
+    contract_id: object,
+    client_id: str,
+    current_user: dict,
+    operation: str,
+) -> str | None:
+    """A recurring template may only link to a contract for the same client."""
+    value = str(contract_id or "").strip()
+    if not value:
+        return None
+    contract = await db.contracts.find_one(
+        {"id": value}, {"_id": 0, "id": 1, "client_id": 1}
+    )
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    if str(contract.get("client_id") or "") != client_id:
+        raise HTTPException(status_code=422, detail="The linked contract belongs to a different client")
+    await assert_client_scope(
+        current_user,
+        contract.get("client_id"),
+        operation=operation,
+        mask_not_found=True,
+    )
+    return value
+
+
+def _monthly_recurring_value(amount: float, frequency: str) -> float:
+    freq = str(frequency or "monthly").lower()
+    if freq == "weekly":
+        return amount * 52 / 12
+    if freq == "fortnightly":
+        return amount * 26 / 12
+    if freq == "quarterly":
+        return amount / 3
+    if freq == "annually":
+        return amount / 12
+    return amount
 
 
 async def _get_scoped_recurring_invoice(
@@ -135,6 +258,116 @@ async def _resolve_yeastar_usage_lines(recurring: dict, current_user: dict) -> l
         ) from exc
 
 
+async def _resolve_acronis_usage_lines(recurring: dict, current_user: dict) -> list[dict]:
+    """Attach verified Acronis usage, failing closed when it cannot be priced.
+
+    A linked tenant with no billable lines usually means a provider outage, an
+    empty usage response, or an incomplete pricing map.  Generating the base
+    invoice in that state silently under-bills the client, so the template is
+    blocked until the usage can be reconciled.
+    """
+    if not recurring.get("include_acronis_usage"):
+        return []
+    client_id = str(recurring.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=409, detail="Acronis billing is enabled but the recurring invoice has no client")
+    try:
+        from app.routers.acronis import get_client_acronis_billing
+
+        usage = await get_client_acronis_billing(client_id, current_user=current_user)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Acronis usage could not be verified; no potentially incomplete invoice was generated",
+        ) from exc
+    if not usage.get("linked"):
+        raise HTTPException(status_code=409, detail="Acronis billing is enabled but no Acronis tenant is linked to this client")
+    if usage.get("error"):
+        raise HTTPException(
+            status_code=503,
+            detail="Acronis usage could not be retrieved; no potentially incomplete invoice was generated",
+        )
+    line_items = usage.get("line_items") or []
+    total = _finite_number(usage.get("total", 0), "Acronis usage total", minimum=0, maximum=1_000_000_000)
+    if not line_items or total <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Acronis billing is enabled but no billable usage was returned; check the tenant and product pricing mappings",
+        )
+    period = usage.get("period") or datetime.now(timezone.utc).strftime("%Y-%m")
+    currency = usage.get("currency") or recurring.get("currency") or "AUD"
+    attached: list[dict] = []
+    for item in line_items:
+        quantity = _finite_number(item.get("quantity"), "Acronis line quantity", minimum=0, maximum=1_000_000)
+        rate = _finite_number(item.get("unit_price"), "Acronis unit price", minimum=0, maximum=1_000_000_000)
+        amount = _finite_number(item.get("total"), "Acronis line total", minimum=0, maximum=1_000_000_000)
+        attached.append({
+            "description": f"Acronis - {item.get('label') or 'Usage'} ({period})",
+            "details": f"{quantity} {item.get('unit') or 'unit'} x {currency} {rate:.4f}",
+            "quantity": quantity,
+            "rate": rate,
+            "amount": round(amount, 2),
+            "acronis_auto": True,
+            "acronis_period": period,
+        })
+    return attached
+
+
+async def _resolve_pax8_usage_lines(recurring: dict, current_user: dict) -> list[dict]:
+    """Attach verified Pax8 subscription usage, failing closed on uncertainty."""
+    if not recurring.get("include_pax8_usage"):
+        return []
+    client_id = str(recurring.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=409, detail="Pax8 billing is enabled but the recurring invoice has no client")
+    try:
+        from app.routers.pax8 import pax8_billing_client
+
+        usage = await pax8_billing_client(client_id, current_user=current_user)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Pax8 usage could not be verified; no potentially incomplete invoice was generated",
+        ) from exc
+    if not usage.get("linked"):
+        raise HTTPException(status_code=409, detail="Pax8 billing is enabled but no Pax8 company is linked to this client")
+    if usage.get("error"):
+        raise HTTPException(
+            status_code=503,
+            detail="Pax8 usage could not be retrieved; no potentially incomplete invoice was generated",
+        )
+    line_items = usage.get("line_items") or []
+    total = _finite_number(usage.get("total", 0), "Pax8 usage total", minimum=0, maximum=1_000_000_000)
+    if not line_items or total <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Pax8 billing is enabled but no active billable subscriptions were returned; reconcile the subscription sync before invoicing",
+        )
+    period = usage.get("period") or datetime.now(timezone.utc).strftime("%Y-%m")
+    currency = usage.get("currency") or recurring.get("currency") or "AUD"
+    attached: list[dict] = []
+    for item in line_items:
+        quantity = _finite_number(item.get("quantity"), "Pax8 line quantity", minimum=0, maximum=1_000_000)
+        rate = _finite_number(item.get("unit_price"), "Pax8 unit price", minimum=0, maximum=1_000_000_000)
+        amount = _finite_number(item.get("total"), "Pax8 line total", minimum=0, maximum=1_000_000_000)
+        attached.append({
+            "description": f"Pax8 - {item.get('label') or 'Subscription'} ({period})",
+            "details": f"{quantity} {item.get('unit') or 'unit'} x {currency} {rate:.4f} - {item.get('billing_term') or 'monthly'}",
+            "quantity": quantity,
+            "rate": rate,
+            "amount": round(amount, 2),
+            "pax8_auto": True,
+            "pax8_product_id": item.get("product_id"),
+            "pax8_period": period,
+            "pax8_billing_term": item.get("billing_term"),
+        })
+    return attached
+
+
 async def _deliver_recurring_invoice(invoice: dict, recurring: dict, current_user: dict) -> dict:
     """Use the normal invoice email pipeline and persist an auditable outcome."""
     if not recurring.get("auto_send"):
@@ -169,11 +402,16 @@ async def get_recurring_stats(current_user: dict = Depends(get_current_user)):
     ).to_list(500)
     active = [r for r in all_ri if r.get("status") == "active"]
     paused = [r for r in all_ri if r.get("status") == "paused"]
-    monthly = [r for r in active if r.get("frequency") == "monthly"]
-    quarterly = [r for r in active if r.get("frequency") == "quarterly"]
-    annual = [r for r in active if r.get("frequency") == "annually"]
-    mrr = sum(r.get("amount", 0) for r in monthly)
-    arr = mrr * 12 + sum(r.get("amount", 0) for r in quarterly) * 4 + sum(r.get("amount", 0) for r in annual)
+    by_frequency = {freq: 0 for freq in sorted(RECURRING_FREQUENCIES)}
+    for record in active:
+        frequency = str(record.get("frequency") or "monthly").lower()
+        if frequency in by_frequency:
+            by_frequency[frequency] += 1
+    mrr = sum(
+        _monthly_recurring_value(float(r.get("amount") or 0), str(r.get("frequency") or "monthly"))
+        for r in active
+    )
+    arr = mrr * 12
     total_generated = sum(r.get("invoices_generated", 0) for r in all_ri)
     total_revenue = sum(r.get("total_billed", 0) for r in all_ri)
     # Due this week
@@ -192,7 +430,7 @@ async def get_recurring_stats(current_user: dict = Depends(get_current_user)):
         "mrr": round(mrr, 2), "arr": round(arr, 2),
         "total_generated": total_generated, "total_revenue": round(total_revenue, 2),
         "due_this_week": due_soon,
-        "by_frequency": {"monthly": len(monthly), "quarterly": len(quarterly), "annually": len(annual)},
+        "by_frequency": by_frequency,
     }
 
 
@@ -206,51 +444,65 @@ async def get_recurring_invoice(ri_id: str, current_user: dict = Depends(get_cur
 @router.post("/recurring-invoices/create")
 async def create_recurring(data: dict, current_user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
-    line_items = data.get("line_items", [])
-    if not data.get("client_id") or not str(data.get("description", "")).strip():
+    client_id = str(data.get("client_id") or "").strip()
+    description = str(data.get("description") or "").strip()
+    if not client_id or not description:
         raise HTTPException(status_code=400, detail="Client and description are required")
     await assert_client_scope(
         current_user,
-        str(data["client_id"]),
+        client_id,
         operation="recurring_invoice.create",
         mask_not_found=True,
     )
-    if not line_items:
-        raise HTTPException(status_code=400, detail="At least one recurring invoice line is required")
-    for line in line_items:
-        if not str(line.get("description", "")).strip():
-            raise HTTPException(status_code=400, detail="Each recurring invoice line needs a description")
-        if float(line.get("quantity", 0)) <= 0 or float(line.get("rate", 0)) < 0:
-            raise HTTPException(status_code=400, detail="Each recurring invoice line needs a positive quantity and valid rate")
-    if data.get("auto_send") and not str(data.get("auto_send_email", "")).strip():
-        raise HTTPException(status_code=400, detail="An email recipient is required when auto-send is enabled")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
 
-    # Calculate amount from line items
-    subtotal = sum(float(li.get("amount", 0)) for li in line_items)
-    tax_rate = float(data.get("tax_rate", 0))
+    # Amounts are always derived from quantity x rate.  Never trust a client
+    # supplied line total, which could otherwise under-bill or over-bill the
+    # customer while looking legitimate in the template.
+    line_items = _normalise_recurring_lines(data.get("line_items"))
+    subtotal = round(sum(li["amount"] for li in line_items), 2)
+    tax_rate = _normalise_tax_rate(data.get("tax_rate", 0))
     tax_amount = round(subtotal * tax_rate / 100, 2)
     total = round(subtotal + tax_amount, 2)
 
-    # Calculate next generation date
-    start_date = data.get("start_date") or now.strftime("%Y-%m-%d")
-    frequency = data.get("frequency", "monthly")
+    start_date = str(data.get("start_date") or now.strftime("%Y-%m-%d")).strip()
+    start_dt = _parse_recurring_date(start_date, "start_date")
+    end_date = None
+    if str(data.get("end_date") or "").strip():
+        end_date = str(data["end_date"]).strip()
+        if _parse_recurring_date(end_date, "end_date") < start_dt:
+            raise HTTPException(status_code=422, detail="end_date cannot be before start_date")
+    frequency = str(data.get("frequency") or "monthly").strip().lower()
+    if frequency not in RECURRING_FREQUENCIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"frequency must be one of {', '.join(sorted(RECURRING_FREQUENCIES))}",
+        )
+    if data.get("auto_send") and not str(data.get("auto_send_email", "")).strip():
+        raise HTTPException(status_code=400, detail="An email recipient is required when auto-send is enabled")
+    contract_id = await _validated_recurring_contract(
+        data.get("contract_id"), client_id, current_user, "recurring_invoice.create"
+    )
 
     inv = {
         "id": f"ri-{uuid.uuid4().hex[:8]}",
-        "client_id": data.get("client_id", ""),
-        "client_name": data.get("client_name", ""),
-        "description": data.get("description", ""),
+        "client_id": client_id,
+        "client_name": client.get("name") or data.get("client_name", ""),
+        "description": description,
         "line_items": line_items,
         "subtotal": subtotal,
         "tax_rate": tax_rate,
         "tax_amount": tax_amount,
         "amount": total,
-        "currency": data.get("currency", "AUD"),
+        "currency": str(data.get("currency") or "AUD").strip().upper()[:8],
         "frequency": frequency,
         "start_date": start_date,
-        "next_generation": _calc_next_date(start_date, frequency),
-        "end_date": data.get("end_date"),
-        "contract_id": data.get("contract_id"),
+        "billing_anchor_day": start_dt.day,
+        "next_generation": _calc_next_date(start_date, frequency, start_dt.day),
+        "end_date": end_date,
+        "contract_id": contract_id,
         "payment_terms": data.get("payment_terms", "net_30"),
         "notes": data.get("notes", ""),
         "auto_send": data.get("auto_send", False),
@@ -263,6 +515,8 @@ async def create_recurring(data: dict, current_user: dict = Depends(get_current_
         "total_billed": 0,
         "last_generated": None,
         "generation_history": [],
+        "tenant_id": platform_tenant_id(current_user),
+        "version": 1,
         "created_by": current_user.get("name", ""),
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
@@ -282,31 +536,90 @@ async def update_recurring(ri_id: str, data: dict, current_user: dict = Depends(
             status_code=422,
             detail="A recurring invoice cannot be moved to a different client",
         )
-    update = {
-        k: v
-        for k, v in data.items()
-        if k not in ("id", "_id", "client_id", "created_at", "created_by")
+    # Billing state is server-owned.  A general PUT must not be able to forge
+    # generated counts, totals, history, the next billing period, or status.
+    editable = {
+        "description", "line_items", "tax_rate", "frequency", "start_date",
+        "end_date", "contract_id", "payment_terms", "notes", "auto_send",
+        "auto_send_email", "include_pdf", "include_acronis_usage",
+        "include_pax8_usage", "include_yeastar_usage", "currency", "invoice_name",
     }
-    # Recalculate amount if line_items changed
+    unknown = sorted(set(data) - editable - {"id", "_id", "client_id", "created_at", "created_by"})
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"These fields are server-managed and cannot be updated: {', '.join(unknown)}",
+        )
+    update = {k: v for k, v in data.items() if k in editable}
+    if not update:
+        raise HTTPException(status_code=422, detail="No editable recurring invoice fields were supplied")
+
+    frequency = str(update.get("frequency", ri.get("frequency") or "monthly")).strip().lower()
+    if frequency not in RECURRING_FREQUENCIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"frequency must be one of {', '.join(sorted(RECURRING_FREQUENCIES))}",
+        )
+    if "frequency" in update:
+        update["frequency"] = frequency
+
+    start_date = str(update.get("start_date") or ri.get("start_date") or "").strip()
+    if "start_date" in update:
+        start_dt = _parse_recurring_date(start_date, "start_date")
+        update["start_date"] = start_date
+        update["billing_anchor_day"] = start_dt.day
+    else:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            start_dt = datetime.now(timezone.utc)
+    end_date = update.get("end_date", ri.get("end_date"))
+    if str(end_date or "").strip():
+        end_date = str(end_date).strip()
+        if _parse_recurring_date(end_date, "end_date") < start_dt:
+            raise HTTPException(status_code=422, detail="end_date cannot be before start_date")
+        update["end_date"] = end_date
+    else:
+        update["end_date"] = None
+    if "contract_id" in update:
+        update["contract_id"] = await _validated_recurring_contract(
+            update["contract_id"], str(ri.get("client_id") or ""), current_user, "recurring_invoice.update"
+        )
+
+    line_items = (
+        _normalise_recurring_lines(update["line_items"])
+        if "line_items" in update
+        else list(ri.get("line_items") or [])
+    )
     if "line_items" in update:
-        if not update["line_items"]:
-            raise HTTPException(status_code=400, detail="At least one recurring invoice line is required")
-        for line in update["line_items"]:
-            if not str(line.get("description", "")).strip():
-                raise HTTPException(status_code=400, detail="Each recurring invoice line needs a description")
-            if float(line.get("quantity", 0)) <= 0 or float(line.get("rate", 0)) < 0:
-                raise HTTPException(status_code=400, detail="Each recurring invoice line needs a positive quantity and valid rate")
-        subtotal = sum(float(li.get("amount", 0)) for li in update["line_items"])
-        tax_rate = float(update.get("tax_rate", ri.get("tax_rate", 0)))
+        update["line_items"] = line_items
+    if "line_items" in update or "tax_rate" in update:
+        tax_rate = _normalise_tax_rate(update.get("tax_rate"), float(ri.get("tax_rate") or 0))
+        subtotal = round(sum(float(li.get("amount", 0)) for li in line_items), 2)
+        update["tax_rate"] = tax_rate
         update["subtotal"] = subtotal
         update["tax_amount"] = round(subtotal * tax_rate / 100, 2)
         update["amount"] = round(subtotal + update["tax_amount"], 2)
+
+    if "frequency" in update or "start_date" in update:
+        anchor = int(update.get("billing_anchor_day") or _recurring_anchor_day(ri))
+        base = str(ri.get("next_generation") or datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        # A future start date should schedule from that date.  Otherwise keep
+        # the existing next billing period so a cadence edit cannot rewind and
+        # re-bill periods that were already generated.
+        if start_date > datetime.now(timezone.utc).strftime("%Y-%m-%d") and start_date > base:
+            base = start_date
+        update["next_generation"] = _calc_next_date(base, frequency, anchor)
+
     if update.get("auto_send", ri.get("auto_send", False)) and not str(update.get("auto_send_email", ri.get("auto_send_email", ""))).strip():
         raise HTTPException(status_code=400, detail="An email recipient is required when auto-send is enabled")
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.recurring_invoices.update_one(
-        {"id": ri_id, "client_id": ri.get("client_id")}, {"$set": update}
+    result = await db.recurring_invoices.update_one(
+        _recurring_write_filter(ri),
+        {"$set": update, "$inc": {"version": 1}},
     )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Recurring invoice changed before the update could be saved")
     return {"message": "Updated"}
 
 
@@ -363,19 +676,44 @@ async def toggle_recurring(ri_id: str, current_user: dict = Depends(get_current_
     )
     if ri.get("status") not in ("active", "paused"):
         raise HTTPException(status_code=400, detail="Only active or paused recurring invoices can be toggled")
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
     new_status = "paused" if ri.get("status") == "active" else "active"
-    await db.recurring_invoices.update_one(
-        {"id": ri_id, "client_id": ri.get("client_id")},
-        {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    update = {"status": new_status, "updated_at": now.isoformat()}
+    if new_status == "active":
+        end_date = str(ri.get("end_date") or "").strip()
+        if end_date and end_date < today:
+            raise HTTPException(status_code=409, detail=f"This recurring invoice ended on {end_date} and cannot be resumed")
+        next_generation = str(ri.get("next_generation") or today)
+        if not ri.get("next_generation"):
+            update["next_generation"] = next_generation
+        if next_generation < today:
+            # Do not back-bill the whole paused period.  Move to the next
+            # scheduled occurrence on or after today, keeping the anchor day.
+            guard = 0
+            while next_generation < today and guard < 520:
+                next_generation = _calc_next_date(next_generation, ri.get("frequency", "monthly"), _recurring_anchor_day(ri))
+                guard += 1
+            update["next_generation"] = next_generation
+        update["resumed_at"] = now.isoformat()
+    else:
+        update["paused_at"] = now.isoformat()
+    result = await db.recurring_invoices.update_one(
+        _recurring_write_filter(ri),
+        {"$set": update, "$inc": {"version": 1}},
     )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Recurring invoice changed before it could be toggled")
     return {"status": new_status}
 
 
 @router.post("/recurring-invoices/{ri_id}/generate-now")
 async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_current_user)):
     """Manually generate an invoice from a recurring template right now.
-    If the linked contract's client has an Acronis tenant and `include_acronis_usage=True`,
-    fresh Acronis usage line items are auto-attached for the current period."""
+
+    Enabled provider usage is attached from verified live data.  If it cannot
+    be reconciled the request fails rather than billing a base-only invoice.
+    """
     ri = await _get_scoped_recurring_invoice(
         ri_id, current_user, operation="recurring_invoice.generate"
     )
@@ -383,7 +721,17 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=400, detail="Activate the recurring invoice before generating an invoice")
 
     now = datetime.now(timezone.utc)
-    billing_period = ri.get("next_generation") or now.strftime("%Y-%m-%d")
+    today = now.strftime("%Y-%m-%d")
+    billing_period = ri.get("next_generation") or today
+    if str(ri.get("start_date") or "") > today:
+        raise HTTPException(status_code=409, detail=f"This recurring invoice starts on {ri.get('start_date')} and cannot be billed yet")
+    end_date = str(ri.get("end_date") or "").strip()
+    if end_date and (end_date < today or billing_period > end_date):
+        await db.recurring_invoices.update_one(
+            {"id": ri_id, "client_id": ri.get("client_id")},
+            {"$set": {"status": "completed", "completed_at": now.isoformat(), "completion_reason": "end_date_reached", "updated_at": now.isoformat()}},
+        )
+        raise HTTPException(status_code=409, detail=f"This recurring invoice ended on {end_date} and has been completed")
     await _ensure_recurring_period_guard()
     existing = await db.invoices.find_one(
         {"recurring_invoice_id": ri_id, "billing_period": billing_period}, {"_id": 0, "id": 1, "invoice_number": 1}
@@ -399,49 +747,13 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     # Start with the template's static line items (excluding any prior auto-attach)
     line_items = await _resolve_source_driven_lines(ri)
 
-    # Auto-attach Acronis usage if enabled and client is linked
-    acronis_attached = []
-    if ri.get("include_acronis_usage", False) and ri.get("client_id"):
-        try:
-            from app.routers.acronis import get_client_acronis_billing
-            acr = await get_client_acronis_billing(ri["client_id"], current_user=current_user)
-            if acr.get("linked") and acr.get("total", 0) > 0:
-                for li in acr.get("line_items", []):
-                    acronis_attached.append({
-                        "description": f"Acronis — {li['label']} ({acr['period']})",
-                        "details": f"{li['quantity']} {li['unit']} × {acr['currency']} {li['unit_price']:.4f}",
-                        "quantity": li["quantity"],
-                        "rate": li["unit_price"],
-                        "amount": li["total"],
-                        "acronis_auto": True,
-                        "acronis_period": acr["period"],
-                    })
-                line_items.extend(acronis_attached)
-        except Exception:
-            pass  # Don't block invoice generation on Acronis failure
+    # Provider usage resolves fail closed, so an unlinked tenant, provider
+    # outage or unpriced usage cannot silently under-bill the client.
+    acronis_attached = await _resolve_acronis_usage_lines(ri, current_user)
+    line_items.extend(acronis_attached)
 
-    # Auto-attach Pax8 / Microsoft subscription usage
-    pax8_attached = []
-    if ri.get("include_pax8_usage", False) and ri.get("client_id"):
-        try:
-            from app.routers.pax8 import pax8_billing_client
-            p8 = await pax8_billing_client(ri["client_id"], current_user=current_user)
-            if p8.get("linked") and p8.get("total", 0) > 0:
-                for li in p8.get("line_items", []):
-                    pax8_attached.append({
-                        "description": f"Pax8 — {li['label']} ({p8['period']})",
-                        "details": f"{li['quantity']} {li['unit']} × {li['currency']} {li['unit_price']:.4f} · {li['billing_term']}",
-                        "quantity": li["quantity"],
-                        "rate": li["unit_price"],
-                        "amount": li["total"],
-                        "pax8_auto": True,
-                        "pax8_product_id": li.get("product_id"),
-                        "pax8_period": p8["period"],
-                        "pax8_billing_term": li["billing_term"],
-                    })
-                line_items.extend(pax8_attached)
-        except Exception:
-            pass
+    pax8_attached = await _resolve_pax8_usage_lines(ri, current_user)
+    line_items.extend(pax8_attached)
 
     yeastar_attached = await _resolve_yeastar_usage_lines(ri, current_user)
     line_items.extend(yeastar_attached)
@@ -477,6 +789,8 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
         "acronis_auto_attached": len(acronis_attached),
         "pax8_auto_attached": len(pax8_attached),
         "yeastar_auto_attached": len(yeastar_attached),
+        "tenant_id": ri.get("tenant_id") or platform_tenant_id(current_user),
+        "version": 1,
         "created_at": now.isoformat(),
         "created_by": current_user.get("name", ""),
     }
@@ -492,12 +806,26 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
                  "generated_at": now.isoformat(), "generated_by": current_user.get("name", ""),
                  "acronis_items": len(acronis_attached),
                  "pax8_items": len(pax8_attached), "yeastar_items": len(yeastar_attached), "delivery": delivery}
-    next_date = _calc_next_date(now.strftime("%Y-%m-%d"), ri.get("frequency", "monthly"))
-    await db.recurring_invoices.update_one({"id": ri_id, "client_id": ri.get("client_id")}, {
-        "$inc": {"invoices_generated": 1, "total_billed": total},
-        "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
-        "$push": {"generation_history": gen_entry},
-    })
+    next_date = _calc_next_date(billing_period, ri.get("frequency", "monthly"), _recurring_anchor_day(ri))
+    schedule_update = {
+        "last_generated": now.isoformat(),
+        "next_generation": next_date,
+        "updated_at": now.isoformat(),
+    }
+    if end_date and next_date > end_date:
+        schedule_update.update({
+            "status": "completed",
+            "completed_at": now.isoformat(),
+            "completion_reason": "end_date_reached",
+        })
+    await db.recurring_invoices.update_one(
+        _recurring_write_filter(ri),
+        {
+            "$inc": {"invoices_generated": 1, "total_billed": total, "version": 1},
+            "$set": schedule_update,
+            "$push": {"generation_history": gen_entry},
+        },
+    )
 
     msg = f"Invoice {inv_number} generated"
     extras = []
@@ -529,9 +857,16 @@ async def duplicate_recurring(ri_id: str, current_user: dict = Depends(get_curre
     new_ri["total_billed"] = 0
     new_ri["last_generated"] = None
     new_ri["generation_history"] = []
+    new_ri["completed_at"] = None
+    new_ri["completion_reason"] = None
+    new_ri["version"] = 1
+    new_ri["tenant_id"] = platform_tenant_id(current_user)
     new_ri["created_by"] = current_user.get("name", "")
     new_ri["created_at"] = now.isoformat()
     new_ri["updated_at"] = now.isoformat()
+    today = now.strftime("%Y-%m-%d")
+    if str(new_ri.get("next_generation") or "") < today:
+        new_ri["next_generation"] = _calc_next_date(today, new_ri.get("frequency", "monthly"), _recurring_anchor_day(new_ri))
     await db.recurring_invoices.insert_one(new_ri)
     return {k: v for k, v in new_ri.items() if k != "_id"}
 
@@ -807,6 +1142,18 @@ async def _run_scheduler_now(current_user: dict) -> dict:
     for ri in due_invoices:
         try:
             billing_period = ri.get("next_generation") or today_str
+            start_date = str(ri.get("start_date") or "").strip()
+            end_date = str(ri.get("end_date") or "").strip()
+            if start_date and billing_period < start_date:
+                results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "skipped", "reason": f"Starts on {start_date}"})
+                continue
+            if end_date and (end_date < today_str or billing_period > end_date):
+                await db.recurring_invoices.update_one(
+                    _recurring_write_filter(ri),
+                    {"$set": {"status": "completed", "completed_at": now.isoformat(), "completion_reason": "end_date_reached", "updated_at": now.isoformat()}, "$inc": {"version": 1}},
+                )
+                results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "skipped", "reason": f"Ended on {end_date}"})
+                continue
             inv_number = f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:4].upper()}"
             due_date = _calc_due_date(ri.get("payment_terms", "net_30"))
 
@@ -815,47 +1162,12 @@ async def _run_scheduler_now(current_user: dict) -> dict:
             acronis_attached = []
             pax8_attached = []
 
-            # Auto-attach Acronis usage if enabled — parity with /generate-now
-            if ri.get("include_acronis_usage", False) and ri.get("client_id"):
-                try:
-                    from app.routers.acronis import get_client_acronis_billing
-                    acr = await get_client_acronis_billing(ri["client_id"], current_user=current_user)
-                    if acr.get("linked") and acr.get("total", 0) > 0:
-                        for li in acr.get("line_items", []):
-                            acronis_attached.append({
-                                "description": f"Acronis — {li['label']} ({acr['period']})",
-                                "details": f"{li['quantity']} {li['unit']} × {acr['currency']} {li['unit_price']:.4f}",
-                                "quantity": li["quantity"],
-                                "rate": li["unit_price"],
-                                "amount": li["total"],
-                                "acronis_auto": True,
-                                "acronis_period": acr["period"],
-                            })
-                        line_items.extend(acronis_attached)
-                except Exception:
-                    pass  # Don't block scheduler on Acronis failure
-
-            # Auto-attach Pax8 subscription usage if enabled
-            if ri.get("include_pax8_usage", False) and ri.get("client_id"):
-                try:
-                    from app.routers.pax8 import pax8_billing_client
-                    p8 = await pax8_billing_client(ri["client_id"], current_user=current_user)
-                    if p8.get("linked") and p8.get("total", 0) > 0:
-                        for li in p8.get("line_items", []):
-                            pax8_attached.append({
-                                "description": f"Pax8 — {li['label']} ({p8['period']})",
-                                "details": f"{li['quantity']} {li['unit']} × {li['currency']} {li['unit_price']:.4f} · {li['billing_term']}",
-                                "quantity": li["quantity"],
-                                "rate": li["unit_price"],
-                                "amount": li["total"],
-                                "pax8_auto": True,
-                                "pax8_product_id": li.get("product_id"),
-                                "pax8_period": p8["period"],
-                                "pax8_billing_term": li["billing_term"],
-                            })
-                        line_items.extend(pax8_attached)
-                except Exception:
-                    pass
+            # Parity with /generate-now: provider usage resolves fail closed
+            # rather than generating an incomplete invoice.
+            acronis_attached = await _resolve_acronis_usage_lines(ri, current_user)
+            line_items.extend(acronis_attached)
+            pax8_attached = await _resolve_pax8_usage_lines(ri, current_user)
+            line_items.extend(pax8_attached)
 
             yeastar_attached = await _resolve_yeastar_usage_lines(ri, current_user)
             line_items.extend(yeastar_attached)
@@ -888,9 +1200,11 @@ async def _run_scheduler_now(current_user: dict) -> dict:
                 "billing_period": billing_period,
                 "notes": ri.get("notes", ""),
                 "auto_generated": True,
-                "acronis_auto_attached": len(acronis_attached),
+                                "acronis_auto_attached": len(acronis_attached),
                 "pax8_auto_attached": len(pax8_attached),
                 "yeastar_auto_attached": len(yeastar_attached),
+                "tenant_id": ri.get("tenant_id") or platform_tenant_id(current_user),
+                "version": 1,
                 "created_at": now.isoformat(),
                 "created_by": actor_name,
             }
@@ -902,13 +1216,19 @@ async def _run_scheduler_now(current_user: dict) -> dict:
             delivery = await _deliver_recurring_invoice(invoice, ri, current_user)
             await db.invoices.update_one({"id": invoice["id"]}, {"$set": {"recurring_delivery": delivery}})
 
-            next_date = _calc_next_date(today_str, ri.get("frequency", "monthly"))
+            next_date = _calc_next_date(billing_period, ri.get("frequency", "monthly"), _recurring_anchor_day(ri))
             gen_entry = {"invoice_id": invoice["id"], "invoice_number": inv_number, "amount": total, "generated_at": now.isoformat(), "generated_by": actor_name, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "yeastar_items": len(yeastar_attached), "delivery": delivery}
-            await db.recurring_invoices.update_one({"id": ri["id"]}, {
-                "$inc": {"invoices_generated": 1, "total_billed": total},
-                "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
-                "$push": {"generation_history": gen_entry},
-            })
+            schedule_update = {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()}
+            if end_date and next_date > end_date:
+                schedule_update.update({"status": "completed", "completed_at": now.isoformat(), "completion_reason": "end_date_reached"})
+            await db.recurring_invoices.update_one(
+                _recurring_write_filter(ri),
+                {
+                    "$inc": {"invoices_generated": 1, "total_billed": total, "version": 1},
+                    "$set": schedule_update,
+                    "$push": {"generation_history": gen_entry},
+                },
+            )
 
             await db.scheduler_logs.insert_one({
                 "id": f"slog-{uuid.uuid4().hex[:8]}", "type": "recurring_invoice",
@@ -923,7 +1243,21 @@ async def _run_scheduler_now(current_user: dict) -> dict:
             })
             results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "invoice": inv_number, "amount": total, "acronis_items": len(acronis_attached), "pax8_items": len(pax8_attached), "delivery": delivery, "status": "generated"})
         except Exception as e:
-            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "error", "error": str(e)})
+            error_text = str(e)
+            results.append({"ri_id": ri["id"], "client": ri.get("client_name"), "status": "error", "error": error_text})
+            try:
+                await db.scheduler_logs.insert_one({
+                    "id": f"slog-{uuid.uuid4().hex[:8]}",
+                    "type": "recurring_invoice_error",
+                    "recurring_invoice_id": ri.get("id"),
+                    "client_name": ri.get("client_name", ""),
+                    "status": "error",
+                    "error": error_text[:1000],
+                    "triggered_by": actor_name,
+                    "timestamp": now.isoformat(),
+                })
+            except Exception:
+                pass
 
     generated_count = sum(1 for result in results if result.get("status") == "generated")
     skipped_duplicates = sum(1 for result in results if result.get("status") == "skipped")
@@ -937,33 +1271,35 @@ async def _run_scheduler_now(current_user: dict) -> dict:
 
 # ============== HELPERS ==============
 
-def _calc_next_date(from_date_str: str, frequency: str) -> str:
+def _add_months(anchor: datetime, months: int, billing_day: int) -> datetime:
+    month_index = anchor.month - 1 + months
+    year = anchor.year + month_index // 12
+    month = month_index % 12 + 1
+    last_day = calendar.monthrange(year, month)[1]
+    return anchor.replace(year=year, month=month, day=min(max(1, billing_day), last_day))
+
+
+def _calc_next_date(from_date_str: str, frequency: str, anchor_day: int | None = None) -> str:
+    """Advance one billing period without permanently drifting off the anchor day.
+
+    A 31st-of-month schedule becomes the last day of a shorter month and then
+    returns to the 31st, rather than drifting to the 28th forever.
+    """
     try:
         d = datetime.strptime(from_date_str, "%Y-%m-%d")
     except Exception:
         d = datetime.now(timezone.utc)
+    billing_day = anchor_day if isinstance(anchor_day, int) and 1 <= anchor_day <= 31 else d.day
     if frequency == "weekly":
         d += timedelta(days=7)
     elif frequency == "fortnightly":
         d += timedelta(days=14)
     elif frequency == "monthly":
-        month = d.month + 1
-        year = d.year
-        if month > 12:
-            month = 1
-            year += 1
-        day = min(d.day, 28)
-        d = d.replace(year=year, month=month, day=day)
+        d = _add_months(d, 1, billing_day)
     elif frequency == "quarterly":
-        month = d.month + 3
-        year = d.year
-        while month > 12:
-            month -= 12
-            year += 1
-        day = min(d.day, 28)
-        d = d.replace(year=year, month=month, day=day)
+        d = _add_months(d, 3, billing_day)
     elif frequency == "annually":
-        d = d.replace(year=d.year + 1)
+        d = _add_months(d, 12, billing_day)
     else:
         d += timedelta(days=30)
     return d.strftime("%Y-%m-%d")
@@ -974,30 +1310,3 @@ def _calc_due_date(payment_terms: str) -> str:
     days_map = {"due_on_receipt": 0, "net_7": 7, "net_14": 14, "net_30": 30, "net_45": 45, "net_60": 60, "net_90": 90}
     days = days_map.get(payment_terms, 30)
     return (now + timedelta(days=days)).strftime("%Y-%m-%d")
-
-
-async def _seed_recurring():
-    now = datetime.now(timezone.utc)
-    invoices = [
-        {"id": "ri-001", "client_id": "client-001", "client_name": "Acme Corporation", "description": "Monthly Managed IT Services", "amount": 4500.00, "subtotal": 4090.91, "tax_rate": 10, "tax_amount": 409.09, "currency": "AUD", "frequency": "monthly", "next_generation": (now + timedelta(days=12)).strftime("%Y-%m-%d"), "start_date": "2025-01-01", "contract_id": "contract-001", "payment_terms": "net_30", "auto_send": True, "auto_send_email": "accounts@acme.com", "include_pdf": True, "line_items": [{"description": "Managed IT - 45 endpoints @ $85/ep", "quantity": 45, "rate": 85, "amount": 3825}, {"description": "M365 License Management", "quantity": 1, "rate": 265.91, "amount": 265.91}], "status": "active", "invoices_generated": 14, "total_billed": 63000, "last_generated": (now - timedelta(days=18)).isoformat(), "generation_history": [], "notes": "Standard managed services agreement", "created_by": "Alex Thompson", "created_at": (now - timedelta(days=420)).isoformat(), "updated_at": now.isoformat()},
-        {"id": "ri-002", "client_id": "client-003", "client_name": "Global Finance Ltd", "description": "Monthly IT Support & Security", "amount": 12800.00, "subtotal": 11636.36, "tax_rate": 10, "tax_amount": 1163.64, "currency": "AUD", "frequency": "monthly", "next_generation": (now + timedelta(days=5)).strftime("%Y-%m-%d"), "start_date": "2024-01-01", "payment_terms": "net_14", "auto_send": True, "auto_send_email": "finance@globalfin.com", "include_pdf": True, "line_items": [{"description": "Premium IT Management - 120 endpoints", "quantity": 120, "rate": 75, "amount": 9000}, {"description": "24/7 SOC Monitoring", "quantity": 1, "rate": 1800, "amount": 1800}, {"description": "Compliance Management (PCI-DSS)", "quantity": 1, "rate": 836.36, "amount": 836.36}], "status": "active", "invoices_generated": 24, "total_billed": 307200, "last_generated": (now - timedelta(days=25)).isoformat(), "generation_history": [], "created_by": "Alex Thompson", "created_at": (now - timedelta(days=730)).isoformat(), "updated_at": now.isoformat()},
-        {"id": "ri-003", "client_id": "client-004", "client_name": "HealthCare Plus", "description": "HIPAA Compliant IT Management", "amount": 7200.00, "subtotal": 6545.45, "tax_rate": 10, "tax_amount": 654.55, "currency": "AUD", "frequency": "monthly", "next_generation": (now + timedelta(days=8)).strftime("%Y-%m-%d"), "start_date": "2024-06-01", "payment_terms": "net_30", "auto_send": False, "line_items": [{"description": "Healthcare IT Management - 67 endpoints", "quantity": 67, "rate": 85, "amount": 5695}, {"description": "HIPAA Compliance Monitoring", "quantity": 1, "rate": 850.45, "amount": 850.45}], "status": "active", "invoices_generated": 18, "total_billed": 129600, "last_generated": (now - timedelta(days=22)).isoformat(), "generation_history": [], "created_by": "Sarah Chen", "created_at": (now - timedelta(days=540)).isoformat(), "updated_at": now.isoformat()},
-        {"id": "ri-004", "client_id": "client-002", "client_name": "TechStart Inc", "description": "Quarterly Security Audit & Pen Test", "amount": 3500.00, "subtotal": 3181.82, "tax_rate": 10, "tax_amount": 318.18, "currency": "AUD", "frequency": "quarterly", "next_generation": (now + timedelta(days=45)).strftime("%Y-%m-%d"), "start_date": "2025-01-01", "payment_terms": "net_30", "auto_send": True, "auto_send_email": "billing@techstart.io", "line_items": [{"description": "External Penetration Test", "quantity": 1, "rate": 2000, "amount": 2000}, {"description": "Internal Vulnerability Scan", "quantity": 1, "rate": 800, "amount": 800}, {"description": "Report & Remediation Plan", "quantity": 1, "rate": 381.82, "amount": 381.82}], "status": "active", "invoices_generated": 4, "total_billed": 14000, "last_generated": (now - timedelta(days=60)).isoformat(), "generation_history": [], "created_by": "Alex Thompson", "created_at": (now - timedelta(days=365)).isoformat(), "updated_at": now.isoformat()},
-        {"id": "ri-005", "client_id": "client-006", "client_name": "Summit Legal Group", "description": "Monthly IT Services + Legal Compliance", "amount": 5600.00, "subtotal": 5090.91, "tax_rate": 10, "tax_amount": 509.09, "currency": "AUD", "frequency": "monthly", "next_generation": (now + timedelta(days=15)).strftime("%Y-%m-%d"), "start_date": "2025-06-01", "payment_terms": "net_30", "auto_send": True, "auto_send_email": "admin@summitlegal.com", "line_items": [{"description": "Managed IT - 22 endpoints", "quantity": 22, "rate": 95, "amount": 2090}, {"description": "Document Management System", "quantity": 1, "rate": 1500, "amount": 1500}, {"description": "Legal DMS Compliance Pack", "quantity": 1, "rate": 1500.91, "amount": 1500.91}], "status": "active", "invoices_generated": 8, "total_billed": 44800, "last_generated": (now - timedelta(days=15)).isoformat(), "generation_history": [], "created_by": "Mike Rodriguez", "created_at": (now - timedelta(days=240)).isoformat(), "updated_at": now.isoformat()},
-        {"id": "ri-006", "client_id": "client-005", "client_name": "RetailMax", "description": "Monthly POS & IT Support", "amount": 2800.00, "subtotal": 2545.45, "tax_rate": 10, "tax_amount": 254.55, "currency": "AUD", "frequency": "monthly", "next_generation": (now + timedelta(days=20)).strftime("%Y-%m-%d"), "start_date": "2025-03-01", "payment_terms": "net_14", "auto_send": True, "line_items": [{"description": "POS System Management - 8 terminals", "quantity": 8, "rate": 120, "amount": 960}, {"description": "Network & Security", "quantity": 1, "rate": 800, "amount": 800}, {"description": "Help Desk Support", "quantity": 1, "rate": 785.45, "amount": 785.45}], "status": "active", "invoices_generated": 11, "total_billed": 30800, "last_generated": (now - timedelta(days=10)).isoformat(), "generation_history": [], "created_by": "Lisa Park", "created_at": (now - timedelta(days=330)).isoformat(), "updated_at": now.isoformat()},
-    ]
-    # Also seed invoice templates
-    templates = [
-        {"id": "it-001", "name": "Standard MSP Monthly", "description": "Per-endpoint managed services with M365 management", "line_items": [{"description": "Managed IT Services - per endpoint", "quantity": 1, "rate": 85, "amount": 85}, {"description": "M365 License Management", "quantity": 1, "rate": 250, "amount": 250}], "tax_rate": 10, "payment_terms": "net_30", "currency": "AUD", "category": "managed_services", "usage_count": 8, "created_by": "System", "created_at": now.isoformat(), "updated_at": now.isoformat()},
-        {"id": "it-002", "name": "Security Bundle", "description": "SOC monitoring + EDR + compliance", "line_items": [{"description": "24/7 SOC Monitoring", "quantity": 1, "rate": 1800, "amount": 1800}, {"description": "EDR Management", "quantity": 1, "rate": 500, "amount": 500}, {"description": "Compliance Reporting", "quantity": 1, "rate": 400, "amount": 400}], "tax_rate": 10, "payment_terms": "net_30", "currency": "AUD", "category": "security", "usage_count": 3, "created_by": "System", "created_at": now.isoformat(), "updated_at": now.isoformat()},
-        {"id": "it-003", "name": "Backup & DR Package", "description": "Cloud backup + disaster recovery", "line_items": [{"description": "Cloud Backup - per server", "quantity": 1, "rate": 150, "amount": 150}, {"description": "Cloud Backup - per workstation", "quantity": 1, "rate": 25, "amount": 25}, {"description": "DR Runbook Maintenance", "quantity": 1, "rate": 300, "amount": 300}], "tax_rate": 10, "payment_terms": "net_30", "currency": "AUD", "category": "backup", "usage_count": 5, "created_by": "System", "created_at": now.isoformat(), "updated_at": now.isoformat()},
-        {"id": "it-004", "name": "Quarterly Security Audit", "description": "Pen test + vuln scan + report", "line_items": [{"description": "External Penetration Test", "quantity": 1, "rate": 2000, "amount": 2000}, {"description": "Internal Vulnerability Scan", "quantity": 1, "rate": 800, "amount": 800}, {"description": "Remediation Report", "quantity": 1, "rate": 400, "amount": 400}], "tax_rate": 10, "payment_terms": "net_30", "currency": "AUD", "category": "security", "usage_count": 2, "created_by": "System", "created_at": now.isoformat(), "updated_at": now.isoformat()},
-        {"id": "it-005", "name": "Hardware-as-a-Service", "description": "Monthly device leasing", "line_items": [{"description": "Laptop Lease - per unit/month", "quantity": 1, "rate": 65, "amount": 65}, {"description": "Monitor Lease - per unit/month", "quantity": 1, "rate": 20, "amount": 20}, {"description": "Docking Station - per unit/month", "quantity": 1, "rate": 15, "amount": 15}], "tax_rate": 10, "payment_terms": "net_30", "currency": "AUD", "category": "haas", "usage_count": 1, "created_by": "System", "created_at": now.isoformat(), "updated_at": now.isoformat()},
-    ]
-    await db.recurring_invoices.delete_many({})
-    for i in invoices:
-        await db.recurring_invoices.insert_one(i)
-    await db.invoice_templates.delete_many({})
-    for t in templates:
-        await db.invoice_templates.insert_one(t)
-    return [{k: v for k, v in i.items() if k != "_id"} for i in invoices]

@@ -5,13 +5,13 @@ Includes: Service Catalog · Triage Queue · Ticket Merge/Split · Quote-to-Cash
 Teams/Slack webhooks · Customer Health Score · Bulk PDF · Patch Tuesday ·
 Phone integration · API Tokens · CRM Pipeline · KB AI Generator ·
 Cyber Insurance Export · Defender Health · DR Plan · NPS · Asset Print Batch ·
-Stocktake mobile · SaaS Spend Tracker · 2FA TOTP.
+Stocktake mobile · SaaS Spend Tracker.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
-import uuid, io, zipfile, secrets, base64, hashlib, hmac, struct, time, httpx
+import uuid, io, zipfile, secrets, base64, hashlib, httpx
 from app.database import db
-from app.auth import get_current_user, verify_password
+from app.auth import get_current_user
 from app.services.activity import log_activity
 from app.services.notification_channels import (
     normalise_notification_channel_input,
@@ -731,70 +731,6 @@ async def saas_spend(current_user: dict = Depends(get_current_user)):
 
 # ============================================================================
 # 16. 2FA TOTP
-# ============================================================================
-
-def _hotp(secret_b32: str, counter: int) -> str:
-    key = base64.b32decode(secret_b32 + "=" * ((8 - len(secret_b32) % 8) % 8))
-    msg = struct.pack(">Q", counter)
-    h = hmac.new(key, msg, hashlib.sha1).digest()
-    o = h[-1] & 0xF
-    code = (struct.unpack(">I", h[o:o+4])[0] & 0x7FFFFFFF) % 1000000
-    return str(code).zfill(6)
-
-def _totp(secret_b32: str) -> str:
-    return _hotp(secret_b32, int(time.time() // 30))
-
-@router.post("/pro-pack/2fa/setup")
-async def setup_2fa(current_user: dict = Depends(get_current_user)):
-    secret = base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
-    user_email = current_user.get("email", "user")
-    uri = f"otpauth://totp/NexusOps:{user_email}?secret={secret}&issuer=NexusOps&algorithm=SHA1&digits=6&period=30"
-    await db.user_2fa.update_one(
-        {"user_id": current_user.get("id")},
-        {"$set": {"user_id": current_user.get("id"), "secret": secret, "verified": False, "created_at": datetime.now(timezone.utc).isoformat()}},
-        upsert=True
-    )
-    return {"secret": secret, "otpauth_uri": uri, "qr_code_text": uri}
-
-
-@router.get("/pro-pack/2fa")
-async def get_2fa_status(current_user: dict = Depends(get_current_user)):
-    """Return enrollment state without exposing the authenticator secret."""
-    rec = await db.user_2fa.find_one(
-        {"user_id": current_user.get("id")},
-        {"_id": 0, "verified": 1, "verified_at": 1, "created_at": 1},
-    )
-    return {
-        "enabled": bool(rec and rec.get("verified")),
-        "verified_at": rec.get("verified_at") if rec else None,
-        "setup_in_progress": bool(rec and not rec.get("verified")),
-    }
-
-@router.post("/pro-pack/2fa/verify")
-async def verify_2fa(data: dict, current_user: dict = Depends(get_current_user)):
-    code = (data.get("code") or "").strip()
-    rec = await db.user_2fa.find_one({"user_id": current_user.get("id")}, {"_id": 0})
-    if not rec:
-        raise HTTPException(status_code=404, detail="2FA not set up")
-    expected = _totp(rec["secret"])
-    if code != expected:
-        raise HTTPException(status_code=400, detail="Invalid code")
-    await db.user_2fa.update_one({"user_id": current_user.get("id")}, {"$set": {"verified": True, "verified_at": datetime.now(timezone.utc).isoformat()}})
-    return {"verified": True}
-
-@router.delete("/pro-pack/2fa")
-async def disable_2fa(data: dict, current_user: dict = Depends(get_current_user)):
-    """Disable MFA only after the signed-in technician re-confirms their password."""
-    password = data.get("password", "")
-    user = await db.users.find_one({"id": current_user.get("id")})
-    if not user or not verify_password(password, user.get("password_hash", "")):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
-    await db.user_2fa.delete_one({"user_id": current_user.get("id")})
-    return {"message": "disabled"}
-
-
-# ============================================================================
-# 17. NPS / CSAT close prompt
 # ============================================================================
 
 @router.get("/pro-pack/nps/summary")

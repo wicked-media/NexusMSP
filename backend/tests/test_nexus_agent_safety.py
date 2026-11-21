@@ -28,7 +28,6 @@ from app.routers import (  # noqa: E402
     asset_lifecycle,
     alert_rules,
     client_budget,
-    client_health,
     client_studio,
     change_management,
     cipp_hygiene,
@@ -568,11 +567,17 @@ def test_intelligent_routing_requires_confirmed_rules_and_recorded_skills():
 
 
 def test_client_health_requires_multiple_recorded_evidence_dimensions_before_scoring():
-    assert client_health._health_status(None) == "not_assessed"
-    assert client_health._device_source({"cpu_usage": 95}) is None
-    assert client_health._device_source({"source": "nexus-agent", "cpu_usage": 95}) == "nexus-agent"
-    assert client_health._numeric(None) is None
-    assert client_health._numeric("82.5") == 82.5
+    from app.services.client_health_engine import device_source, numeric
+    from app.services.client_health_policy import health_status
+
+    assert health_status(None) == "not_assessed"
+    assert health_status(85) == "thriving"
+    assert health_status(84) == "healthy"
+    assert health_status(69) == "needs_attention"
+    assert device_source({"cpu_usage": 95}) is None
+    assert device_source({"source": "nexus-agent", "cpu_usage": 95}) == "nexus-agent"
+    assert numeric(None) is None
+    assert numeric("82.5") == 82.5
 
 
 def test_compliance_report_preserves_an_unassessed_scan_without_inventing_zero_score(monkeypatch):
@@ -627,9 +632,7 @@ def test_alert_rules_require_configured_policies_and_agent_observed_telemetry():
     assert [action["id"] for action in alert_rules.ACTION_OPTIONS] == ["create_ticket"]
     assert alert_rules._agent_observed({"cpu_usage": 99}) is False
     assert alert_rules._agent_observed({"source": "nexus-agent", "cpu_usage": 99}) is True
-    with pytest.raises(HTTPException) as retired:
-        asyncio.run(alert_rules._seed_rules())
-    assert retired.value.status_code == 410
+    assert not hasattr(alert_rules, "_seed_rules")
 
 
 def test_installer_records_the_configured_agent_intervals():

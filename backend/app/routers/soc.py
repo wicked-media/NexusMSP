@@ -4,7 +4,8 @@ from app.routers.auth import get_current_user
 from datetime import datetime, timezone, timedelta
 import uuid
 from app.services.module_permissions import require_module_permission
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, platform_tenant_id, scoped_query
+from app.services import ticket_checkpoint_notifications
 
 router = APIRouter(tags=["Huntress Integration"])
 
@@ -384,7 +385,7 @@ async def check_thank_you_responses(user=Depends(get_current_user)):
     keywords = (settings or {}).get("thank_you_keywords", ["thanks", "thank you", "ty", "cheers"])
     open_tickets = await db.tickets.find(
         {"status": {"$in": ["open", "waiting_on_client", "resolved"]}},
-        {"_id": 0, "id": 1, "title": 1, "conversations": 1, "status": 1}
+        {"_id": 0, "id": 1, "tenant_id": 1, "client_id": 1, "title": 1, "conversations": 1, "status": 1, "next_checkpoint_at": 1}
     ).to_list(500)
     closed_count = 0
     for ticket in open_tickets:
@@ -394,10 +395,18 @@ async def check_thank_you_responses(user=Depends(get_current_user)):
         last_msg = convos[-1] if convos else {}
         msg_text = (last_msg.get("message", "") or "").lower().strip()
         if len(msg_text) < 50 and any(kw in msg_text for kw in keywords):
+            closed_at = datetime.now(timezone.utc).isoformat()
             await db.tickets.update_one({"id": ticket["id"]}, {
-                "$set": {"status": "closed", "closed_at": datetime.now(timezone.utc).isoformat(), "closed_reason": "auto_thank_you"},
-                "$push": {"conversations": {"message": "Auto-closed: Client sent a thank-you response.", "sender": "system", "created_at": datetime.now(timezone.utc).isoformat()}}
+                "$set": {"status": "closed", "closed_at": closed_at, "closed_reason": "auto_thank_you"},
+                "$push": {"conversations": {"message": "Auto-closed: Client sent a thank-you response.", "sender": "system", "created_at": closed_at}}
             })
+            await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+                {**ticket, "status": "closed"},
+                tenant_id=str(ticket.get("tenant_id") or platform_tenant_id(user)),
+                actor={"id": "system", "name": "Nexus automation"},
+                resolution="ticket_closed",
+                database=db,
+            )
             closed_count += 1
     return {"message": f"Scanned {len(open_tickets)} tickets, auto-closed {closed_count}", "closed": closed_count, "scanned": len(open_tickets)}
 

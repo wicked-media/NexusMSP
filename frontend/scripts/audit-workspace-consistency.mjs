@@ -66,6 +66,14 @@ const delegatedHeaderPages = new Set([
   "TriageQueuePage",
 ]);
 const specialistHeaderPages = new Set([
+  // Customer-facing, unauthenticated canvases own their full page shell; they
+  // intentionally do not render the technician workspace header.
+  "CsatResponsePage",
+  "PublicPaymentPage",
+  "PortalLoginPage",
+  "StatusBoardPage",
+  "WarRoomPublicPage",
+  // Authenticated specialist canvases with a purpose-built layout.
   "AutoOpsHubPage",
   "ClientPortalViewPage",
   "DeviceChatPage",
@@ -76,16 +84,12 @@ const specialistHeaderPages = new Set([
   "LiveChatPage",
   "NotificationsPage",
   "PortalDashboardPage",
-  "PortalLoginPage",
-  "PublicPaymentPage",
   "ReportsHubPage",
-  "StatusBoardPage",
   "StocktakeMobilePage",
   "StripeBillingPortalPage",
   "TeamChatPage",
   "TechProfilePage",
   "WarRoomPage",
-  "WarRoomPublicPage",
   "WorkshopBenchPage",
   "WorkspacePage",
 ]);

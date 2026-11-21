@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
+import math
 import uuid
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
@@ -16,7 +17,7 @@ from app.services.commercial_documents import (
     freeze_commercial_document_snapshot,
     normalise_document_customisation,
 )
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, platform_tenant_id, scoped_query
 
 router = APIRouter()
 PO_EVIDENCE_DIR = Path(UPLOADS_DIR) / "purchase-orders"
@@ -186,6 +187,7 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
         "assigned_to_name": data.get("assigned_to_name", ""),
         "created_by": current_user["id"],
         "created_by_name": current_user.get("name", ""),
+        "tenant_id": platform_tenant_id(current_user),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "last_ping_at": None,
@@ -293,6 +295,111 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
         await _log_po_audit(po_id, "updated", "Purchase order updated", current_user)
     return {"message": "Purchase order updated"}
 
+def _supplier_line_match(po: dict, supplied_lines: object, data: dict) -> dict:
+    """Compare supplier invoice lines with the ordered PO lines.
+
+    Suppliers routinely invoice a different quantity, unit price or tax rate
+    on one line while the invoice total still looks plausible.  Matching only
+    the total hides that exposure.  When line detail is supplied, every PO
+    line must be represented exactly once and the supplied total must agree
+    with the line arithmetic.
+    """
+    if supplied_lines is None:
+        return {"line_items": [], "line_variance_count": 0, "tax_variance": None, "shipping_variance": None}
+    if not isinstance(supplied_lines, list) or not supplied_lines:
+        raise HTTPException(status_code=422, detail="line_items must be a non-empty list when supplied")
+    po_lines = po.get("line_items") or []
+    if len(supplied_lines) != len(po_lines):
+        raise HTTPException(status_code=422, detail="Supplier matching must include every purchase-order line exactly once")
+
+    matched: list[dict] = []
+    seen: set[int] = set()
+    supplier_subtotal = 0.0
+    supplier_tax = 0.0
+    expected_subtotal = 0.0
+    expected_tax = 0.0
+    for position, raw in enumerate(supplied_lines):
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=422, detail=f"Supplier line {position + 1} must be an object")
+        raw_index = raw.get("line_index", position)
+        if isinstance(raw_index, str) and raw_index.isdigit():
+            raw_index = int(raw_index)
+        if not isinstance(raw_index, int) or not 0 <= raw_index < len(po_lines):
+            raise HTTPException(status_code=422, detail=f"Supplier line {position + 1} has an invalid line_index")
+        if raw_index in seen:
+            raise HTTPException(status_code=422, detail=f"Purchase-order line {raw_index + 1} is matched more than once")
+        seen.add(raw_index)
+        po_line = po_lines[raw_index]
+        if raw.get("product_id") and po_line.get("product_id") and raw["product_id"] != po_line["product_id"]:
+            raise HTTPException(status_code=422, detail=f"Supplier line {position + 1} does not match the selected PO line")
+        try:
+            quantity = float(raw.get("quantity", po_line.get("quantity", 0)))
+            unit_price = float(raw.get("unit_price", po_line.get("unit_price", 0)))
+            tax_rate = float(raw.get("tax_rate", po_line.get("tax_rate", 0)) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Supplier line {position + 1} needs numeric quantity, unit_price and tax_rate") from None
+        if not all(math.isfinite(value) for value in (quantity, unit_price, tax_rate)):
+            raise HTTPException(status_code=422, detail=f"Supplier line {position + 1} contains a non-finite number")
+        if quantity < 0 or unit_price < 0 or not 0 <= tax_rate <= 100:
+            raise HTTPException(status_code=422, detail=f"Supplier line {position + 1} has an invalid quantity, price or tax rate")
+
+        expected_quantity = float(po_line.get("quantity", 0) or 0)
+        expected_price = float(po_line.get("unit_price", 0) or 0)
+        expected_rate = float(po_line.get("tax_rate", 0) or 0)
+        supplied_amount = round(quantity * unit_price, 2)
+        supplied_line_tax = round(supplied_amount * tax_rate / 100, 2)
+        expected_amount = round(expected_quantity * expected_price, 2)
+        expected_line_tax = round(expected_amount * expected_rate / 100, 2)
+        supplier_subtotal += supplied_amount
+        supplier_tax += supplied_line_tax
+        expected_subtotal += expected_amount
+        expected_tax += expected_line_tax
+        matched.append({
+            "line_index": raw_index,
+            "product_id": po_line.get("product_id", ""),
+            "product_name": po_line.get("product_name") or po_line.get("name") or "",
+            "expected_quantity": expected_quantity,
+            "supplier_quantity": quantity,
+            "quantity_variance": round(quantity - expected_quantity, 4),
+            "expected_unit_price": expected_price,
+            "supplier_unit_price": unit_price,
+            "unit_price_variance": round(unit_price - expected_price, 2),
+            "expected_tax_rate": expected_rate,
+            "supplier_tax_rate": tax_rate,
+            "tax_rate_variance": round(tax_rate - expected_rate, 4),
+            "expected_amount": expected_amount,
+            "supplier_amount": supplied_amount,
+            "amount_variance": round(supplied_amount - expected_amount, 2),
+        })
+
+    try:
+        shipping = float(data.get("shipping", 0) or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Shipping must be a valid amount") from None
+    if not math.isfinite(shipping) or shipping < 0:
+        raise HTTPException(status_code=422, detail="Shipping must be a finite non-negative amount")
+    expected_shipping = float(po.get("shipping", 0) or 0)
+    line_variances = [
+        line for line in matched
+        if abs(line["quantity_variance"]) > 0.0001
+        or abs(line["unit_price_variance"]) >= 0.01
+        or abs(line["tax_rate_variance"]) > 0.0001
+    ]
+    return {
+        "line_items": matched,
+        "line_variance_count": len(line_variances),
+        "supplier_subtotal": round(supplier_subtotal, 2),
+        "expected_subtotal": round(expected_subtotal, 2),
+        "supplier_tax": round(supplier_tax, 2),
+        "expected_tax": round(expected_tax, 2),
+        "tax_variance": round(supplier_tax - expected_tax, 2),
+        "supplier_shipping": round(shipping, 2),
+        "expected_shipping": round(expected_shipping, 2),
+        "shipping_variance": round(shipping - expected_shipping, 2),
+        "calculated_total": round(supplier_subtotal + supplier_tax + shipping, 2),
+    }
+
+
 @router.post("/purchase-orders/{po_id}/vendor-invoice-match")
 async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Record a supplier invoice against a PO without changing the PO or billing totals."""
@@ -325,19 +432,38 @@ async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict
         supplier_total = round(float(data.get("supplier_total")), 2)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Supplier invoice total must be a valid amount")
-    if supplier_total < 0:
-        raise HTTPException(status_code=422, detail="Supplier invoice total cannot be negative")
+    if not math.isfinite(supplier_total) or supplier_total < 0:
+        raise HTTPException(status_code=422, detail="Supplier invoice total must be a finite non-negative amount")
 
     expected_total = round(float(po.get("total", 0) or 0), 2)
     variance = round(supplier_total - expected_total, 2)
+    line_match = _supplier_line_match(po, data.get("line_items"), data)
+    if line_match["line_items"] and abs(float(line_match["calculated_total"]) - supplier_total) >= 0.01:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Supplier total does not agree with the supplied line amounts, tax and shipping "
+                f"(calculated {line_match['calculated_total']:.2f})"
+            ),
+        )
+    has_line_variance = bool(line_match["line_items"]) and (
+        line_match["line_variance_count"] > 0
+        or abs(float(line_match["tax_variance"] or 0)) >= 0.01
+        or abs(float(line_match["shipping_variance"] or 0)) >= 0.01
+    )
     match = {
         "invoice_number": invoice_number,
         "invoice_date": str(data.get("invoice_date", "")).strip(),
         "supplier_total": supplier_total,
         "expected_total": expected_total,
         "variance": variance,
-        "status": "matched" if abs(variance) < 0.01 else "variance",
+        "status": "variance" if has_line_variance or abs(variance) >= 0.01 else "matched",
         "notes": str(data.get("notes", "")).strip(),
+        "line_items": line_match["line_items"],
+        "line_variance_count": line_match["line_variance_count"],
+        "tax_variance": line_match["tax_variance"],
+        "shipping_variance": line_match["shipping_variance"],
+        "supplier_shipping": line_match.get("supplier_shipping"),
         "matched_by": current_user.get("id", "system"),
         "matched_by_name": current_user.get("name", "System"),
         "matched_at": datetime.now(timezone.utc).isoformat(),
@@ -346,7 +472,16 @@ async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict
         "vendor_invoice_match": match,
         "updated_at": match["matched_at"],
     }})
-    outcome = "matched" if match["status"] == "matched" else f"has a ${abs(variance):.2f} {'over' if variance > 0 else 'under'} variance"
+    if match["status"] == "matched":
+        outcome = "matched"
+    elif has_line_variance:
+        outcome = (
+            f"has {line_match['line_variance_count']} line variance(s), "
+            f"tax variance {float(line_match['tax_variance'] or 0):+.2f}, "
+            f"shipping variance {float(line_match['shipping_variance'] or 0):+.2f}"
+        )
+    else:
+        outcome = f"has a ${abs(variance):.2f} {'over' if variance > 0 else 'under'} variance"
     await _log_po_audit(po_id, "vendor_invoice_matched", f"Supplier invoice {invoice_number} recorded and {outcome} against PO total ${expected_total:.2f}", current_user)
     return {"message": "Supplier invoice match recorded", "vendor_invoice_match": match}
 
@@ -833,6 +968,80 @@ async def return_po_items(po_id: str, data: dict, current_user: dict = Depends(g
     return response
 
 
+PO_ATTACHMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx"}
+PO_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+
+
+async def store_purchase_order_attachment(
+    *,
+    po_id: str,
+    content: bytes,
+    filename: str | None,
+    content_type: str | None,
+    category: str = "receiving",
+    note: str = "",
+    uploaded_by: str = "system",
+    uploaded_by_name: str = "System",
+    source: str = "manual_upload",
+    syncro_attachment_id: str | None = None,
+    syncro_purchase_order_id: str | None = None,
+    database=None,
+) -> dict:
+    """Store PO evidence through the same private directory and metadata shape as the UI."""
+    store = database or db
+    if syncro_attachment_id:
+        existing_po = await store.purchase_orders.find_one(
+            {"id": po_id}, {"_id": 0, "attachments": 1}
+        )
+        for existing in (existing_po or {}).get("attachments") or []:
+            if isinstance(existing, dict) and str(existing.get("syncro_attachment_id") or "") == str(syncro_attachment_id):
+                return existing
+    extension = Path(filename or "").suffix.lower()
+    if extension not in PO_ATTACHMENT_EXTENSIONS:
+        raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Word, or Excel evidence file")
+    if not content or len(content) > PO_ATTACHMENT_MAX_BYTES:
+        raise HTTPException(status_code=422, detail="Evidence files must be between 1 byte and 10 MB")
+    stored_filename = f"{uuid.uuid4().hex}{extension}"
+    path = PO_EVIDENCE_DIR / stored_filename
+    path.write_bytes(content)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    attachment = {
+        "id": str(uuid.uuid4()),
+        "name": Path(filename or stored_filename).name,
+        "url": f"/api/uploads/purchase-orders/{stored_filename}",
+        "content_type": content_type or "application/octet-stream",
+        "size": len(content),
+        "category": str(category or "receiving").strip().lower(),
+        "note": str(note or "").strip(),
+        "uploaded_by": uploaded_by,
+        "uploaded_by_name": uploaded_by_name,
+        "uploaded_at": now_iso,
+        "source": source,
+        "syncro_attachment_id": str(syncro_attachment_id) if syncro_attachment_id else None,
+        "syncro_purchase_order_id": str(syncro_purchase_order_id) if syncro_purchase_order_id else None,
+    }
+    attachment = {key: value for key, value in attachment.items() if value is not None}
+    try:
+        result = await store.purchase_orders.update_one(
+            {"id": po_id},
+            {"$push": {"attachments": attachment}, "$set": {"updated_at": now_iso}, "$inc": {"version": 1}},
+        )
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    if not getattr(result, "matched_count", 1):
+        path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="PO not found")
+    await _log_po_audit(
+        po_id,
+        "evidence_attached",
+        f"Attached {attachment['name']} as {attachment['category']} evidence",
+        {"id": uploaded_by, "name": uploaded_by_name},
+        database=store,
+    )
+    return attachment
+
+
 @router.post("/purchase-orders/{po_id}/attachments")
 async def upload_po_attachment(
     po_id: str,
@@ -842,34 +1051,16 @@ async def upload_po_attachment(
     current_user: dict = Depends(get_current_user),
 ):
     await _po_or_404(po_id, current_user)
-    extension = Path(file.filename or "").suffix.lower()
-    if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx"}:
-        raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Word, or Excel evidence file")
-    content = await file.read()
-    if not content or len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=422, detail="Evidence files must be between 1 byte and 10 MB")
-    filename = f"{uuid.uuid4().hex}{extension}"
-    path = PO_EVIDENCE_DIR / filename
-    path.write_bytes(content)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    attachment = {
-        "id": str(uuid.uuid4()),
-        "name": Path(file.filename or filename).name,
-        "url": f"/api/uploads/purchase-orders/{filename}",
-        "content_type": file.content_type or "application/octet-stream",
-        "size": len(content),
-        "category": str(category or "receiving").strip().lower(),
-        "note": str(note or "").strip(),
-        "uploaded_by": current_user.get("id", "system"),
-        "uploaded_by_name": current_user.get("name", "System"),
-        "uploaded_at": now_iso,
-    }
-    await db.purchase_orders.update_one(
-        {"id": po_id},
-        {"$push": {"attachments": attachment}, "$set": {"updated_at": now_iso}, "$inc": {"version": 1}},
+    return await store_purchase_order_attachment(
+        po_id=po_id,
+        content=await file.read(),
+        filename=file.filename,
+        content_type=file.content_type,
+        category=category,
+        note=note,
+        uploaded_by=current_user.get("id", "system"),
+        uploaded_by_name=current_user.get("name", "System"),
     )
-    await _log_po_audit(po_id, "evidence_attached", f"Attached {attachment['name']} as {attachment['category']} evidence", current_user)
-    return attachment
 
 
 @router.post("/purchase-orders/{po_id}/supplier-bill/sync")
@@ -891,8 +1082,8 @@ async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depen
     if replay is not None:
         return {**replay, "replayed": True}
     existing = await db.xero_supplier_bills.find_one({"po_id": po_id}, {"_id": 0})
-    if existing and existing.get("status") in {"queued", "synced"}:
-        response = {"message": "Supplier bill is already queued for Xero", "supplier_bill": existing}
+    if existing and existing.get("status") in {"prepared", "queued", "synced"}:
+        response = {"message": "Supplier bill is already prepared for the Xero connector", "supplier_bill": existing, "xero_sync_available": False}
         await complete_idempotent_operation(db, scope=f"po-supplier-bill:{po_id}", key=idempotency_key, response=response)
         return response
 
@@ -909,6 +1100,7 @@ async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depen
         "po_id": po_id,
         "po_number": po.get("po_number", ""),
         "client_id": po.get("client_id", ""),
+        "tenant_id": po.get("tenant_id") or platform_tenant_id(current_user),
         "type": "ACCPAY",
         "vendor_id": po.get("vendor_id", ""),
         "vendor_name": po.get("vendor", ""),
@@ -919,9 +1111,13 @@ async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depen
         "subtotal": po.get("subtotal", 0),
         "tax": po.get("tax", 0),
         "total": match.get("supplier_total", po.get("total", 0)),
-        "status": "queued" if connected else "needs_connection",
+        # There is no live Xero ACCPAY connector in this deployment.  Do not
+        # label a local document "queued" or "synced" until it has actually
+        # been posted by an authenticated worker.
+        "status": "prepared" if connected else "needs_connection",
         "xero_tenant_id": xero.get("tenant_id", "") if connected else "",
-        "queued_at": now_iso if connected else None,
+        "prepared_at": now_iso,
+        "sync_blocked_reason": "Xero supplier-bill API connector is not available",
         "created_at": (existing or {}).get("created_at") or now_iso,
         "updated_at": now_iso,
         "created_by": current_user.get("id", "system"),
@@ -938,12 +1134,13 @@ async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depen
         {"id": po_id},
         {"$set": {"supplier_bill_sync": sync_state, "updated_at": now_iso}, "$inc": {"version": 1}},
     )
-    detail = "queued for Xero" if connected else "prepared and waiting for the Xero connection"
-    await _log_po_audit(po_id, "supplier_bill_queued", f"Supplier invoice {bill['invoice_number']} {detail}", current_user)
+    detail = "prepared for the Xero connector" if connected else "prepared and waiting for the Xero connection"
+    await _log_po_audit(po_id, "supplier_bill_prepared", f"Supplier invoice {bill['invoice_number']} {detail}; live Xero posting is not available", current_user)
     response = {
-        "message": f"Supplier bill {detail}",
+        "message": f"Supplier bill {detail}; live Xero posting is not available in this deployment",
         "supplier_bill": bill,
         "xero_connected": connected,
+        "xero_sync_available": False,
     }
     await complete_idempotent_operation(db, scope=f"po-supplier-bill:{po_id}", key=idempotency_key, response=response)
     return response
@@ -1065,14 +1262,14 @@ async def get_overdue_pos(current_user: dict = Depends(get_current_user)):
 
 # ============== HELPERS ==============
 
-async def _log_po_audit(po_id: str, action: str, details: str, user: dict):
+async def _log_po_audit(po_id: str, action: str, details: str, user: dict, *, database=None):
     log = {
         "id": str(uuid.uuid4()), "po_id": po_id, "action": action,
         "details": details, "user_id": user.get("id", "system"),
         "user_name": user.get("name", "System"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.po_audit_log.insert_one(log)
+    await (database or db).po_audit_log.insert_one(log)
 
 
 async def _ticket_or_422(ticket_id: str, current_user: dict) -> dict:

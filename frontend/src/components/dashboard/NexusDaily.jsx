@@ -105,9 +105,9 @@ export default function NexusDaily({
         description="One live briefing, one priority view, one place to act."
         icon={Sparkles}
         tone="emerald"
-        signal={briefing.healthScore < 50 ? "critical" : briefing.healthScore < 75 ? "attention" : briefing.attentionCount ? "working" : "healthy"}
-        signalLabel={`${briefing.healthLabel} operating health`}
-        signalDescription={`${briefing.healthScore}/100 · ${briefing.attentionCount} connected signal${briefing.attentionCount === 1 ? "" : "s"} affecting the score.`}
+        signal={!briefing.healthAssessed ? "neutral" : briefing.healthScore < 50 ? "critical" : briefing.healthScore < 75 ? "attention" : briefing.attentionCount ? "working" : "healthy"}
+        signalLabel={briefing.healthAssessed ? `${briefing.healthLabel} operating health` : "Operating health not assessed"}
+        signalDescription={briefing.healthAssessed ? `${briefing.healthScore}/100 · ${briefing.attentionCount} connected signal${briefing.attentionCount === 1 ? "" : "s"} affecting the score.` : "No managed devices or active work are connected yet."}
         actionsLabel={null}
         actionsDescription={null}
         meta={[

@@ -691,7 +691,9 @@ export default function PurchaseOrdersPage() {
         { idempotency_key: crypto.randomUUID() },
         { headers },
       );
-      response.data.xero_connected ? toast.success("Supplier bill queued for Xero") : toast.warning("Supplier bill prepared; connect Xero to send it");
+      response.data.xero_connected
+        ? toast.warning("Supplier bill prepared; live Xero posting is not available in this deployment")
+        : toast.warning("Supplier bill prepared; connect Xero to make it available to the connector");
       fetchPODetail(viewPO.id); fetchData();
     } catch (error) { toast.error(error.response?.data?.detail || "Could not prepare the supplier bill"); }
   };
@@ -1489,7 +1491,7 @@ export default function PurchaseOrdersPage() {
                 </Button>}
                 {vendorInvoiceMatch && (vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted") && (
                   <Button variant="info" className="w-full" onClick={handleQueueSupplierBill} data-testid="queue-xero-supplier-bill">
-                    <Building2 className="mr-1.5 h-4 w-4" />{po.supplier_bill_sync?.status === "queued" ? "Supplier bill queued" : po.supplier_bill_sync?.status === "needs_connection" ? "Connect Xero to send bill" : "Queue supplier bill for Xero"}
+                    <Building2 className="mr-1.5 h-4 w-4" />{["prepared", "queued"].includes(po.supplier_bill_sync?.status) ? "Supplier bill prepared" : po.supplier_bill_sync?.status === "needs_connection" ? "Connect Xero to prepare bill" : "Prepare supplier bill for Xero"}
                   </Button>
                 )}
                 <label className="flex h-9 w-full cursor-pointer items-center rounded-lg border border-white/[0.12] bg-black/10 px-3 text-sm text-zinc-100 hover:border-cyan-400/30 hover:bg-cyan-500/[0.06]">

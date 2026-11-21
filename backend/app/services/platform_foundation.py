@@ -35,6 +35,7 @@ EVENT_SUBJECTS = [
     {"subject": "virtualization.vm.action.failed", "owner": "Proxmox Studio", "risk": "high", "description": "A guest power action failed before a verified outcome was recorded."},
     {"subject": "virtualization.vm.action.outcome.unknown", "owner": "Proxmox Studio", "risk": "high", "description": "A guest power action was submitted but its outcome could not be confirmed in the verification window."},
     {"subject": "ticket.created", "owner": "Service Desk", "risk": "low", "description": "A new auditable service record was created."},
+    {"subject": "client.evidence_action.started", "owner": "Client Health", "risk": "low", "description": "A technician started connecting a missing evidence source from the health radar. The event records which source was chosen, not the customer's provider data."},
     {"subject": "user.offboard.requested", "owner": "Nexus Control Plane", "risk": "high", "description": "A governed identity offboarding workflow was requested."},
     {"subject": "invoice.reconciliation.failed", "owner": "Nexus Finance", "risk": "medium", "description": "An invoice could not be reconciled to its accounting source."},
     {"subject": "remote.session.started", "owner": "Nexus Remote", "risk": "high", "description": "A technician began an authenticated remote session."},

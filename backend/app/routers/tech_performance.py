@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user
@@ -49,39 +49,8 @@ async def get_technician_performance(current_user: dict = Depends(get_current_us
 
 @router.get("/reports/csat")
 async def get_csat_report(current_user: dict = Depends(get_current_user)):
-    """Get CSAT survey results"""
-    surveys = await db.csat_surveys.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
-    if surveys:
-        avg_score = round(sum(s.get("score", 0) for s in surveys) / len(surveys), 1)
-        promoters = sum(1 for s in surveys if s.get("score", 0) >= 9)
-        detractors = sum(1 for s in surveys if s.get("score", 0) <= 6)
-        nps = round(((promoters - detractors) / len(surveys)) * 100) if surveys else 0
-    else:
-        avg_score = 0
-        nps = 0
-
-    return {
-        "surveys": surveys[:50],
-        "total_responses": len(surveys),
-        "average_score": avg_score,
-        "nps_score": nps,
-    }
-
-
-@router.post("/csat/{survey_id}/respond-public")
-async def respond_to_survey_public(survey_id: str, data: dict):
-    """Public CSAT response (no auth) — used by external survey link.
-    Authenticated submissions go through ticket_workflow.respond_csat at /api/csat/{id}/respond."""
-    result = await db.csat_surveys.update_one(
-        {"id": survey_id, "status": "pending"},
-        {"$set": {
-            "score": data.get("score", 0),
-            "feedback": data.get("feedback", ""),
-            "status": "completed",
-            "responded_at": datetime.now(timezone.utc).isoformat(),
-        }}
+    """Retired: it scored a 1-5 CSAT scale as NPS and had no callers."""
+    raise HTTPException(
+        status_code=410,
+        detail="CSAT reporting moved to GET /api/csat/dashboard (average, distribution, by_tech).",
     )
-    if result.matched_count == 0:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Survey not found or already completed")
-    return {"message": "Thank you for your feedback!"}

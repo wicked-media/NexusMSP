@@ -41,15 +41,17 @@ an endpoint automatically. Those actions remain explicit, reviewed workflows.
 
 ```bash
 cd /app/agent
-make all             # Build service, Client Chat and Tray for windows/amd64
-make windows-remote  # Build the Native Remote user-session companion
+make all             # Build service, Client Chat, Tray and Native Remote Companion
+make windows-remote  # Build only the Native Remote user-session companion
 ```
 
-The production API image builds these components from the checked-in
-Agent source in its Docker build stage. It does not copy a developer's
-ignored `agent/dist` directory or any per-device `config.json` into the image.
-Pass the same `NEXUS_AGENT_VERSION` build argument and API environment value
-when promoting a release so the advertised and embedded versions agree.
+The source-build API image (`backend/Dockerfile.production`) builds these
+components from the checked-in Agent source in its Docker build stage and writes
+`agent/dist/VERSION`; it does not copy a developer's ignored `agent/dist`
+directory or any per-device `config.json` into the image. The published release
+image (`backend/Dockerfile.release`) instead carries the verified Authenticode
+signed bundle and its `VERSION`; deployment environment defaults do not override
+that file. `make all` also writes `dist/VERSION` for local signing and checks.
 
 ## Install (test machine)
 

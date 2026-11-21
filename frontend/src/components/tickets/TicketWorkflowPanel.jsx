@@ -116,8 +116,16 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
   const sendCsat = async () => {
     setBusy(true);
     try {
-      await axios.post(`${API}/tickets/${ticket.id}/send-csat`, {}, { headers });
-      toast.success("CSAT survey logged");
+      const { data } = await axios.post(`${API}/tickets/${ticket.id}/send-csat`, {}, { headers });
+      const link = data?.survey_path ? `${window.location.origin}${data.survey_path}` : data?.survey_url;
+      if (data?.delivery?.mailed) {
+        toast.success("CSAT survey emailed to the ticket contact");
+      } else if (link) {
+        try { await navigator.clipboard?.writeText(link); } catch { /* clipboard may be blocked */ }
+        toast.success("Survey link copied — connect a mailbox in Settings to email it automatically");
+      } else {
+        toast.success("CSAT survey link created");
+      }
       refresh?.();
       close();
     } catch (e) { toast.error(e.response?.data?.detail || "Send failed"); }

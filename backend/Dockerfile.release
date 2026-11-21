@@ -1,0 +1,57 @@
+# Published API image for signed Windows Agent releases.
+#
+# Unlike Dockerfile.production (which compiles source components for local and
+# CI builds), this image must be built with a downloaded, already-signed agent
+# artifact at ./signed-bundle. The verification stage fails closed when the
+# bundle is unsigned, incomplete, tampered with, or bound to another commit.
+
+FROM python:3.12-slim AS verify-signed-agent
+
+ARG NEXUS_AGENT_VERSION
+
+WORKDIR /verify
+
+RUN test -n "$NEXUS_AGENT_VERSION"
+
+COPY scripts/verify_signed_agent_bundle.py ./verify_signed_agent_bundle.py
+COPY signed-bundle ./signed-bundle
+
+RUN python ./verify_signed_agent_bundle.py \
+    --bundle ./signed-bundle \
+    --expected-version "$NEXUS_AGENT_VERSION"
+
+
+FROM python:3.12-slim AS runtime
+
+ARG NEXUS_AGENT_VERSION
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    NEXUS_AGENT_VERSION=${NEXUS_AGENT_VERSION} \
+    NEXUS_AGENT_VERSION_FILE=/app/agent/dist/VERSION
+
+WORKDIR /app
+
+RUN addgroup --system nexus && adduser --system --ingroup nexus nexus
+COPY backend/requirements.txt ./
+RUN python -m pip install --upgrade pip && pip install -r requirements.txt
+
+COPY --chown=nexus:nexus backend/app ./app
+COPY --chown=nexus:nexus backend/server.py backend/worker.py ./
+COPY --chown=nexus:nexus backend/scripts/nexus_migrate.py ./scripts/nexus_migrate.py
+
+# Copy only the verified distribution directory from the gate above. The
+# evidence remains in the builder stage and is not shipped in the runtime image.
+COPY --from=verify-signed-agent --chown=nexus:nexus /verify/signed-bundle/agent/dist/ ./agent/dist/
+
+RUN mkdir -p /app/data/agent-installers /app/uploads /app/private_uploads \
+    && chown -R nexus:nexus /app
+
+USER nexus
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=4)"
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]

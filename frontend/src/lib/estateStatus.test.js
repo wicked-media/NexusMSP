@@ -23,4 +23,13 @@ describe("estate status presentation", () => {
     expect(buildEstateStatus({ health_score: null }).detail).toBe("Unavailable");
     expect(buildEstateStatus({ health_score: "not-a-score" }).detail).toBe("Unavailable");
   });
+
+  test("reports an unassessed estate instead of a perfect score", () => {
+    expect(buildEstateStatus({ health_score: null, health_label: "Not assessed" })).toEqual({
+      label: "Not assessed",
+      score: null,
+      tone: "neutral",
+      detail: "Not assessed",
+    });
+  });
 });

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.services.event_backbone import validate_webhook_url
+from app.services.event_backbone import (
+    assert_outbound_destination as _assert_outbound_destination,
+    validate_webhook_url,
+)
 
 
 _SENSITIVE_HEADER_NAMES = frozenset(
@@ -31,6 +34,11 @@ def validate_legacy_webhook_url(value: Any) -> str:
         return validate_webhook_url(str(value or ""))
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
+
+
+async def assert_outbound_destination(value: Any) -> str:
+    """Validate and resolve a destination with the event delivery policy."""
+    return await _assert_outbound_destination(value)
 
 
 def redact_webhook_for_response(document: dict[str, Any]) -> dict[str, Any]:

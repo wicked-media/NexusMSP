@@ -28,6 +28,7 @@ const typeConfig = {
   device_offline: { icon: Monitor, color: "text-orange-400", bg: "bg-orange-500/10", label: "Device offline" },
   ticket_assigned: { icon: Ticket, color: "text-sky-400", bg: "bg-sky-500/10", label: "Ticket assigned" },
   ticket_updated: { icon: Ticket, color: "text-cyan-400", bg: "bg-cyan-500/10", label: "Ticket update" },
+  ticket_checkpoint_due: { icon: Clock, color: "text-rose-400", bg: "bg-rose-500/10", label: "Promise due" },
   ticket_escalated: { icon: Shield, color: "text-rose-400", bg: "bg-rose-500/10", label: "Escalation" },
   ticket_elevation_alert: { icon: Shield, color: "text-amber-400", bg: "bg-amber-500/10", label: "Elevation handover" },
   nexus_elevate_review: { icon: Shield, color: "text-amber-400", bg: "bg-amber-500/10", label: "Elevation review" },

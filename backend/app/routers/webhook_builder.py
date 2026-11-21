@@ -5,8 +5,13 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_global_scope
-from app.services.webhook_security import redact_webhook_for_response, validate_legacy_webhook_url
-import uuid, random
+from app.services.webhook_security import (
+    assert_outbound_destination,
+    redact_webhook_for_response,
+)
+import time, uuid
+
+import httpx
 
 router = APIRouter(prefix="/webhook-builder", tags=["webhook-builder"])
 
@@ -46,44 +51,9 @@ SAMPLE_PAYLOADS = {
     "invoice.paid": '{"event":"invoice.paid","invoice_id":"INV-001","client":"Acme Corp","amount":3500.00,"paid_at":"{{timestamp}}"}',
 }
 
-def _gen_default_hooks():
-    return [
-        {"id": f"WH-{uuid.uuid4().hex[:6].upper()}", "name": "Slack - Critical Tickets", "trigger": "ticket.created",
-         "method": "POST", "url": "https://hooks.slack.com/services/T00000/B00000/XXXX",
-         "headers": {"Content-Type": "application/json"}, "payload_template": '{"text":"New ticket: {{title}} - Priority: {{priority}}"}',
-         "status": "active", "trigger_count": random.randint(50, 200), "last_triggered": "2026-02-10T08:30:00Z",
-         "created_at": "2026-01-01T00:00:00Z", "created_by": "Admin", "filters": {"priority": ["critical", "high"]},
-         "retry_count": 3, "retry_delay": 30, "log": []},
-        {"id": f"WH-{uuid.uuid4().hex[:6].upper()}", "name": "Teams - Device Alerts", "trigger": "device.offline",
-         "method": "POST", "url": "https://outlook.office.com/webhook/xxxx",
-         "headers": {"Content-Type": "application/json"}, "payload_template": '{"text":"Device offline: {{hostname}} ({{client}})"}',
-         "status": "active", "trigger_count": random.randint(20, 80), "last_triggered": "2026-02-09T15:20:00Z",
-         "created_at": "2026-01-05T00:00:00Z", "created_by": "Admin", "filters": {},
-         "retry_count": 3, "retry_delay": 30, "log": []},
-        {"id": f"WH-{uuid.uuid4().hex[:6].upper()}", "name": "PagerDuty - SLA Breach", "trigger": "sla.breach",
-         "method": "POST", "url": "https://events.pagerduty.com/v2/enqueue",
-         "headers": {"Content-Type": "application/json", "Authorization": "Token token=xxxx"},
-         "payload_template": '{"routing_key":"xxxx","event_action":"trigger","payload":{"summary":"SLA breach: {{ticket_id}}","severity":"critical"}}',
-         "status": "paused", "trigger_count": random.randint(5, 20), "last_triggered": "2026-02-08T12:00:00Z",
-         "created_at": "2026-01-10T00:00:00Z", "created_by": "Admin", "filters": {},
-         "retry_count": 5, "retry_delay": 60, "log": []},
-        {"id": f"WH-{uuid.uuid4().hex[:6].upper()}", "name": "Zapier - Invoice Paid", "trigger": "invoice.paid",
-         "method": "POST", "url": "https://hooks.zapier.com/hooks/catch/xxxx/yyyy",
-         "headers": {"Content-Type": "application/json"}, "payload_template": '{"invoice_id":"{{invoice_id}}","client":"{{client}}","amount":{{amount}}}',
-         "status": "active", "trigger_count": random.randint(30, 100), "last_triggered": "2026-02-10T10:00:00Z",
-         "created_at": "2026-01-15T00:00:00Z", "created_by": "Admin", "filters": {},
-         "retry_count": 3, "retry_delay": 30, "log": []},
-    ]
-
-
 @router.get("/list")
 async def list_webhooks(current_user: dict = Depends(_require_webhook_administration)):
     hooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
-    if not hooks:
-        hooks = _gen_default_hooks()
-        for h in hooks:
-            await db.webhooks.insert_one(h)
-        hooks = await db.webhooks.find({}, {"_id": 0}).to_list(100)
     return [redact_webhook_for_response(hook) for hook in hooks]
 
 
@@ -95,7 +65,7 @@ async def get_event_triggers(current_user: dict = Depends(_require_webhook_admin
 @router.post("/create")
 async def create_webhook(data: dict, current_user: dict = Depends(_require_webhook_administration)):
     try:
-        endpoint_url = validate_legacy_webhook_url(data.get("url"))
+        endpoint_url = await assert_outbound_destination(data.get("url"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     hook = {
@@ -126,7 +96,7 @@ async def update_webhook(hook_id: str, data: dict, current_user: dict = Depends(
     updates = {k: v for k, v in data.items() if k in ["name", "trigger", "method", "url", "headers", "payload_template", "status", "filters", "retry_count", "retry_delay"]}
     if "url" in updates:
         try:
-            updates["url"] = validate_legacy_webhook_url(updates["url"])
+            updates["url"] = await assert_outbound_destination(updates["url"])
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -159,19 +129,65 @@ async def test_webhook(hook_id: str, current_user: dict = Depends(_require_webho
     hook = await db.webhooks.find_one({"id": hook_id}, {"_id": 0})
     if not hook:
         raise HTTPException(status_code=404, detail="Not found")
+
+    try:
+        url = await assert_outbound_destination(hook.get("url"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    configured_headers = hook.get("headers") if isinstance(hook.get("headers"), dict) else {}
+    headers = {str(key): str(value) for key, value in configured_headers.items()}
+    headers.setdefault("Content-Type", "application/json")
     now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "event": "test",
+        "hook_id": hook.get("id"),
+        "hook_name": hook.get("name"),
+        "trigger": hook.get("trigger"),
+        "message": "NexusMSP webhook test delivery",
+        "timestamp": now,
+    }
+
+    started = time.perf_counter()
+    status_code = None
+    transport_error = None
+    try:
+        timeout = httpx.Timeout(10.0, connect=5.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as response:
+                status_code = response.status_code
+    except httpx.HTTPError as exc:
+        transport_error = type(exc).__name__
+    response_time_ms = int(round((time.perf_counter() - started) * 1000))
+
+    success = status_code is not None and 200 <= status_code < 300
+    if success:
+        message = f"Destination accepted the delivery ({status_code} in {response_time_ms} ms)"
+    elif status_code is None:
+        message = f"No response from destination ({transport_error}) after {response_time_ms} ms"
+    elif 300 <= status_code < 400:
+        message = f"Destination returned a redirect ({status_code}); redirects are not followed"
+    else:
+        message = f"Destination rejected the delivery ({status_code})"
+
     test_log = {
         "timestamp": now,
         "type": "test",
-        "status_code": 200,
-        "response_time_ms": random.randint(50, 300),
-        "success": True,
-        "message": "Test delivery successful (simulated)",
+        "status_code": status_code,
+        "response_time_ms": response_time_ms,
+        "success": success,
+        "message": message,
     }
-    await db.webhooks.update_one(
-        {"id": hook_id},
-        {"$push": {"log": {"$each": [test_log], "$slice": -50}}, "$set": {"last_triggered": now}}
-    )
+    update = {
+        "$push": {"log": {"$each": [test_log], "$slice": -50}},
+        "$set": {
+            "last_triggered": now,
+            "last_status": status_code,
+            "last_result": "success" if success else "failed",
+        },
+    }
+    update["$set"]["failure_count"] = 0 if success else (int(hook.get("failure_count") or 0) + 1)
+    await db.webhooks.update_one({"id": hook_id}, update)
     return test_log
 
 

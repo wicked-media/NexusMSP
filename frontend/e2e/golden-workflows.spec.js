@@ -81,17 +81,59 @@ async function browserCall(page, token, method, path, data) {
   );
 }
 
+async function typeIntoLogin(page, testId, value) {
+  const field = page.getByTestId(testId);
+  await field.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Backspace");
+  await field.pressSequentially(value, { delay: 5 });
+}
+
+async function fillLoginCredentials(page, credentials) {
+  // Branding and auth bootstrap can replace the login form after first paint.
+  // Use real keyboard input so the controlled React inputs see the events, and
+  // verify both values before submitting. Refill only when an initialization
+  // render has replaced them.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await typeIntoLogin(page, "login-email-input", credentials.email);
+    await typeIntoLogin(page, "login-password-input", credentials.password);
+    const values = await page.evaluate(() => ({
+      email: document.querySelector('[data-testid="login-email-input"]')?.value,
+      password: document.querySelector('[data-testid="login-password-input"]')?.value,
+    }));
+    if (values.email === credentials.email && values.password === credentials.password) return;
+    await page.waitForTimeout(100);
+  }
+  throw new Error("Login form reset before the credentials stabilized");
+}
+
 async function login(page, credentials) {
+  // The production bundle renders the branded login experience from safe local
+  // defaults and then revalidates branding. Start waiting before navigation so
+  // the controlled fields are only filled after that replacement has settled.
+  const brandingLoaded = page.waitForResponse(
+    (candidate) => candidate.url().includes("/api/settings/branding/public")
+      && candidate.request().method() === "GET"
+      && candidate.status() === 200,
+    { timeout: 15000 },
+  ).catch(() => null);
   await page.goto("/login");
-  await expect(page.getByTestId("login-page")).toBeVisible();
-  await page.getByTestId("login-email-input").fill(credentials.email);
-  await page.getByTestId("login-password-input").fill(credentials.password);
+  await expect(page.getByTestId("login-page")).toBeVisible({ timeout: 15000 });
+  await brandingLoaded;
+  await expect(page.getByTestId("login-email-input")).toBeVisible({ timeout: 15000 });
+  await page.waitForFunction(
+    () => /secure workspace access/i.test(document.body.innerText || ""),
+    null,
+    { timeout: 15000 },
+  );
+  await fillLoginCredentials(page, credentials);
   const [response] = await Promise.all([
     page.waitForResponse((candidate) => candidate.url().endsWith("/api/auth/login")),
     page.getByTestId("login-submit-button").click(),
   ]);
   expect(response.status()).toBe(200);
   const payload = await response.json();
+  expect(payload.token).toBeTruthy();
   await expect(page).not.toHaveURL(/\/login(?:\?|$)/);
   return payload.token;
 }
@@ -325,7 +367,7 @@ test("2 remote request fails honestly when transport is unavailable and masks fo
   const failures = observeRuntime(page);
   const token = await login(page, fixture.users.A);
   await page.goto(`/nexus-remote?device=${fixture.devices.A.id}&ticket=${fixture.tickets.A.id}`);
-  await expect(page.getByTestId("remote-access-page")).toBeVisible();
+  await expect(page.getByTestId("native-remote-access-page")).toBeVisible();
   const unavailable = await browserCall(page, token, "POST", `/devices/${fixture.devices.A.id}/remote-sessions/start`, {
     ticket_id: fixture.tickets.A.id,
     provider: "rustdesk",
@@ -334,8 +376,8 @@ test("2 remote request fails honestly when transport is unavailable and masks fo
     purpose: "Disposable browser acceptance",
     idempotency_key: `browser-remote-${runId}`,
   });
-  expect(unavailable.status).toBe(409);
-  expect(unavailable.body.detail).toMatch(/not enabled|not enrolled/i);
+  expect(unavailable.status).toBe(410);
+  expect(unavailable.body.detail).toMatch(/retired/i);
   const foreign = await browserCall(page, token, "POST", `/devices/${fixture.devices.B.id}/remote-sessions/start`, {
     provider: "rustdesk",
     consent_confirmed: true,
@@ -399,8 +441,10 @@ test("4 invoice and provider handoff state remain client scoped", async ({ page,
   const token = await login(page, fixture.users.A);
   await page.goto("/invoices");
   await expect(page.getByTestId("invoices-page")).toBeVisible();
-  await expect(page.getByText(fixture.invoices.A.invoice_number, { exact: false }).first()).toBeVisible();
-  await expect(page.getByText(fixture.invoices.B.invoice_number, { exact: false })).toHaveCount(0);
+  const ownInvoiceRow = page.getByTestId(`invoice-row-${fixture.invoices.A.id}`);
+  await expect(ownInvoiceRow).toBeVisible();
+  await expect(ownInvoiceRow).toContainText(fixture.invoices.A.invoice_name);
+  await expect(page.getByTestId(`invoice-row-${fixture.invoices.B.id}`)).toHaveCount(0);
   const foreign = await browserCall(page, token, "GET", `/invoices/${fixture.invoices.B.id}`);
   expectDenied(foreign);
   const adminContext = await browser.newContext();
