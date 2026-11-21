@@ -110,3 +110,37 @@ result: /api/ready returned 503 while warming up, then 200 at 8s after start;
         boot reconciliation completed in 1.2s.
 conclusion: application startup is not the cause. The failure is in the
             compose/container path, not in Nexus application boot.
+
+===== 2026-11-21 acceptance readiness diagnosis (run 44855166233) =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44855166233
+job: tenant-boundary-acceptance (136696121479), commit ef016fd
+API container started 02:23:42Z. Captured before teardown:
+  02:23:47.301 NexusOps API v3.0.0 started successfully
+  02:23:47.440 NexusMSP boot reconciliation complete
+  /ready 200 at 02:23:52Z, 02:24:22Z, 02:24:53Z, 02:25:23Z
+  compose port api 8000 -> "invalid IP:0"
+  compose exec api /api/ready -> status 200
+  host GET http://127.0.0.1:18000/api/ready -> never connected
+  host wait failed after 120s at 02:25:44Z
+cause: docker-compose.acceptance.yml attached api only to the `acceptance`
+       network with internal: true. Docker silently ignores `ports:` for a
+       container attached only to internal networks, so the 127.0.0.1:18000
+       mapping never existed. The API itself was healthy.
+fix: api now joins `acceptance_publish`, a non-internal network used only for
+     the host-loopback publish; mongo remains internal-only.
+
+===== 2026-11-21 fixed run: all four images + acceptance (44856147536) =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44856147536
+commit: ddc88ef8a69a87ff8cca7f8ff97f0a9e5b733cd1
+PR: https://github.com/wicked-media/NexusMSP/pull/3
+container-build (136698722482), all steps SUCCESS:
+  Build API image: 02:29:22Z-02:30:37Z
+  Build production API image with Agent release components: 02:30:37Z-02:31:54Z
+  Build release API image from a verified signed-agent fixture: 02:31:54Z-02:33:06Z
+  Build web image: 02:33:06Z-02:35:24Z
+  Validate production compose model: 02:35:24Z
+tenant-boundary-acceptance (136699291589), SUCCESS:
+  step 02:31:50Z-02:33:56Z
+  pytest: 1 passed in 2.73s at 02:33:55Z
+  runner: [Nexus acceptance] Passed.
+run conclusion: success at 02:35:27Z.

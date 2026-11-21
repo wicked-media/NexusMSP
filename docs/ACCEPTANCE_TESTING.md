@@ -209,13 +209,17 @@ and the promotion drill, is recorded in the 2026-11-18 cycle record of
 `test_reports/full-matrix-2026-11-18/`. These directories are local and ignored
 by Git. No deployment or production-readiness claim follows from this run;
 provider sandbox acceptance, container builds and deployment-host gates remain
-separate. A 2026-11-21 CI probe of the current worktree (temporary draft PR #3,
-commit `2721e46`) built all four images — API, production API, release API from
-a verified signed-agent fixture, and web — and validated the production Compose
-model on `ubuntu-latest` (run `44853975650`, job `136691671613`). Its separate
-`tenant-boundary-acceptance` job did not pass: the disposable API container
-never reached `/api/ready` within 120s, and API logs were not retained, so that
-runtime acceptance remains open. The same job failed identically on base commit
-`17758d3` in run `41771659755`, so it predates the worktree. The exact local commands and errors are in
+separate. A 2026-11-21 CI probe of the current worktree (temporary draft PR #3)
+built all four images — API, production API, release API from a verified
+signed-agent fixture, and web — and validated the production Compose model on
+`ubuntu-latest` (run `44856147536`, job `136698722482`, commit `ddc88ef`). Its
+`tenant-boundary-acceptance` job also passed: `1 passed in 2.73s`, step
+02:31:50Z-02:33:56Z. The earlier failure on commit `2721e46` was diagnosed from
+captured container logs (run `44855166233`): `/api/ready` returned 200 inside
+the container while `compose port api 8000` returned `invalid IP:0` and the host
+probe timed out, because Docker ignores published ports on an internal-only
+network. `docker-compose.acceptance.yml` now attaches the API to a second
+non-internal network for the loopback publish; MongoDB remains internal-only.
+Exact logs and step times are in
 `test_reports/full-matrix-2026-11-18/container-remediation.log` and the
 readiness checklist's cycle record.

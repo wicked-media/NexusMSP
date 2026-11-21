@@ -424,6 +424,10 @@ try {
         }
         throw
     }
+    if (-not $UseLocalMongo) {
+        $publishedApiPort = & $script:composeExecutable @script:composePrefix @composeProjectArguments port api 8000
+        Write-Host "[Nexus acceptance] API readiness confirmed at $apiUrl/api/ready; published port: $publishedApiPort"
+    }
     if ($Browser) {
         Write-Host "[Nexus acceptance] Running authenticated two-client browser acceptance across eight golden workflows..."
         & pnpm --dir (Join-Path $root "frontend") exec playwright test e2e/golden-workflows.spec.js
