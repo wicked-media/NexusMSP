@@ -146,15 +146,16 @@ tenant-boundary-acceptance (136699291589), SUCCESS:
   runner: [Nexus acceptance] Passed.
 run conclusion: success at 02:35:27Z.
 attribution: this run validates the network fix on ddc88ef; it is not the
-             code-head run. The validated-head run is recorded below.
+             validated-code run. That run is recorded below.
 
-===== 2026-11-21 validated-head run: all four images + acceptance (44856885006) =====
+===== 2026-11-21 validated-code run (11b4864): all four images + acceptance (44856885006) =====
 run: https://github.com/wicked-media/NexusMSP/actions/runs/44856885006
 validated code commit: 11b48640b065a53be38b93fdbe466d923ab0b38f
 PR: https://github.com/wicked-media/NexusMSP/pull/3
-attribution: this is the run on the code head. The evidence update commit is
-             documentation-only and changes no application, container,
-             workflow or test file.
+attribution: this is the run on validated code commit 11b4864. The evidence-only
+             commit carrying this log is documentation-only and changes no
+             application, container, workflow or test file; CI re-runs the
+             same gates on that commit.
 container-build (136701052647), all steps SUCCESS; job 02:37:13Z-02:45:52Z:
   Build API image: 02:37:17Z-02:38:56Z
   Build production API image with Agent release components: 02:38:56Z-02:40:42Z
