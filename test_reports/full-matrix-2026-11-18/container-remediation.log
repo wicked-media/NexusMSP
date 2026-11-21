@@ -65,10 +65,11 @@ steps:
   Build release API image: NOT PRESENT IN THE JOB
 reason: the release API step exists only in the uncommitted worktree ci.yml;
         HEAD's ci.yml has five container-build steps, not six.
-current tree: backend/Dockerfile.production and .github/workflows/ci.yml are
-        modified locally, so this CI run does not cover those changes.
+local tree at that time: backend/Dockerfile.production and
+        .github/workflows/ci.yml were modified locally, so this CI run does not
+        cover those changes.
 
-===== 2026-11-21 CI four-build probe (current worktree) =====
+===== 2026-11-21 CI four-build probe (commit 2721e46) =====
 branch: ci/container-builds-2026-11-21
 commit: 2721e46ec4c527d50a6a91c42c1c84a9f8924675
 PR: https://github.com/wicked-media/NexusMSP/pull/3 (draft probe)
@@ -82,8 +83,8 @@ steps:
   Validate production compose model: SUCCESS at 02:11:37Z
 job conclusion: success at 02:11:40Z
 result: 4/4 images built on a Docker host with subordinate IDs; the production
-        Compose model validates. The commit contains the current worktree
-        source, Dockerfiles and workflow changes; untracked screenshot
+        Compose model validates. The commit contains the worktree source,
+        Dockerfiles and workflow changes at that time; untracked screenshot
         artifacts were excluded.
 
 same run, other jobs:
@@ -129,7 +130,7 @@ cause: docker-compose.acceptance.yml attached api only to the `acceptance`
 fix: api now joins `acceptance_publish`, a non-internal network used only for
      the host-loopback publish; mongo remains internal-only.
 
-===== 2026-11-21 fixed run: all four images + acceptance (44856147536) =====
+===== 2026-11-21 fix-validation run (ddc88ef): all four images + acceptance (44856147536) =====
 run: https://github.com/wicked-media/NexusMSP/actions/runs/44856147536
 commit: ddc88ef8a69a87ff8cca7f8ff97f0a9e5b733cd1
 PR: https://github.com/wicked-media/NexusMSP/pull/3
@@ -144,3 +145,25 @@ tenant-boundary-acceptance (136699291589), SUCCESS:
   pytest: 1 passed in 2.73s at 02:33:55Z
   runner: [Nexus acceptance] Passed.
 run conclusion: success at 02:35:27Z.
+attribution: this run validates the network fix on ddc88ef; it is not the
+             code-head run. The validated-head run is recorded below.
+
+===== 2026-11-21 validated-head run: all four images + acceptance (44856885006) =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44856885006
+validated code commit: 11b48640b065a53be38b93fdbe466d923ab0b38f
+PR: https://github.com/wicked-media/NexusMSP/pull/3
+attribution: this is the run on the code head. The evidence update commit is
+             documentation-only and changes no application, container,
+             workflow or test file.
+container-build (136701052647), all steps SUCCESS; job 02:37:13Z-02:45:52Z:
+  Build API image: 02:37:17Z-02:38:56Z
+  Build production API image with Agent release components: 02:38:56Z-02:40:42Z
+  Build release API image from a verified signed-agent fixture: 02:40:42Z-02:42:20Z
+  Build web image: 02:42:20Z-02:45:50Z
+  Validate production compose model: 02:45:50Z
+tenant-boundary-acceptance (136701576056), SUCCESS; job 02:39:05Z-02:42:10Z:
+  acceptance step 02:39:55Z-02:42:08Z
+  readiness confirmed 02:42:03Z; published port: 127.0.0.1:18000
+  pytest: 1 passed in 2.26s at 02:42:06Z
+  runner: [Nexus acceptance] Passed.
+run conclusion: success at 02:45:53Z.

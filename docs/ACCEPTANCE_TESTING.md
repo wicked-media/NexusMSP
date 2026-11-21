@@ -209,17 +209,21 @@ and the promotion drill, is recorded in the 2026-11-18 cycle record of
 `test_reports/full-matrix-2026-11-18/`. These directories are local and ignored
 by Git. No deployment or production-readiness claim follows from this run;
 provider sandbox acceptance, container builds and deployment-host gates remain
-separate. A 2026-11-21 CI probe of the current worktree (temporary draft PR #3)
-built all four images — API, production API, release API from a verified
-signed-agent fixture, and web — and validated the production Compose model on
-`ubuntu-latest` (run `44856147536`, job `136698722482`, commit `ddc88ef`). Its
-`tenant-boundary-acceptance` job also passed: `1 passed in 2.73s`, step
-02:31:50Z-02:33:56Z. The earlier failure on commit `2721e46` was diagnosed from
-captured container logs (run `44855166233`): `/api/ready` returned 200 inside
-the container while `compose port api 8000` returned `invalid IP:0` and the host
-probe timed out, because Docker ignores published ports on an internal-only
-network. `docker-compose.acceptance.yml` now attaches the API to a second
-non-internal network for the loopback publish; MongoDB remains internal-only.
-Exact logs and step times are in
-`test_reports/full-matrix-2026-11-18/container-remediation.log` and the
+separate. On 2026-11-21, CI run `44856885006` on validated code commit
+`11b4864` (temporary draft PR #3) built all four images — API, production API,
+release API from a verified signed-agent fixture, and web — and validated the
+production Compose model on `ubuntu-latest` (job `136701052647`, times
+02:37:17Z-02:45:50Z). Its `tenant-boundary-acceptance` job (`136701576056`)
+also passed: step 02:39:55Z-02:42:08Z, `/api/ready` confirmed at 02:42:03Z with
+`published port: 127.0.0.1:18000`, and `1 passed in 2.26s`. A separate
+fix-validation run `44856147536` on commit `ddc88ef` passed the same gates
+(`1 passed in 2.73s` at 02:33:55Z). The earlier failure on commit `2721e46` was
+diagnosed from captured container logs (run `44855166233`): `/api/ready`
+returned 200 inside the container while `compose port api 8000` returned
+`invalid IP:0` and the host probe timed out, because Docker ignores published
+ports on an internal-only network. `docker-compose.acceptance.yml` now attaches
+the API to a second non-internal network for the loopback publish; MongoDB
+remains internal-only. The evidence commit that records this run is
+documentation-only; CI re-runs the same gates on it. Exact logs and step times
+are in `test_reports/full-matrix-2026-11-18/container-remediation.log` and the
 readiness checklist's cycle record.
