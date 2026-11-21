@@ -74,14 +74,31 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Install Authenticode verifier
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/osslsigncode"
+          curl -fsSL \
+            "https://github.com/mtrojnar/osslsigncode/releases/download/2.16/osslsigncode-2.16-linux-amd64.tar.gz" \
+            -o "${RUNNER_TEMP}/osslsigncode.tar.gz"
+          echo "109c711ac07fc2ce1e3756d6247d92bbf23e55c4aa809a4b34cca3c4f2913fc6  ${RUNNER_TEMP}/osslsigncode.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/osslsigncode.tar.gz" -C "${RUNNER_TEMP}/osslsigncode" --strip-components=1
+          echo "${RUNNER_TEMP}/osslsigncode" >> "$GITHUB_PATH"
+
       - name: Resolve and verify signed Windows Agent bundle
         id: signed_agent
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUESTED_RUN_ID: ${{ inputs.agent_run_id }}
+          EXPECTED_SIGNER_THUMBPRINT: ${{ vars.NEXUS_AGENT_SIGNER_THUMBPRINT }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [ -z "${EXPECTED_SIGNER_THUMBPRINT}" ]; then
+            echo "::error::Repository variable NEXUS_AGENT_SIGNER_THUMBPRINT must pin the expected Authenticode signer SHA-1 thumbprint before a container release."
+            exit 1
+          fi
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "${REQUESTED_RUN_ID}" ] && [ "${GITHUB_REF_TYPE}" != "tag" ]; then
             echo "::error::A manual container release from a branch must pass agent_run_id; dispatch from the release tag to auto-resolve the signed bundle."
@@ -132,7 +149,10 @@ jobs:
 
           rm -rf signed-bundle
           gh run download "${RUN_ID}" --name "${ARTIFACT}" --dir signed-bundle
-          VERSION=$(python3 scripts/verify_signed_agent_bundle.py --bundle signed-bundle --expected-commit "${RUN_SHA}")
+          VERSION=$(python3 scripts/verify_signed_agent_bundle.py \
+            --bundle signed-bundle \
+            --expected-commit "${RUN_SHA}" \
+            --expected-signer-thumbprint "${EXPECTED_SIGNER_THUMBPRINT}")
           if [ "${ARTIFACT}" != "nexus-agent-windows-${VERSION}" ]; then
             echo "::error::Artifact ${ARTIFACT} does not match signed evidence version ${VERSION}."
             exit 1
@@ -142,6 +162,7 @@ jobs:
             echo "version=${VERSION}"
             echo "run_id=${RUN_ID}"
             echo "commit=${RUN_SHA}"
+            echo "signer_thumbprint=${EXPECTED_SIGNER_THUMBPRINT}"
           } >> "$GITHUB_OUTPUT"
           echo "Verified signed Windows Agent ${VERSION} from run ${RUN_ID} (${RUN_SHA})."
 
@@ -222,7 +243,10 @@ jobs:
         with:
           context: .
           file: backend/Dockerfile.release
-          build-args: NEXUS_AGENT_VERSION=${{ steps.signed_agent.outputs.version }}
+          build-args: |
+            NEXUS_AGENT_VERSION=${{ steps.signed_agent.outputs.version }}
+            NEXUS_AGENT_COMMIT=${{ steps.signed_agent.outputs.commit }}
+            NEXUS_AGENT_SIGNER_THUMBPRINT=${{ steps.signed_agent.outputs.signer_thumbprint }}
           push: true
           tags: ${{ steps.staging_api.outputs.tags }}
           labels: ${{ steps.meta_api.outputs.labels }}
