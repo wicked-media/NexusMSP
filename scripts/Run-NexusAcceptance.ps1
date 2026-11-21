@@ -102,6 +102,19 @@ function Wait-NexusAcceptanceApi {
     throw "The disposable Nexus acceptance API did not reach /api/ready within 120 seconds."
 }
 
+function Write-NexusAcceptanceComposeDiagnostics {
+    Write-Warning "[Nexus acceptance] Compose diagnostics follow before cleanup:"
+    & $script:composeExecutable @script:composePrefix @composeProjectArguments ps --all | Out-Host
+    foreach ($service in @("api", "mongo")) {
+        Write-Host "--- $service logs (tail 200) ---"
+        & $script:composeExecutable @script:composePrefix @composeProjectArguments logs --no-color --tail 200 $service | Out-Host
+    }
+    Write-Host "--- published api port mapping ---"
+    & $script:composeExecutable @script:composePrefix @composeProjectArguments port api 8000 | Out-Host
+    Write-Host "--- api internal /api/ready probe ---"
+    & $script:composeExecutable @script:composePrefix @composeProjectArguments exec -T api python -c "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=5); print('status', response.status); print(response.read().decode()[:800])" | Out-Host
+}
+
 function Test-NexusComposeRuntime {
     param(
         [Parameter(Mandatory = $true)]
@@ -394,6 +407,7 @@ try {
         $composeAttempted = $true
         $composeExitCode = Invoke-NexusAcceptanceCompose up --build --detach
         if ($composeExitCode -ne 0) {
+            Write-NexusAcceptanceComposeDiagnostics
             throw "The selected Compose runtime could not start the disposable acceptance environment."
         }
     }
@@ -404,6 +418,9 @@ try {
     catch {
         if ($UseLocalMongo) {
             Write-NexusAcceptanceApiDiagnostics -LogDirectory $localApiLogDirectory
+        }
+        else {
+            Write-NexusAcceptanceComposeDiagnostics
         }
         throw
     }

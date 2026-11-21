@@ -1,0 +1,112 @@
+$ id
+uid=196587368(fbbb628c84f0fe689b45a11f64) gid=1001(freebuff) groups=1001(freebuff)
+
+$ getent group docker
+docker:x:103:ubuntu
+
+$ stat -c "%U %G %a %n" /var/run/docker.sock
+root docker 660 /var/run/docker.sock
+
+$ sudo -n true
+sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+sudo: If sudo is running in a container, you may need to adjust the container configuration to disable the flag.
+exit=1
+
+$ su -s /bin/sh ubuntu -c id </dev/null
+Password: su: Authentication failure
+exit=1
+
+$ ctr version
+Client:
+  Version:  2.2.1
+  Revision: 
+  Go version: go1.24.13
+
+$ grep current-user /etc/subuid /etc/subgid
+no subordinate-ID entry
+
+$ command -v podman buildah newuidmap newgidmap
+podman: missing
+buildah: missing
+newuidmap: missing
+newgidmap: missing
+
+$ unshare -Ur true
+exit=0
+
+$ docker compose -f docker-compose.production.yml config --quiet
+exit=0
+
+===== 2026-11-19 post-restart Docker host re-check =====
+identity: uid=196587368 gid=1001(freebuff), supplementary groups: freebuff
+/var/run/docker.sock: srw-rw---- root:docker
+docker info: "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
+/etc/subuid: ubuntu:100000:65536; freebuff-git:165536:65536; no entry for this account
+/etc/subgid: same two entries; no entry for this account
+docker context: only default unix:///var/run/docker.sock
+DOCKER_HOST/BUILDKIT_HOST: unset; no DinD hostname or TCP 2375/2376 endpoint
+sg docker: "Password: Invalid password"
+sudo -n: blocked by no_new_privs
+newuidmap/newgidmap: not installed
+result: API and web were attempted earlier and failed at image layer registration
+        (Lchown /etc/gshadow and /etc/shadow, UID 0, GID 42, invalid argument).
+        Production API and release API were not attempted because the same
+        base-layer prerequisite fails. The four-build matrix remains blocked;
+        no image was produced.
+
+===== 2026-11-19 existing CI Docker-host evidence =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/41771659755
+job: container-build (127182153198), commit 17758d3, runner ubuntu-latest
+steps:
+  Build API image: SUCCESS
+  Build production API image with Agent release components: SUCCESS
+  Build web image: SUCCESS
+  Validate production compose model: SUCCESS
+  Build release API image: NOT PRESENT IN THE JOB
+reason: the release API step exists only in the uncommitted worktree ci.yml;
+        HEAD's ci.yml has five container-build steps, not six.
+current tree: backend/Dockerfile.production and .github/workflows/ci.yml are
+        modified locally, so this CI run does not cover those changes.
+
+===== 2026-11-21 CI four-build probe (current worktree) =====
+branch: ci/container-builds-2026-11-21
+commit: 2721e46ec4c527d50a6a91c42c1c84a9f8924675
+PR: https://github.com/wicked-media/NexusMSP/pull/3 (draft probe)
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44853975650
+job: container-build (136691671613), runner ubuntu-latest
+steps:
+  Build API image: SUCCESS at 02:07:10Z
+  Build production API image with Agent release components: SUCCESS at 02:08:18Z
+  Build release API image from a verified signed-agent fixture: SUCCESS at 02:09:17Z
+  Build web image: SUCCESS at 02:11:37Z
+  Validate production compose model: SUCCESS at 02:11:37Z
+job conclusion: success at 02:11:40Z
+result: 4/4 images built on a Docker host with subordinate IDs; the production
+        Compose model validates. The commit contains the current worktree
+        source, Dockerfiles and workflow changes; untracked screenshot
+        artifacts were excluded.
+
+same run, other jobs:
+  backend: SUCCESS
+  frontend: SUCCESS
+  agent: SUCCESS
+  promotion-recovery-drill: SUCCESS
+  tenant-boundary-acceptance: FAILURE (job 136692274500)
+    step: Disposable two-client API acceptance, 02:08:44Z-02:12:12Z
+    error: The disposable Nexus acceptance API did not reach /api/ready within
+           120 seconds.
+    note: the API container started at 02:10:10Z; the runner removed the
+          Compose project at teardown without retaining API container logs, so
+          the readiness failure cause is not established.
+    prior: the same job failed identically on base commit 17758d3 in run
+           41771659755 (attempt 2): API container started 10:14:56Z and the
+           /api/ready wait timed out at 10:16:58Z. The failure predates this
+           worktree.
+
+===== 2026-11-21 local API readiness reproduction =====
+environment: same env as docker-compose.acceptance.yml api service; host
+             Python 3.12.3, MongoDB 7.0.14, loopback Mongo, no container
+result: /api/ready returned 503 while warming up, then 200 at 8s after start;
+        boot reconciliation completed in 1.2s.
+conclusion: application startup is not the cause. The failure is in the
+            compose/container path, not in Nexus application boot.
