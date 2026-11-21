@@ -3,22 +3,52 @@
 # Unlike Dockerfile.production (which compiles source components for local and
 # CI builds), this image must be built with a downloaded, already-signed agent
 # artifact at ./signed-bundle. The verification stage fails closed when the
-# bundle is unsigned, incomplete, tampered with, or bound to another commit.
+# bundle is unsigned, incomplete, tampered with, signed by an unpinned signer,
+# missing a valid timestamp, or bound to another commit.
 
 FROM python:3.12-slim AS verify-signed-agent
 
 ARG NEXUS_AGENT_VERSION
+ARG NEXUS_AGENT_COMMIT
+ARG NEXUS_AGENT_SIGNER_THUMBPRINT
+# Optional CA bundle for a private code-signing chain. The expected signer
+# thumbprint is still pinned; this only supplies the chain that signs it.
+ARG NEXUS_AGENT_CA_FILE=""
+ARG OSSLSIGNCODE_VERSION=2.16
+ARG OSSLSIGNCODE_SHA256=109c711ac07fc2ce1e3756d6247d92bbf23e55c4aa809a4b34cca3c4f2913fc6
 
 WORKDIR /verify
 
-RUN test -n "$NEXUS_AGENT_VERSION"
+RUN test -n "$NEXUS_AGENT_VERSION" \
+    && test -n "$NEXUS_AGENT_COMMIT" \
+    && test -n "$NEXUS_AGENT_SIGNER_THUMBPRINT"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# The release gate uses the statically linked upstream Linux build. Pin both
+# the version and the archive digest so the verifier itself is reproducible.
+RUN curl -fsSL \
+        "https://github.com/mtrojnar/osslsigncode/releases/download/${OSSLSIGNCODE_VERSION}/osslsigncode-${OSSLSIGNCODE_VERSION}-linux-amd64.tar.gz" \
+        -o /tmp/osslsigncode.tar.gz \
+    && echo "${OSSLSIGNCODE_SHA256}  /tmp/osslsigncode.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/osslsigncode.tar.gz -C /opt \
+    && ln -s "/opt/osslsigncode-${OSSLSIGNCODE_VERSION}-linux-amd64/osslsigncode" /usr/local/bin/osslsigncode \
+    && rm -f /tmp/osslsigncode.tar.gz
 
 COPY scripts/verify_signed_agent_bundle.py ./verify_signed_agent_bundle.py
 COPY signed-bundle ./signed-bundle
 
-RUN python ./verify_signed_agent_bundle.py \
-    --bundle ./signed-bundle \
-    --expected-version "$NEXUS_AGENT_VERSION"
+RUN set -- \
+        --bundle ./signed-bundle \
+        --expected-version "$NEXUS_AGENT_VERSION" \
+        --expected-commit "$NEXUS_AGENT_COMMIT" \
+        --expected-signer-thumbprint "$NEXUS_AGENT_SIGNER_THUMBPRINT"; \
+    if [ -n "$NEXUS_AGENT_CA_FILE" ]; then \
+        set -- "$@" --ca-file "$NEXUS_AGENT_CA_FILE"; \
+    fi; \
+    python ./verify_signed_agent_bundle.py "$@"
 
 
 FROM python:3.12-slim AS runtime

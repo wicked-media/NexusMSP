@@ -93,9 +93,16 @@ service, Client Chat, Tray and Native Remote Companion from checked-in source fo
 local and CI validation; it must never copy a developer's `agent/dist` or
 per-device `config.json` into the runtime image. The published API image uses
 `backend/Dockerfile.release` instead: the container release resolves the signed
-Windows Agent release artifact, verifies its version, commit, signer evidence and
-per-file SHA-256 sums, and fails closed before the runtime image is built unless
-all four components are Authenticode-signed and intact. Before a fleet rollout,
+Windows Agent release artifact, requires its bundle VERSION to agree with the
+signing evidence and artifact name and its source commit to match the agent
+release run, pins the Authenticode signer through the repository
+variable `NEXUS_AGENT_SIGNER_THUMBPRINT`, verifies every PE with `osslsigncode`
+(trust chain, Authenticode message digest and RFC 3161 timestamp), and rechecks
+the per-file SHA-256 sums against both the evidence and `SHA256SUMS.txt`. The
+build fails closed before the runtime image is built if a component is unsigned,
+tampered, signed by another signer, missing a valid timestamp, or bound to a
+different commit or version. The evidence JSON's `signed`/`verified` flags are
+not the proof and cannot make a bundle pass. Before a fleet rollout,
 retain evidence for the signed bundle, installer contents and ACLs, pilot
 install, upgrade, rollback, and post-reboot heartbeat. Application-level
 update-manifest verification does not replace code signing. The signing path

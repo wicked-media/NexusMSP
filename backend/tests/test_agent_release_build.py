@@ -62,20 +62,58 @@ def test_published_api_image_requires_a_verified_signed_agent_bundle():
     assert "COPY scripts/verify_signed_agent_bundle.py" in dockerfile
     assert "COPY signed-bundle" in dockerfile
     assert "--expected-version" in dockerfile
+    assert "--expected-commit" in dockerfile
+    assert "--expected-signer-thumbprint" in dockerfile
+    assert "osslsigncode" in dockerfile
+    assert "NEXUS_AGENT_COMMIT" in dockerfile
+    assert "NEXUS_AGENT_SIGNER_THUMBPRINT" in dockerfile
+    assert 'test -n "$NEXUS_AGENT_COMMIT"' in dockerfile
+    assert 'test -n "$NEXUS_AGENT_SIGNER_THUMBPRINT"' in dockerfile
+    assert "NEXUS_AGENT_CA_FILE" in dockerfile
     assert "COPY --from=verify-signed-agent" in dockerfile
     assert "NEXUS_AGENT_VERSION_FILE=/app/agent/dist/VERSION" in dockerfile
 
     assert "actions: read" in workflow
     assert "agent_run_id" in workflow
     assert "verify_signed_agent_bundle.py" in workflow
+    assert "--expected-commit" in workflow
+    assert "--expected-signer-thumbprint" in workflow
+    assert "Install Authenticode verifier" in workflow
+    assert "osslsigncode-2.16-linux-amd64.tar.gz" in workflow
     assert "backend/Dockerfile.release" in workflow
     assert "nexus-agent-windows-" in workflow
     assert "NEXUS_AGENT_VERSION=" in workflow
+    assert "NEXUS_AGENT_COMMIT=" in workflow
+    assert "NEXUS_AGENT_SIGNER_THUMBPRINT=" in workflow
+    assert "vars.NEXUS_AGENT_SIGNER_THUMBPRINT" in workflow
+    assert 'if [ -z "${EXPECTED_SIGNER_THUMBPRINT}" ]' in workflow
     assert "git merge-base --is-ancestor" in workflow
     assert "Install crane for digest-preserving promotion" in workflow
     assert "scripts/promote_signed_images.sh" in workflow
     assert "Upload promotion manifest" in workflow
     assert "staging-" in workflow
+
+
+def test_authenticode_verifier_pin_is_consistent_across_build_paths():
+    dockerfile = (ROOT / "backend" / "Dockerfile.release").read_text(encoding="utf-8")
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github" / "workflows" / "release-images.yml").read_text(encoding="utf-8")
+    digest = "109c711ac07fc2ce1e3756d6247d92bbf23e55c4aa809a4b34cca3c4f2913fc6"
+
+    for text in (dockerfile, ci, release):
+        assert digest in text
+        assert "2.16" in text
+
+
+def test_ci_exercises_the_real_signed_gate_with_a_test_signed_fixture():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "signed-valid.exe" in workflow
+    assert "signer-a.crt" in workflow
+    assert "Install Authenticode verifier" in workflow
+    assert "NEXUS_AGENT_CA_FILE" in workflow
+    assert "NEXUS_AGENT_SIGNER_THUMBPRINT" in workflow
+    assert "NEXUS_AGENT_COMMIT" in workflow
 
 
 def test_release_tags_are_promoted_only_after_both_signed_images():
@@ -98,6 +136,8 @@ def test_release_tags_are_promoted_only_after_both_signed_images():
     assert api_build < api_sign < web_build < web_sign < record < upload < promote
     assert steps[api_build]["with"]["file"] == "backend/Dockerfile.release"
     assert steps[api_build]["with"]["build-args"].startswith("NEXUS_AGENT_VERSION=")
+    assert "NEXUS_AGENT_COMMIT=" in steps[api_build]["with"]["build-args"]
+    assert "NEXUS_AGENT_SIGNER_THUMBPRINT=" in steps[api_build]["with"]["build-args"]
     assert "staging_api" in steps[api_build]["with"]["tags"]
     assert "meta_api" not in steps[api_build]["with"]["tags"]
     assert steps[web_build]["with"]["file"] == "frontend/Dockerfile"

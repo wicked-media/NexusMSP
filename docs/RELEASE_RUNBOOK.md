@@ -29,9 +29,9 @@ complements `docs/PRODUCTION_READINESS.md` (§4 backup proof, §7 rollback) and
    version. The workflow now builds `nexus-agent.exe`, `nexus-client-chat.exe`,
    `nexus-agent-tray.exe`, `nexus-remote-companion.exe` and the release
    `VERSION`, signs and verifies all four executables, and uploads the signing
-   evidence plus `SHA256SUMS.txt`. Older agent artifacts without the version and
-   commit evidence are rejected; rerun the Agent release before cutting the
-   container release.
+   evidence plus `SHA256SUMS.txt`. Older agent artifacts without the bundle
+   VERSION or a matching source commit are rejected; rerun the Agent release
+   before cutting the container release.
 3. Either push a tag `v<version>` (for example `v1.4.0`), or run the
    **NexusMSP container release** workflow manually with the `version` input.
    For a deterministic API image, also pass the successful `agent_run_id` from
@@ -39,11 +39,16 @@ complements `docs/PRODUCTION_READINESS.md` (§4 backup proof, §7 rollback) and
    reachable from the release commit and fails if no signed bundle is found.
    A manual dispatch from a branch must pass `agent_run_id`; dispatch from the
    release tag when relying on automatic resolution.
-4. The API image is built from `backend/Dockerfile.release`, which downloads
-   and verifies that signed bundle before the runtime stage. The build fails
-   closed if the artifact is unsigned, incomplete, tampered with, or bound to a
-   different commit/version. The web image continues to use
-   `frontend/Dockerfile`.
+4. The API image is built from `backend/Dockerfile.release`, which validates
+   that signed bundle before the runtime stage. The verification stage requires
+   the signer to match the repository variable
+   `NEXUS_AGENT_SIGNER_THUMBPRINT`, verifies every PE with `osslsigncode`
+   (trust chain, Authenticode message digest and RFC 3161 timestamp), and
+   rechecks the bundle VERSION against its evidence and artifact name, the
+   source commit against the agent run, and per-file SHA-256 sums. The build
+   fails closed if the artifact is unsigned, incomplete, tampered with, signed
+   by another signer, missing a valid timestamp, or bound to a different
+   commit/version. The web image continues to use `frontend/Dockerfile`.
 5. Both images are built and signed under unique per-run staging tags. Before
    promotion, the workflow uploads a `nexus-promotion-<version>-<run-id>`
    manifest recording the exact image digests and release tags. Only after both
@@ -52,8 +57,9 @@ complements `docs/PRODUCTION_READINESS.md` (§4 backup proof, §7 rollback) and
    are not deployment targets. If promotion fails partway, use the
    promotion-only recovery below; do not rebuild or hand-tag. Retain the
    workflow summary and promotion manifest (image names, staging tags, release
-   tags, version, commit, digests, signed agent version and agent run ID) with
-   the release record. These digests are the rollback target of last resort.
+   tags, version, commit, digests, signed agent version, agent run ID, signed
+   commit and pinned signer thumbprint) with the release record. These digests
+   are the rollback target of last resort.
 
 ## Recovering an interrupted promotion
 
@@ -128,9 +134,9 @@ the pinned images, and rolls `api`, `worker` and `web` with `--no-build` — no
 rebuild can silently substitute different code. Use `-ValidateOnly` to check a
 pin without touching the running stack.
 
-The API image is built only from a verified signed Agent bundle. Confirm the
-pinned image carries the expected bundle version; it must match the signed
-Agent version in the container workflow summary:
+The API image is built only after the Authenticode gate accepts the signed
+Agent bundle. Confirm the pinned image carries the expected bundle version; it
+must match the signed Agent version in the container workflow summary:
 
 ```powershell
 docker run --rm --entrypoint cat ghcr.io/<owner>/nexusmsp-api:1.4.0 /app/agent/dist/VERSION
@@ -334,10 +340,13 @@ one remains uncovered until it does.
    dispatch with the `version` input). It runs the Go tests and vet, then builds
    `nexus-agent.exe`, `nexus-client-chat.exe`, `nexus-agent-tray.exe` and
    `nexus-remote-companion.exe`, and writes the exact release `VERSION`.
-2. Configure the signing secrets for real releases:
+2. Configure the signing certificate and expected-signer pin for real releases:
    - `NEXUS_AGENT_SIGNING_CERTIFICATE` — base64-encoded PFX of the Authenticode
      code-signing certificate.
    - `NEXUS_AGENT_SIGNING_PASSWORD` — the PFX password.
+   - Repository variable `NEXUS_AGENT_SIGNER_THUMBPRINT` — the SHA-1 thumbprint
+     of the same certificate. The container release fails before building the
+     API image when it is unset.
 3. Release runs fail without the certificate secret. Dispatch with `sign=false`
    only for explicitly unsigned lab builds; those artifacts are labelled
    `UNSIGNED` and must never ship to managed endpoints.
@@ -356,8 +365,8 @@ one remains uncovered until it does.
 Retain with every release:
 
 - [ ] Container workflow summary: image names, staging tags, release tags,
-      version, commit, digests, signed Agent version, Agent release run ID and
-      signed commit.
+      version, commit, digests, signed Agent version, Agent release run ID,
+      signed commit and the pinned Agent signer thumbprint.
 - [ ] `nexus-promotion-<version>-<run-id>` manifest with both signed image
       digests and release tags, plus the promotion recovery summary if used.
 - [ ] Promotion recovery drill evidence

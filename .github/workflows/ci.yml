@@ -62,6 +62,16 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
+      - name: Install Authenticode verifier
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/osslsigncode"
+          curl -fsSL \
+            "https://github.com/mtrojnar/osslsigncode/releases/download/2.16/osslsigncode-2.16-linux-amd64.tar.gz" \
+            -o "${RUNNER_TEMP}/osslsigncode.tar.gz"
+          echo "109c711ac07fc2ce1e3756d6247d92bbf23e55c4aa809a4b34cca3c4f2913fc6  ${RUNNER_TEMP}/osslsigncode.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/osslsigncode.tar.gz" -C "${RUNNER_TEMP}/osslsigncode" --strip-components=1
+          echo "${RUNNER_TEMP}/osslsigncode" >> "${GITHUB_PATH}"
       - name: Python lint gate
         run: python -m flake8 app server.py worker.py
       - name: Deterministic unit tests
@@ -226,62 +236,65 @@ jobs:
         run: docker build --tag nexusmsp-api:ci ./backend
       - name: Build production API image with Agent release components
         run: docker build --tag nexusmsp-api-production:ci --file backend/Dockerfile.production .
-      - name: Build release API image from a verified signed-agent fixture
+      - name: Build release API image from a test-signed fixture through the real gate
         run: |
-          python3 - <<'PY'
+          set -euo pipefail
+          FIXTURE_DIR="backend/tests/fixtures/signed_agent"
+          VERSION="0.1.20-ci"
+          COMMIT="${GITHUB_SHA}"
+          THUMBPRINT=$(openssl x509 -in "${FIXTURE_DIR}/signer-a.crt" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+          rm -rf signed-bundle
+          mkdir -p signed-bundle/agent/dist signed-bundle/artifacts/agent-signing
+          cp "${FIXTURE_DIR}/signer-a.crt" signed-bundle/agent-ca.pem
+          VERSION="${VERSION}" COMMIT="${COMMIT}" THUMBPRINT="${THUMBPRINT}" python3 - <<'PY'
           import hashlib
           import json
           import os
           from pathlib import Path
 
-          version = "0.1.20-ci"
-          commit = os.environ.get("GITHUB_SHA", "0" * 40)
+          version = os.environ["VERSION"]
+          commit = os.environ["COMMIT"]
+          thumbprint = os.environ["THUMBPRINT"]
           components = (
               "nexus-agent.exe",
               "nexus-client-chat.exe",
               "nexus-agent-tray.exe",
               "nexus-remote-companion.exe",
           )
+          source = Path("backend/tests/fixtures/signed_agent/signed-valid.exe").read_bytes()
           bundle = Path("signed-bundle")
           dist = bundle / "agent" / "dist"
           signing = bundle / "artifacts" / "agent-signing"
-          dist.mkdir(parents=True, exist_ok=True)
-          signing.mkdir(parents=True, exist_ok=True)
           (dist / "VERSION").write_text(version + "\n", encoding="utf-8")
 
           files = []
           sums = []
           for component in components:
-              payload = f"{version}:{component}".encode()
-              (dist / component).write_bytes(payload)
-              digest = hashlib.sha256(payload).hexdigest()
+              (dist / component).write_bytes(source)
+              digest = hashlib.sha256(source).hexdigest()
               files.append({
                   "file": component,
                   "sha256_before": digest,
                   "sha256_after": digest,
-                  "signed": True,
-                  "verified": True,
               })
               sums.append(f"{digest}  {component}")
 
           evidence = {
-              "tool": "signtool",
               "agent_version": version,
               "commit": commit,
-              "certificate": {
-                  "source": "PfxFile",
-                  "thumbprint": "B" * 40,
-                  "subject": "CN=Nexus CI Signing Fixture",
-              },
+              "certificate": {"thumbprint": thumbprint},
               "files": files,
-              "verification": "signtool verify /pa",
           }
           (signing / "agent-signing-evidence-20260101T000000Z.json").write_text(
               json.dumps(evidence), encoding="utf-8"
           )
           (signing / "SHA256SUMS.txt").write_text("\n".join(sums) + "\n", encoding="ascii")
           PY
-          docker build --tag nexusmsp-api-release:ci --file backend/Dockerfile.release --build-arg NEXUS_AGENT_VERSION=0.1.20-ci .
+          docker build --tag nexusmsp-api-release:ci --file backend/Dockerfile.release \
+            --build-arg NEXUS_AGENT_VERSION="${VERSION}" \
+            --build-arg NEXUS_AGENT_COMMIT="${COMMIT}" \
+            --build-arg NEXUS_AGENT_SIGNER_THUMBPRINT="${THUMBPRINT}" \
+            --build-arg NEXUS_AGENT_CA_FILE=./signed-bundle/agent-ca.pem .
       - name: Build web image
         run: docker build --tag nexusmsp-web:ci ./frontend
       - name: Validate production compose model
