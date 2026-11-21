@@ -209,10 +209,13 @@ and the promotion drill, is recorded in the 2026-11-18 cycle record of
 `test_reports/full-matrix-2026-11-18/`. These directories are local and ignored
 by Git. No deployment or production-readiness claim follows from this run;
 provider sandbox acceptance, container builds and deployment-host gates remain
-separate. Container image builds were attempted but are blocked by this
-account's missing subordinate-ID range; API and web failed at image layer
-registration, and the production/release API builds were not attempted. A prior
-CI run on commit `17758d3` passed API, production API and web on `ubuntu-latest`,
-but it had no release API step and does not cover the current worktree's
-uncommitted Dockerfile/workflow changes. The exact commands and errors are in
-the readiness checklist's 2026-11-18 cycle record.
+separate. A 2026-11-21 CI probe of the current worktree (temporary draft PR #3,
+commit `2721e46`) built all four images — API, production API, release API from
+a verified signed-agent fixture, and web — and validated the production Compose
+model on `ubuntu-latest` (run `44853975650`, job `136691671613`). Its separate
+`tenant-boundary-acceptance` job did not pass: the disposable API container
+never reached `/api/ready` within 120s, and API logs were not retained, so that
+runtime acceptance remains open. The same job failed identically on base commit
+`17758d3` in run `41771659755`, so it predates the worktree. The exact local commands and errors are in
+`test_reports/full-matrix-2026-11-18/container-remediation.log` and the
+readiness checklist's cycle record.
