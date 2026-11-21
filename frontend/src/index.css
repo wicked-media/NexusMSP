@@ -922,6 +922,45 @@ html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__spinner { animation
 .nx-ticket-module-nav__tools { min-width: 6.5rem; min-height: 3.85rem; gap: .35rem; border-radius: .75rem; font-size: .68rem; }
 .nx-ticket-module-nav__tools.is-active { border-color: rgb(167 139 250 / .5); color: rgb(196 181 253); background: rgb(139 92 246 / .09); }
 
+/* The ticket service pulse is the case's operational horizon: SLA runway,
+   next accountable move and attached evidence in one calm, hairline strip. */
+.nx-case-pulse {
+    --nx-pulse-accent: 34 211 238;
+    position: relative;
+    background:
+        radial-gradient(circle at 0% 0%, rgb(var(--nx-pulse-accent) / .095), transparent 30%),
+        linear-gradient(180deg, rgb(255 255 255 / .018), transparent 44%),
+        #0b0f14;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), 0 20px 48px -38px rgb(0 0 0 / .9);
+}
+.nx-case-pulse::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgb(var(--nx-pulse-accent) / .9), rgb(var(--nx-pulse-accent) / .08) 68%, transparent);
+}
+.nx-case-pulse[data-tone="complete"] { --nx-pulse-accent: 52 211 153; }
+.nx-case-pulse[data-tone="healthy"] { --nx-pulse-accent: 34 211 238; }
+.nx-case-pulse[data-tone="attention"] { --nx-pulse-accent: 251 191 36; }
+.nx-case-pulse[data-tone="critical"],
+.nx-case-pulse[data-tone="overdue"] { --nx-pulse-accent: 251 113 133; }
+.nx-case-pulse[data-tone="untracked"] { --nx-pulse-accent: 113 113 122; }
+.nx-case-pulse__state { border-color: rgb(var(--nx-pulse-accent) / .22); color: rgb(var(--nx-pulse-accent)); background: rgb(var(--nx-pulse-accent) / .07); }
+.nx-case-pulse__value { color: rgb(var(--nx-pulse-accent)); }
+.nx-case-pulse__meter > span { background: rgb(var(--nx-pulse-accent)); box-shadow: 0 0 18px rgb(var(--nx-pulse-accent) / .28); }
+.nx-ticket-pipeline { scrollbar-width: none; }
+.nx-ticket-pipeline::-webkit-scrollbar { display: none; }
+@media (max-width: 1100px) {
+    .nx-ticket-pipeline { width: 100%; justify-content: space-between; }
+    .nx-ticket-pipeline button { flex: 1 1 0; padding-inline: .3rem; }
+    .nx-ticket-pipeline button svg { display: none; }
+}
+@media (max-width: 480px) {
+    .nx-ticket-pipeline button { font-size: 8px; letter-spacing: .06em; }
+}
+
 @media (max-width: 1180px) {
     .nx-workspace-header { grid-template-columns: 1fr; }
     .nx-workspace-header__aside[data-has-signal="true"] { grid-template-columns: 1fr; }

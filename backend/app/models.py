@@ -169,6 +169,10 @@ class Ticket(BaseModel):
     last_activity_by_name: Optional[str] = None
     last_customer_reply_at: Optional[datetime] = None
     last_technician_reply_at: Optional[datetime] = None
+    # The next client-visible update Nexus promised on this ticket. It is set
+    # only by a customer-visible conversation update and remains ticket-owned
+    # evidence rather than a separate reminder record.
+    next_checkpoint_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

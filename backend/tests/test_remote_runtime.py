@@ -87,6 +87,9 @@ class _RemoteSessionCursor:
     def sort(self, *_args, **_kwargs):
         return self
 
+    def skip(self, _offset):
+        return self
+
     async def to_list(self, _limit):
         return []
 

@@ -37,6 +37,20 @@ const BUILD_STAGES = [
   { name: "Technician Viewer", detail: "Live desktop canvas with freshness state, session evidence, interactive control under fresh endpoint approval, and an emergency end control.", state: "ready", icon: MonitorUp },
 ];
 
+const READINESS_LABELS = {
+  ready: "Ready",
+  not_enrolled: "Agent not enrolled",
+  agent_unavailable: "Linked Agent inactive",
+  agent_offline: "Agent offline or stale",
+  companion_required: "Remote Companion not installed",
+  readiness_unreported: "Readiness not reported",
+  waiting_for_user_session: "Awaiting user session",
+  waiting_for_policy: "Applying remote policy",
+  integrity_unverified: "Companion integrity unverified",
+  unsupported_platform: "Unsupported platform",
+  trust_reenrollment_required: "Trust re-enrolment required",
+};
+
 const CAPABILITY_TARGETS = [
   "Attended and policy-controlled unattended access", "Multi-monitor canvas", "Reboot and reconnect",
   "Multi-technician collaboration", "Secure clipboard and file exchange", "Session recording and playback",
@@ -56,6 +70,11 @@ const REMOTE_ALLOWED_KEYS = new Set([
 function normaliseViewerKey(value) {
   const key = REMOTE_KEY_NAMES[value] || String(value || "").trim().toUpperCase();
   return (/^[A-Z0-9]$/.test(key) || REMOTE_ALLOWED_KEYS.has(key)) ? key : "";
+}
+
+function readinessLabelFor(value) {
+  const state = String(value || "unknown");
+  return READINESS_LABELS[state] || state.replaceAll("_", " ");
 }
 
 function messageFor(error, fallback) {
@@ -101,6 +120,8 @@ export default function NativeRemoteAccessPage() {
   const [devices, setDevices] = useState([]);
   const [agents, setAgents] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [operations, setOperations] = useState(null);
+  const [readinessFilter, setReadinessFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(null);
@@ -252,14 +273,16 @@ export default function NativeRemoteAccessPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [deviceResponse, agentResponse, sessionResponse] = await Promise.all([
+      const [deviceResponse, agentResponse, sessionResponse, readinessResponse] = await Promise.all([
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/nexus-agent/agents`, { headers }),
         axios.get(`${API}/remote/sessions`, { headers }),
+        axios.get(`${API}/remote/fleet-readiness`, { headers }).catch(() => null),
       ]);
       setDevices((deviceResponse.data || []).filter(device => !device.archived));
       setAgents(agentResponse.data || []);
       setSessions((sessionResponse.data || []).filter(session => session.provider === "nexus"));
+      setOperations(readinessResponse?.data || null);
     } catch (error) {
       toast.error(messageFor(error, "Nexus Native Remote could not load"));
     } finally {
@@ -312,10 +335,21 @@ export default function NativeRemoteAccessPage() {
         : viewerState === "reconnecting"
           ? "Reconnecting"
           : "Waiting for endpoint capture";
+  const readinessByDevice = useMemo(
+    () => new Map((operations?.endpoints || []).map(endpoint => [endpoint.device_id, endpoint])),
+    [operations],
+  );
+  const fleetSummary = operations?.summary || null;
+  const readinessQueue = operations?.attention_endpoints || [];
   const visibleDevices = devices.filter(device => {
     const value = query.trim().toLowerCase();
-    if (!value) return true;
-    return [device.name, device.hostname, device.client_name, device.os].some(field => String(field || "").toLowerCase().includes(value));
+    if (value && ![device.name, device.hostname, device.client_name, device.os].some(field => String(field || "").toLowerCase().includes(value))) {
+      return false;
+    }
+    if (readinessFilter === "all") return true;
+    const readiness = readinessByDevice.get(device.id);
+    if (!readiness) return false;
+    return readinessFilter === "attention" ? !readiness.ready : readiness.state === readinessFilter;
   });
   const companionStateLabel = evidence => {
     const state = String(evidence?.status || "readiness_unreported");
@@ -757,6 +791,76 @@ export default function NativeRemoteAccessPage() {
         <MetricTile label="Active sessions" value={activeSessions.length} icon={Users} accent="amber" />
       </MetricStrip>
 
+      {fleetSummary && (
+        <Card className="overflow-hidden border-border/60" data-testid="remote-fleet-readiness">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Fleet remote readiness</CardTitle>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">
+                  Server-derived from enrolled Agent and Companion evidence. This view never starts a session or widens access; it shows which endpoints can be supported now.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className={fleetSummary.total_endpoints > 0 && fleetSummary.ready === fleetSummary.total_endpoints ? "border-emerald-400/30 text-emerald-200" : "border-amber-400/30 text-amber-200"}>
+                  {fleetSummary.ready}/{fleetSummary.total_endpoints} ready
+                </Badge>
+                <span className="text-[10px] text-muted-foreground">checked {displayEvidenceTime(operations.generated_at)}</span>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <span className={fleetSummary.ready_percentage >= 80 ? "block h-full bg-emerald-400" : fleetSummary.ready_percentage >= 50 ? "block h-full bg-amber-300" : "block h-full bg-rose-400"} style={{ width: `${Math.max(0, Math.min(100, fleetSummary.ready_percentage || 0))}%` }} />
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/[0.04] px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Ready now</p><p className="mt-1 text-lg font-semibold">{fleetSummary.ready}</p></div>
+                <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.04] px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Needs attention</p><p className="mt-1 text-lg font-semibold">{fleetSummary.blocked}</p></div>
+                <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.04] px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Active sessions</p><p className="mt-1 text-lg font-semibold">{fleetSummary.active_sessions}<span className="ml-2 text-[10px] font-normal text-muted-foreground">{fleetSummary.control_sessions} control</span></p></div>
+                <div className="rounded-lg border border-violet-400/20 bg-violet-400/[0.04] px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Unattended ready</p><p className="mt-1 text-lg font-semibold">{fleetSummary.unattended_ready}</p></div>
+              </div>
+            </div>
+
+            {fleetSummary.total_endpoints === 0 ? (
+              <div className="rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">No active endpoints are in this technician&apos;s scope.</div>
+            ) : operations.blockers?.length > 0 ? (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold">Readiness blockers</p><button type="button" className="text-[11px] text-cyan-300 hover:underline" onClick={() => setReadinessFilter("attention")}>Show affected endpoints</button></div>
+                <div className="flex flex-wrap gap-2">
+                  {operations.blockers.map(blocker => (
+                    <button key={blocker.state} type="button" onClick={() => setReadinessFilter(blocker.state)} className="flex items-center gap-2 rounded-full border border-amber-400/25 bg-amber-400/[0.05] px-3 py-1 text-[11px] text-amber-100 transition-colors hover:border-amber-300/50">
+                      <span>{blocker.label}</span><Badge variant="outline" className="border-amber-400/30 px-1.5 text-[9px]">{blocker.count}</Badge>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.04] px-3 py-2 text-xs text-emerald-200"><CheckCircle2 className="h-4 w-4" />Every sampled endpoint reports the signed Remote Companion ready.</div>
+            )}
+
+            {readinessQueue.length > 0 && (
+              <div className="space-y-1.5" data-testid="remote-readiness-queue">
+                <p className="text-xs font-semibold">Priority endpoints</p>
+                {readinessQueue.slice(0, 4).map(endpoint => (
+                  <button
+                    key={endpoint.device_id}
+                    type="button"
+                    onClick={() => { const device = devices.find(item => item.id === endpoint.device_id); if (device) inspectDevice(device); }}
+                    className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-left transition-colors hover:border-cyan-400/30 hover:bg-cyan-400/[0.03]"
+                  >
+                    <Monitor className="h-4 w-4 text-cyan-300" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{endpoint.device_name}</span>
+                    <span className="text-[11px] text-muted-foreground">{endpoint.client_name || "Managed client"} · {readinessLabelFor(endpoint.state)}</span>
+                    <Badge variant="outline" className={endpoint.active_session ? "border-cyan-400/30 text-cyan-200" : "border-amber-400/25 text-amber-200"}>{endpoint.active_session ? (endpoint.active_session.status === "active" ? "In session" : "Authorised") : "Blocked"}</Badge>
+                  </button>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="overflow-hidden border-cyan-400/20 bg-[linear-gradient(112deg,rgba(8,145,178,0.10),rgba(15,23,42,0.82)_52%,rgba(30,64,175,0.08))]" data-testid="nexus-native-build-status">
         <CardHeader className="pb-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-cyan-100">NEXUS NATIVE</Badge><CardTitle className="mt-2 text-lg">Remote assurance</CardTitle><p className="mt-1 text-xs leading-5 text-muted-foreground">Every attended session is bound to the endpoint, technician and tenant, then retained with consent and transport evidence.</p></div><Badge variant="outline" className={capable.length ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-amber-400/30 text-amber-300"}>{capable.length ? "Service ready" : "Endpoint setup needed"}</Badge></div></CardHeader>
         <CardContent className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -767,7 +871,13 @@ export default function NativeRemoteAccessPage() {
       <Tabs defaultValue="fleet">
         <TabsList><TabsTrigger value="fleet"><Monitor className="mr-1.5 h-3.5 w-3.5" />Fleet</TabsTrigger><TabsTrigger value="sessions"><History className="mr-1.5 h-3.5 w-3.5" />Session ledger</TabsTrigger><TabsTrigger value="capabilities"><Clock3 className="mr-1.5 h-3.5 w-3.5" />Roadmap</TabsTrigger></TabsList>
         <TabsContent value="fleet" className="mt-4 space-y-3">
-          <div className="relative max-w-xl"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search endpoint, client or operating system" className="pl-9" /></div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[16rem] max-w-xl flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search endpoint, client or operating system" className="pl-9" /></div>
+            {[["all", "All"], ["ready", "Ready"], ["attention", "Needs attention"]].map(([value, label]) => (
+              <Button key={value} size="sm" variant={readinessFilter === value ? "secondary" : "outline"} onClick={() => setReadinessFilter(value)} disabled={!operations} className="h-8 text-[11px]">{label}</Button>
+            ))}
+            {!["all", "ready", "attention"].includes(readinessFilter) && <Button size="sm" variant="ghost" onClick={() => setReadinessFilter("all")} className="h-8 text-[11px]">Clear “{readinessLabelFor(readinessFilter)}”</Button>}
+          </div>
           <div className="grid gap-3 lg:grid-cols-2">
             {visibleDevices.map(device => { const agent = agentById.get(device.nexus_agent_id); const companionEvidence = agent?.native_remote_evidence || {}; const nativeReady = Boolean(agent?.online && [...(agent.agent_runtime_capabilities || []), ...(agent.nexus_shield_capabilities || [])].includes("native_remote_v1") && companionEvidence.status === "ready"); const sessionActive = activeSessionDeviceIds.has(device.id); return <Card key={device.id} className="border-border/60"><CardContent className="flex items-center gap-3 p-4"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${nativeReady ? "bg-emerald-500/10 text-emerald-300" : "bg-muted text-muted-foreground"}`}><Monitor className="h-5 w-5" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{device.name || device.hostname}</p><p className="truncate text-xs text-muted-foreground">{device.client_name || "Managed client"} · {agent?.online ? "Agent online" : agent ? "Agent offline" : "Agent not linked"}</p><p className="truncate text-[11px] text-muted-foreground" title={companionEvidence.detail || companionStateLabel(companionEvidence)}>{agent ? companionStateLabel(companionEvidence) : "Companion needed"}</p></div><Badge variant="outline" className={sessionActive ? "border-amber-400/25 text-amber-300" : nativeReady ? "border-emerald-400/25 text-emerald-300" : "text-muted-foreground"}>{sessionActive ? "Session active" : nativeReady ? "Ready" : companionStateLabel(companionEvidence)}</Badge><Button size="sm" onClick={() => inspectDevice(device)} disabled={!nativeReady || sessionActive}>{sessionActive ? "In session" : "Connect"}</Button></CardContent></Card>; })}
           </div>

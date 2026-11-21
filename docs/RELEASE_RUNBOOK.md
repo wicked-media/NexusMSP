@@ -24,14 +24,94 @@ complements `docs/PRODUCTION_READINESS.md` (§4 backup proof, §7 rollback) and
 ## Cutting a container release
 
 1. Ensure CI is green on the commit being released.
-2. Either push a tag `v<version>` (for example `v1.4.0`), or run the
+2. Run the **Nexus Agent release** workflow first (tag `agent-v<version>` or
+   manual dispatch with signing enabled). Note its successful run ID and
+   version. The workflow now builds `nexus-agent.exe`, `nexus-client-chat.exe`,
+   `nexus-agent-tray.exe`, `nexus-remote-companion.exe` and the release
+   `VERSION`, signs and verifies all four executables, and uploads the signing
+   evidence plus `SHA256SUMS.txt`. Older agent artifacts without the version and
+   commit evidence are rejected; rerun the Agent release before cutting the
+   container release.
+3. Either push a tag `v<version>` (for example `v1.4.0`), or run the
    **NexusMSP container release** workflow manually with the `version` input.
-3. The workflow builds `nexusmsp-api` (from `backend/Dockerfile.production`)
-   and `nexusmsp-web` (from `frontend/Dockerfile`), publishes both with the
-   version and `sha-` tags, attaches Buildx provenance and an SBOM, and signs
-   the published digests with keyless Cosign.
-4. Retain the workflow summary (image names, version, commit, digests) with the
-   release record. These digests are the rollback target of last resort.
+   For a deterministic API image, also pass the successful `agent_run_id` from
+   step 2. Without it, the workflow resolves the newest successful agent run
+   reachable from the release commit and fails if no signed bundle is found.
+   A manual dispatch from a branch must pass `agent_run_id`; dispatch from the
+   release tag when relying on automatic resolution.
+4. The API image is built from `backend/Dockerfile.release`, which downloads
+   and verifies that signed bundle before the runtime stage. The build fails
+   closed if the artifact is unsigned, incomplete, tampered with, or bound to a
+   different commit/version. The web image continues to use
+   `frontend/Dockerfile`.
+5. Both images are built and signed under unique per-run staging tags. Before
+   promotion, the workflow uploads a `nexus-promotion-<version>-<run-id>`
+   manifest recording the exact image digests and release tags. Only after both
+   Cosign signatures verify does it promote the version and `sha-` release tags
+   to those signed digests. No release tag is created before both signatures pass; staging tags
+   are not deployment targets. If promotion fails partway, use the
+   promotion-only recovery below; do not rebuild or hand-tag. Retain the
+   workflow summary and promotion manifest (image names, staging tags, release
+   tags, version, commit, digests, signed agent version and agent run ID) with
+   the release record. These digests are the rollback target of last resort.
+
+## Recovering an interrupted promotion
+
+Use this only when a release run stopped after the promotion manifest was
+uploaded but before every version and `sha-` tag was promoted. It does not
+rebuild either image.
+
+1. Open the interrupted **NexusMSP container release** run and copy its run ID.
+   If that run is still in progress, cancel it first; the workflow's concurrency
+   group queues recovery behind the same ref.
+2. Dispatch the same workflow from the release tag or the ref used by the
+   interrupted run, with `promotion_only: true`, `source_run_id` set to that
+   run ID, the same `version` shown in the interrupted run's summary, and the
+   same `registry` value. The version must match the promotion manifest.
+3. The recovery job downloads the `nexus-promotion-<version>-<run-id>`
+   manifest, validates the image names, digests and release tags, re-verifies
+   both Cosign signatures, and re-runs `crane tag` for both images. It never
+   builds or signs a new image.
+4. Confirm the recovery summary lists both release digests, then run the deploy
+   preflight and the `VERSION` check below. Do not deploy if recovery fails.
+
+The promotion manifest is retained for 30 days. If it has expired, run a new
+full release; do not tag manually reconstructed or unverified digests.
+
+### Drill the recovery path
+
+Run this after any change to the promotion manifest, the shared promotion
+script or the recovery job:
+
+```bash
+python scripts/promotion_recovery_drill.py
+```
+
+It extracts the real manifest writer and recovery run blocks from the release
+workflow, records a manifest, interrupts the real promotion script at the first
+web tag, and then runs only the recovery steps against a disposable fake
+registry. It requires both images to carry both the version and `sha-` tag on
+the recorded digests, repeats recovery to prove idempotency, and writes
+`artifacts/release-drills/promotion-recovery-drill-*.json`.
+
+It also replaces the recorded API and web digests in turn with valid-format but
+unrecorded digests, requires recovery to fail before any tag command and leave
+the partial tag map unchanged for each, then restores the recorded manifest and
+completes the positive recovery. These are the corrupted-digest controls.
+
+It does not contact a real registry, verify real keyless signatures, upload or
+download a GitHub Actions artifact, or rebuild either image. It proves the
+recorded-digest recovery logic; live interrupted-run recovery on the real
+registry remains the end-to-end check.
+
+CI runs the same drill in the `promotion-recovery-drill` job on every pull
+request and push to `main` or `master`, and uploads the JSON as the
+`promotion-recovery-drill-evidence` artifact for 30 days. The job summary links
+the uploaded evidence artifact and shows each API/web tamper control's tag and
+verification counts and whether positive recovery completed. The failure path is
+covered by a forced-failure test: the drill still writes the same JSON evidence,
+and the CI upload step is unconditional. Retain that artifact with the release
+evidence; a local run writes the same file.
 
 ## Deploying a released image
 
@@ -47,6 +127,17 @@ The script validates the pinned Compose model (`docker compose config`), pulls
 the pinned images, and rolls `api`, `worker` and `web` with `--no-build` — no
 rebuild can silently substitute different code. Use `-ValidateOnly` to check a
 pin without touching the running stack.
+
+The API image is built only from a verified signed Agent bundle. Confirm the
+pinned image carries the expected bundle version; it must match the signed
+Agent version in the container workflow summary:
+
+```powershell
+docker run --rm --entrypoint cat ghcr.io/<owner>/nexusmsp-api:1.4.0 /app/agent/dist/VERSION
+```
+
+A missing file, an invalid version or a mismatch is a release fault: do not
+roll that image to the fleet.
 
 On a host that stages images ahead of the change window (air-gapped deployment,
 or a pre-loaded release), add `-SkipPull` to roll to images already present on
@@ -241,7 +332,8 @@ one remains uncovered until it does.
 
 1. Run the **Nexus Agent release** workflow (tag `agent-v<version>` or manual
    dispatch with the `version` input). It runs the Go tests and vet, then builds
-   `nexus-agent.exe`, `nexus-client-chat.exe` and `nexus-agent-tray.exe`.
+   `nexus-agent.exe`, `nexus-client-chat.exe`, `nexus-agent-tray.exe` and
+   `nexus-remote-companion.exe`, and writes the exact release `VERSION`.
 2. Configure the signing secrets for real releases:
    - `NEXUS_AGENT_SIGNING_CERTIFICATE` — base64-encoded PFX of the Authenticode
      code-signing certificate.
@@ -251,18 +343,33 @@ one remains uncovered until it does.
    `UNSIGNED` and must never ship to managed endpoints.
 4. Signing runs `scripts/Sign-NexusAgent.ps1`, which signs each component with
    `signtool` (SHA-256 + RFC3161 timestamp), verifies every signature, and
-   writes `artifacts/agent-signing/agent-signing-evidence-*.json` (signer
-   identity, thumbprint, timestamp URL, per-file SHA-256) plus `SHA256SUMS.txt`.
-   The same script signs local release builds when run on a Windows host with
-   the certificate installed.
+   writes `artifacts/agent-signing/agent-signing-evidence-*.json` (agent version,
+   source commit, signer identity, thumbprint, timestamp URL, per-file SHA-256)
+   plus `SHA256SUMS.txt`. The same script signs local release builds when run on
+   a Windows host with the certificate installed.
+5. The **NexusMSP container release** workflow consumes that artifact for the
+   API image. An unsigned lab build is labelled `UNSIGNED` and is rejected before
+   the release image is built; it must never ship to managed endpoints.
 
 ## Release evidence checklist
 
 Retain with every release:
 
-- [ ] Container workflow summary: image names, version tag, commit, digests.
+- [ ] Container workflow summary: image names, staging tags, release tags,
+      version, commit, digests, signed Agent version, Agent release run ID and
+      signed commit.
+- [ ] `nexus-promotion-<version>-<run-id>` manifest with both signed image
+      digests and release tags, plus the promotion recovery summary if used.
+- [ ] Promotion recovery drill evidence
+      (`promotion-recovery-drill-evidence` CI artifact, or
+      `artifacts/release-drills/promotion-recovery-drill-*.json` from a local
+      run) from `scripts/promotion_recovery_drill.py`, run after any change to
+      the promotion or recovery path and covering the interrupted-promotion and
+      corrupted-digest controls.
 - [ ] Cosign verification output for the published digests (`cosign verify`).
-- [ ] Agent signing evidence JSON + `SHA256SUMS.txt` (or the `UNSIGNED` lab label).
+- [ ] Signed Agent release run ID and its retained signing evidence JSON +
+      `SHA256SUMS.txt`. An `UNSIGNED` lab artifact is not valid evidence for a
+      container release and is rejected by the API image build.
 - [ ] Recovery drill evidence (`artifacts/recovery-drills/recovery-drill-*.json`)
       from `scripts/Smoke-Test-NexusDockerRecovery.ps1`, run on the deployment
       Docker host after any change to the capture/storage/restore path.

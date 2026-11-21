@@ -70,13 +70,13 @@ class NexusOpsAPITester:
             return False, {}
 
     def test_seed_data(self):
-        """Test seeding demo data"""
-        print("\n🌱 Testing Data Seeding...")
+        """Demo seeding is retired; the endpoint must stay closed."""
+        print("\n🔒 Testing Data Seeding Retirement...")
         success, response = self.run_test(
-            "Seed Demo Data",
+            "Seed Demo Data Retired",
             "POST",
             "seed",
-            200
+            410
         )
         return success
 
@@ -700,7 +700,7 @@ class NexusOpsAPITester:
         print(f"Testing against: {self.base_url}")
         print("=" * 50)
         
-        # Seed data first
+        # Seeding is retired; verify the endpoint refuses before other checks.
         self.test_seed_data()
         
         # Test authentication

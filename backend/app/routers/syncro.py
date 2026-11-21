@@ -1,230 +1,381 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from datetime import datetime, timezone
-import uuid
-import httpx
+import asyncio
 import logging
+
 from app.database import db
 from app.auth import get_current_user
+from app.services import syncro_migration as migration
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Keep strong references to migration tasks for the lifetime of the process.
+# The task itself owns its failure state in MongoDB, so a process restart leaves
+# an operator-visible failed/interrupted job rather than a silent disappearance.
+_migration_tasks: set[asyncio.Task] = set()
+
+
+async def _syncro_config(current_user: dict) -> dict | None:
+    return await db.settings.find_one(
+        tenant_scoped_query(current_user, {"type": "syncro"}),
+        {"_id": 0},
+    )
+
+
+async def _save_syncro_config(current_user: dict, values: dict) -> None:
+    """Update the tenant's Syncro document without creating a duplicate."""
+    tenant_id = platform_tenant_id(current_user)
+    existing = await db.settings.find_one(
+        tenant_scoped_query(current_user, {"type": "syncro"}),
+        {"_id": 1},
+    )
+    payload = {
+        "type": "syncro",
+        "tenant_id": tenant_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        **values,
+    }
+    if existing:
+        await db.settings.update_one({"_id": existing["_id"]}, {"$set": payload})
+    else:
+        await db.settings.insert_one(payload)
+
+
+def _start_job_task(job_id: str) -> None:
+    task = asyncio.create_task(migration.run_migration_job(job_id))
+    _migration_tasks.add(task)
+
+    def _done(completed: asyncio.Task) -> None:
+        _migration_tasks.discard(completed)
+        try:
+            completed.result()
+        except Exception:
+            logger.exception("Syncro migration task %s ended unexpectedly", job_id)
+
+    task.add_done_callback(_done)
+
 
 # ============== SYNCRO SETTINGS ==============
 
 @router.get("/syncro/settings")
 async def get_syncro_settings(current_user: dict = Depends(get_current_user)):
-    doc = await db.settings.find_one({"type": "syncro"}, {"_id": 0})
-    if doc and doc.get("api_key"):
-        doc["api_key"] = doc["api_key"][:8] + "..." + doc["api_key"][-4:] if len(doc["api_key"]) > 12 else "****"
-    return doc or {"type": "syncro", "subdomain": "", "api_key": "", "enabled": False}
+    doc = await _syncro_config(current_user)
+    key_configured = bool(doc and doc.get("api_key"))
+    if doc and key_configured:
+        key = str(doc["api_key"])
+        doc["api_key"] = key[:8] + "..." + key[-4:] if len(key) > 12 else "****"
+    result = doc or {"type": "syncro", "subdomain": "", "api_key": "", "enabled": False}
+    result["api_key_configured"] = key_configured
+    return result
+
 
 @router.put("/syncro/settings")
-async def update_syncro_settings(data: dict, current_user: dict = Depends(get_current_user)):
-    await db.settings.update_one({"type": "syncro"}, {"$set": {
-        "type": "syncro",
-        "subdomain": data.get("subdomain", ""),
-        "api_key": data.get("api_key", ""),
-        "enabled": data.get("enabled", False),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }}, upsert=True)
+async def update_syncro_settings(
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_action("platform.data.import.manage")),
+):
+    subdomain = str(data.get("subdomain") or "").strip()
+    if subdomain:
+        try:
+            subdomain = migration.normalise_subdomain(subdomain)
+        except migration.SyncroConfigurationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    existing = await _syncro_config(current_user)
+    api_key = str(data.get("api_key") or "").strip()
+    if not api_key and not (existing and existing.get("api_key")):
+        raise HTTPException(status_code=422, detail="Syncro API key is required")
+    values = {
+        "subdomain": subdomain,
+        "enabled": bool(data.get("enabled", False)),
+    }
+    # An empty field means "keep the existing secret", not "erase it". The
+    # settings response only returns a masked value, so the browser must never
+    # save that mask back over the real token.
+    if api_key:
+        values["api_key"] = api_key
+    await _save_syncro_config(current_user, values)
     return {"message": "Syncro settings saved"}
 
+
 @router.post("/syncro/test-connection")
-async def test_syncro_connection(current_user: dict = Depends(get_current_user)):
-    doc = await db.settings.find_one({"type": "syncro"}, {"_id": 0})
+async def test_syncro_connection(
+    current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_action("platform.data.import.manage")),
+):
+    doc = await _syncro_config(current_user)
     if not doc or not doc.get("api_key") or not doc.get("subdomain"):
         raise HTTPException(status_code=400, detail="Syncro not configured")
-    
-    subdomain = doc["subdomain"]
-    api_key = doc["api_key"]
-    url = f"https://{subdomain}.syncromsp.com/api/v1/customers?page=1&per_page=1"
-    
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers={"Authorization": api_key})
-        if resp.status_code == 200:
-            return {"status": "connected", "message": "Successfully connected to Syncro"}
-        else:
-            return {"status": "error", "message": f"Syncro returned status {resp.status_code}"}
-    except Exception as e:
-        return {"status": "error", "message": f"Connection failed: {str(e)[:100]}"}
 
-# ============== SYNCRO IMPORT ==============
+    client = None
+    try:
+        client = migration.SyncroClient(doc["subdomain"], doc["api_key"])
+        await client.get("/customers", {"page": 1, "per_page": 1})
+        return {"status": "connected", "message": "Successfully connected to Syncro"}
+    except migration.SyncroConfigurationError as exc:
+        return {"status": "error", "message": str(exc)}
+    except migration.SyncroAPIError as exc:
+        return {"status": "error", "message": str(exc)}
+    except Exception:
+        logger.warning("Syncro connection test failed", exc_info=True)
+        return {"status": "error", "message": "Syncro connection failed. Check the subdomain and API token."}
+    finally:
+        if client is not None:
+            await client.close()
+
+
+# ============== MIGRATION API ==============
+
+@router.get(
+    "/syncro/migration/capabilities",
+    dependencies=[Depends(require_action("platform.data.import.view"))],
+)
+async def syncro_migration_capabilities(current_user: dict = Depends(get_current_user)):
+    """Return the supported one-time migration surface without touching Syncro."""
+    return migration.capabilities()
+
+
+@router.get(
+    "/syncro/migration/jobs",
+    dependencies=[Depends(require_action("platform.data.import.view"))],
+)
+async def list_syncro_migration_jobs(
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user),
+):
+    jobs = await migration.list_jobs(db, platform_tenant_id(current_user), limit=limit)
+    return {"jobs": jobs}
+
+
+@router.post(
+    "/syncro/migration/jobs",
+    dependencies=[Depends(require_action("platform.data.import.manage"))],
+)
+async def create_syncro_migration_job(
+    payload: dict = Body(default={}),
+    current_user: dict = Depends(get_current_user),
+):
+    doc = await _syncro_config(current_user)
+    if not doc or not doc.get("api_key") or not doc.get("subdomain"):
+        raise HTTPException(status_code=400, detail="Configure Syncro before starting a migration")
+
+    mode = str(payload.get("mode") or "dry_run").strip().lower()
+    if mode not in {"dry_run", "apply"}:
+        raise HTTPException(status_code=422, detail="mode must be dry_run or apply")
+    entities = payload.get("entities")
+    if entities is not None and not isinstance(entities, list):
+        raise HTTPException(status_code=422, detail="entities must be a list")
+
+    try:
+        job = await migration.create_job(
+            db,
+            tenant_id=platform_tenant_id(current_user),
+            requested_by=str(current_user.get("name") or current_user.get("email") or current_user.get("id") or "system"),
+            entities=entities,
+            mode=mode,
+        )
+    except migration.ActiveMigrationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A Syncro migration is already running (job {exc.job_id})",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    _start_job_task(job["id"])
+    return job
+
+
+@router.get(
+    "/syncro/migration/jobs/{job_id}",
+    dependencies=[Depends(require_action("platform.data.import.view"))],
+)
+async def get_syncro_migration_job(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    job = await migration.get_job(db, platform_tenant_id(current_user), job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Migration job not found")
+    return job
+
+
+@router.post(
+    "/syncro/migration/jobs/{job_id}/cancel",
+    dependencies=[Depends(require_action("platform.data.import.manage"))],
+)
+async def cancel_syncro_migration_job(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    tenant_id = platform_tenant_id(current_user)
+    job = await migration.get_job(db, tenant_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Migration job not found")
+    if job.get("status") not in {"queued", "running"}:
+        return job
+    updates = {
+        "cancel_requested": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if job.get("status") == "queued":
+        updates.update({"status": "cancelled", "completed_at": datetime.now(timezone.utc).isoformat()})
+    await db.syncro_migration_jobs.update_one(
+        migration.tenant_query(tenant_id, {"id": job_id}),
+        {"$set": updates},
+    )
+    updated = await migration.get_job(db, tenant_id, job_id)
+    return updated or job
+
+
+@router.get(
+    "/syncro/migration/jobs/{job_id}/failures",
+    dependencies=[Depends(require_action("platform.data.import.view"))],
+)
+async def list_syncro_migration_failures(
+    job_id: str,
+    limit: int = 100,
+    current_user: dict = Depends(get_current_user),
+):
+    failures = await migration.list_failures(
+        db,
+        platform_tenant_id(current_user),
+        job_id,
+        limit=limit,
+    )
+    return {"failures": failures}
+
+
+@router.get(
+    "/syncro/migration/jobs/{job_id}/reconciliation",
+    dependencies=[Depends(require_action("platform.data.import.view"))],
+)
+async def get_syncro_migration_reconciliation(
+    job_id: str,
+    issues_only: bool = True,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
+    """Compare archived Syncro invoice/payment evidence with current Nexus records."""
+    tenant_id = platform_tenant_id(current_user)
+    job = await migration.get_job(db, tenant_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Migration job not found")
+    if job.get("mode") != "apply":
+        raise HTTPException(
+            status_code=409,
+            detail="Reconciliation is available after an applied migration, not a dry run",
+        )
+    if job.get("status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Reconciliation is available only after the migration job completes",
+        )
+    report = await migration.build_reconciliation_report(
+        db,
+        tenant_id,
+        job_id,
+        issues_only=issues_only,
+        limit=limit,
+        offset=offset,
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Migration job not found")
+    return report
+
+
+@router.get(
+    "/syncro/migration/jobs/{job_id}/reconciliation.csv",
+    dependencies=[Depends(require_action("platform.data.import.view"))],
+)
+async def export_syncro_migration_reconciliation(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Export the read-only reconciliation evidence as a CSV attachment."""
+    tenant_id = platform_tenant_id(current_user)
+    job = await migration.get_job(db, tenant_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Migration job not found")
+    if job.get("mode") != "apply":
+        raise HTTPException(
+            status_code=409,
+            detail="Reconciliation is available after an applied migration, not a dry run",
+        )
+    if job.get("status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Reconciliation is available only after the migration job completes",
+        )
+    report = await migration.build_reconciliation_report(
+        db,
+        tenant_id,
+        job_id,
+        issues_only=False,
+        all_rows=True,
+    )
+    if not report:
+        raise HTTPException(status_code=404, detail="Migration job not found")
+    filename = f"syncro-reconciliation-{report['job']['id']}.csv"
+    return Response(
+        content=migration.reconciliation_csv(report),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+# ============== COMPATIBILITY ENDPOINTS ==============
 
 @router.post("/syncro/import-clients")
-async def import_clients_from_syncro(current_user: dict = Depends(get_current_user)):
-    """Import clients and their associated data from Syncro RMM"""
-    doc = await db.settings.find_one({"type": "syncro"}, {"_id": 0})
+async def import_clients_from_syncro(
+    current_user: dict = Depends(get_current_user),
+    _: dict = Depends(require_action("platform.data.import.manage")),
+):
+    """Compatibility entry point for the old client-only import button.
+
+    The old synchronous importer skipped existing customers, so it could not
+    update names or assets. It now starts the same idempotent migration job as
+    the full migration workspace.
+    """
+    doc = await _syncro_config(current_user)
     if not doc or not doc.get("api_key") or not doc.get("subdomain"):
-        raise HTTPException(status_code=400, detail="Syncro not configured. Add your Syncro subdomain and API key in Settings.")
-    
-    subdomain = doc["subdomain"]
-    api_key = doc["api_key"]
-    base_url = f"https://{subdomain}.syncromsp.com/api/v1"
-    headers_dict = {"Authorization": api_key}
-    
-    imported = {"clients": 0, "contacts": 0, "assets": 0, "skipped": 0, "errors": []}
-    
+        raise HTTPException(status_code=400, detail="Configure Syncro before starting an import")
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Fetch all customers
-            page = 1
-            all_customers = []
-            while True:
-                resp = await client.get(f"{base_url}/customers?page={page}&per_page=50", headers=headers_dict)
-                if resp.status_code != 200:
-                    raise HTTPException(status_code=502, detail=f"Syncro API error: {resp.status_code}")
-                data = resp.json()
-                customers = data.get("customers", [])
-                if not customers:
-                    break
-                all_customers.extend(customers)
-                page += 1
-                if page > 20:  # Safety limit
-                    break
-            
-            for cust in all_customers:
-                syncro_id = str(cust.get("id", ""))
-                # Check if already imported
-                existing = await db.clients.find_one({"syncro_id": syncro_id}, {"_id": 0})
-                if existing:
-                    imported["skipped"] += 1
-                    continue
-                
-                # Create client
-                client_id = str(uuid.uuid4())
-                client_doc = {
-                    "id": client_id,
-                    "name": cust.get("business_name") or cust.get("firstname", "Unknown"),
-                    "email": cust.get("email"),
-                    "phone": cust.get("phone"),
-                    "address": cust.get("address"),
-                    "industry": None,
-                    "contract_type": "monthly",
-                    "mrr": 0.0,
-                    "device_count": 0,
-                    "ticket_count": 0,
-                    "contacts": [],
-                    "syncro_id": syncro_id,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-                await db.clients.insert_one(client_doc)
-                imported["clients"] += 1
-                
-                # Fetch contacts for this customer
-                try:
-                    contacts_resp = await client.get(f"{base_url}/customers/{syncro_id}/contacts", headers=headers_dict)
-                    if contacts_resp.status_code == 200:
-                        contacts = contacts_resp.json().get("contacts", [])
-                        for ct in contacts:
-                            contact_doc = {
-                                "id": str(uuid.uuid4()),
-                                "client_id": client_id,
-                                "name": f"{ct.get('name', '')}".strip() or "Unknown",
-                                "email": ct.get("email"),
-                                "phone": ct.get("phone"),
-                                "role": ct.get("title", ""),
-                                "is_primary": False,
-                                "syncro_contact_id": str(ct.get("id", "")),
-                                "created_at": datetime.now(timezone.utc).isoformat(),
-                            }
-                            await db.contacts.insert_one(contact_doc)
-                            imported["contacts"] += 1
-                except Exception as e:
-                    imported["errors"].append(f"Contacts for {cust.get('business_name','')}: {str(e)[:60]}")
-                
-                # Fetch assets for this customer
-                try:
-                    assets_resp = await client.get(f"{base_url}/customers/{syncro_id}/assets", headers=headers_dict)
-                    if assets_resp.status_code == 200:
-                        assets = assets_resp.json().get("assets", [])
-                        for asset in assets:
-                            device_doc = {
-                                "id": str(uuid.uuid4()),
-                                "name": asset.get("name") or asset.get("hostname") or "Unknown Device",
-                                "client_id": client_id,
-                                "client_name": client_doc["name"],
-                                "device_type": _map_syncro_asset_type(asset.get("asset_type", "")),
-                                "os": asset.get("properties", {}).get("Operating System", "Unknown"),
-                                "ip_address": asset.get("properties", {}).get("Local IP", ""),
-                                "serial_number": asset.get("serial_number", ""),
-                                "manufacturer": asset.get("properties", {}).get("Manufacturer", ""),
-                                "model": asset.get("properties", {}).get("Model", ""),
-                                "status": "online" if asset.get("online") else "offline",
-                                "syncro_asset_id": str(asset.get("id", "")),
-                                "last_seen": datetime.now(timezone.utc).isoformat(),
-                                "created_at": datetime.now(timezone.utc).isoformat(),
-                            }
-                            await db.devices.insert_one(device_doc)
-                            imported["assets"] += 1
-                except Exception as e:
-                    imported["errors"].append(f"Assets for {cust.get('business_name','')}: {str(e)[:60]}")
-        
-        return {
-            "status": "success",
-            "message": f"Imported {imported['clients']} clients, {imported['contacts']} contacts, {imported['assets']} devices",
-            **imported
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Syncro import failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)[:200]}")
+        job = await migration.create_job(
+            db,
+            tenant_id=platform_tenant_id(current_user),
+            requested_by=str(current_user.get("name") or current_user.get("email") or "system"),
+            entities=["customers", "contacts", "assets"],
+            mode="apply",
+        )
+    except migration.ActiveMigrationError as exc:
+        raise HTTPException(status_code=409, detail=f"Migration already running (job {exc.job_id})") from exc
+    _start_job_task(job["id"])
+    return {
+        "status": "accepted",
+        "job_id": job["id"],
+        "message": "Syncro import queued. Follow progress in the migration panel.",
+        "job": job,
+    }
+
 
 @router.get("/syncro/import-preview")
 async def preview_syncro_import(current_user: dict = Depends(get_current_user)):
-    """Preview what would be imported from Syncro without actually importing"""
-    doc = await db.settings.find_one({"type": "syncro"}, {"_id": 0})
-    if not doc or not doc.get("api_key") or not doc.get("subdomain"):
-        raise HTTPException(status_code=400, detail="Syncro not configured")
-    
-    subdomain = doc["subdomain"]
-    api_key = doc["api_key"]
-    base_url = f"https://{subdomain}.syncromsp.com/api/v1"
-    
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{base_url}/customers?page=1&per_page=100", headers={"Authorization": api_key})
-            if resp.status_code != 200:
-                raise HTTPException(status_code=502, detail=f"Syncro API error: {resp.status_code}")
-            data = resp.json()
-            customers = data.get("customers", [])
-        
-        # Check which are already imported
-        preview = []
-        for cust in customers:
-            syncro_id = str(cust.get("id", ""))
-            existing = await db.clients.find_one({"syncro_id": syncro_id}, {"_id": 0, "id": 1, "name": 1})
-            preview.append({
-                "syncro_id": syncro_id,
-                "name": cust.get("business_name") or cust.get("firstname", "Unknown"),
-                "email": cust.get("email"),
-                "phone": cust.get("phone"),
-                "already_imported": existing is not None,
-                "existing_client_id": existing.get("id") if existing else None,
-            })
-        
-        new_count = sum(1 for p in preview if not p["already_imported"])
-        return {
-            "total": len(preview),
-            "new": new_count,
-            "already_imported": len(preview) - new_count,
-            "customers": preview
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Preview failed: {str(e)[:200]}")
+    """Retained for clients that expected the old preview route.
 
-def _map_syncro_asset_type(asset_type: str) -> str:
-    mapping = {
-        "Desktop": "workstation",
-        "Laptop": "laptop",
-        "Server": "server",
-        "Tablet": "tablet",
-        "Mobile": "mobile",
-        "Printer": "printer",
-        "Network Device": "network",
-        "Other": "other",
+    A real preview is a dry-run migration job so it exercises the same
+    pagination, mappings and duplicate checks as the applied run.
+    """
+    return {
+        "deprecated": True,
+        "message": "Start a dry-run migration job to preview counts without writing records.",
+        "capabilities": migration.capabilities(),
     }
-    return mapping.get(asset_type, "workstation")

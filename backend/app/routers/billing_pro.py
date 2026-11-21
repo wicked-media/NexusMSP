@@ -32,7 +32,12 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    platform_tenant_id,
+    scope_query,
+)
 from app.services.commercial_documents import (
     freeze_commercial_document_snapshot,
     get_commercial_document_branding,
@@ -677,6 +682,55 @@ async def run_indexation(request: Request, current_user: dict = Depends(get_curr
 #  MID-CYCLE PRORATION
 # ============================================================================
 
+def _proration_calculation(ri: dict, data: dict) -> dict:
+    """Validate and calculate one mid-cycle charge or credit."""
+    try:
+        qty_delta = float(data.get("quantity_delta", 0))
+        unit_price = float(data.get("unit_price", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="quantity_delta and unit_price must be numbers") from None
+    if not math.isfinite(qty_delta) or not math.isfinite(unit_price):
+        raise HTTPException(status_code=422, detail="quantity_delta and unit_price must be finite numbers")
+    if qty_delta == 0:
+        raise HTTPException(status_code=422, detail="quantity_delta must be non-zero")
+    if abs(qty_delta) > 1_000_000:
+        raise HTTPException(status_code=422, detail="quantity_delta is too large")
+    if unit_price < 0 or unit_price > _MAX_CATALOGUE_MONEY:
+        raise HTTPException(status_code=422, detail="unit_price must be a finite non-negative amount")
+    description = _bounded_catalogue_text(
+        data.get("description") or "Mid-cycle change", "description", maximum=200
+    )
+    if not description:
+        raise HTTPException(status_code=422, detail="description must not be empty")
+    effective_date = str(data.get("effective_date") or datetime.now(timezone.utc).date().isoformat())
+    try:
+        eff_dt = datetime.strptime(effective_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="effective_date must be a YYYY-MM-DD date") from None
+
+    freq = str(ri.get("frequency") or "monthly").lower()
+    period_days = {"weekly": 7, "fortnightly": 14, "monthly": 30, "quarterly": 90, "annually": 365}.get(freq, 30)
+    next_generation = str(ri.get("next_generation") or effective_date)
+    try:
+        next_dt = datetime.strptime(next_generation, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Recurring invoice has no valid next billing date") from None
+    remaining = max(0, (next_dt - eff_dt).days)
+    full_period_charge = qty_delta * unit_price
+    prorated = round(full_period_charge * (remaining / period_days), 2)
+    return {
+        "remaining_days": remaining,
+        "period_days": period_days,
+        "full_period_charge": round(full_period_charge, 2),
+        "prorated_amount": prorated,
+        "currency": ri.get("currency", "AUD"),
+        "description": description,
+        "effective_date": effective_date,
+        "quantity_delta": qty_delta,
+        "unit_price": unit_price,
+    }
+
+
 @router.post(
     "/billing-pro/recurring/{ri_id}/prorate",
     dependencies=[Depends(require_action("billing.portal.view"))],
@@ -687,37 +741,182 @@ async def prorate_change(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    """Calculate prorated charge for adding/removing a line item mid-cycle.
-    Body: {quantity_delta, unit_price, description, effective_date}"""
+    """Preview a prorated charge for adding/removing capacity mid-cycle.
+
+    Body: {quantity_delta, unit_price, description, effective_date}
+    """
     ri = await _load_scoped_recurring_invoice(ri_id, current_user, request, "billing.recurring.prorate")
+    return _proration_calculation(ri, data)
+
+
+@router.post(
+    "/billing-pro/recurring/{ri_id}/prorate/apply",
+    dependencies=[Depends(require_action("billing.invoice.modify"))],
+)
+async def apply_proration(
+    ri_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Persist a prorated change as a draft invoice or issued credit note.
+
+    A positive adjustment creates a draft invoice so it follows the normal
+    numbering, approval and delivery path.  A reduction creates a credit note
+    instead of a negative invoice, which keeps receivables and tax reporting
+    consistent.  The adjustment record retains the signed amount, the source
+    recurring invoice and the resulting document for audit.
+    """
+    ri = await _load_scoped_recurring_invoice(ri_id, current_user, request, "billing.recurring.prorate.apply")
+    if ri.get("status") != "active":
+        raise HTTPException(status_code=409, detail="Proration can only be applied to an active recurring invoice")
+    calculation = _proration_calculation(ri, data)
+    signed_amount = float(calculation["prorated_amount"])
+    if signed_amount == 0:
+        raise HTTPException(status_code=422, detail="The prorated amount is zero; no invoice or credit note was created")
+
+    idempotency_key = str(data.get("idempotency_key") or uuid.uuid4().hex).strip()
+    if not idempotency_key or len(idempotency_key) > 200:
+        raise HTTPException(status_code=422, detail="idempotency_key must be at most 200 characters")
+    existing = await db.billing_proration_adjustments.find_one(
+        {"recurring_invoice_id": ri["id"], "idempotency_key": idempotency_key},
+        {"_id": 0},
+    )
+    if existing:
+        return {"message": "Proration adjustment already applied", "replayed": True, "adjustment": existing}
+
+    now = datetime.now(timezone.utc)
     try:
-        qty_delta = float(data.get("quantity_delta", 0))
-        unit_price = float(data.get("unit_price", 0))
+        tax_rate = float(ri.get("tax_rate") or 0)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="quantity_delta and unit_price must be numbers")
-    if not math.isfinite(qty_delta) or not math.isfinite(unit_price):
-        raise HTTPException(status_code=422, detail="quantity_delta and unit_price must be finite numbers")
-    eff = data.get("effective_date") or datetime.now(timezone.utc).date().isoformat()
-    # Compute days remaining in the current billing period
-    freq = ri.get("frequency", "monthly")
-    period_days = {"weekly": 7, "fortnightly": 14, "monthly": 30, "quarterly": 90, "annually": 365}.get(freq, 30)
-    next_gen = ri.get("next_generation") or eff
-    try:
-        eff_dt = datetime.fromisoformat(eff).replace(tzinfo=timezone.utc)
-        next_dt = datetime.fromisoformat(next_gen).replace(tzinfo=timezone.utc)
-        remaining = max(0, (next_dt - eff_dt).days)
-    except Exception:
-        remaining = period_days // 2
-    full_period_charge = qty_delta * unit_price
-    prorated = round(full_period_charge * (remaining / period_days), 2)
+        raise HTTPException(status_code=409, detail="Recurring invoice has an invalid tax rate") from None
+    if not math.isfinite(tax_rate) or not 0 <= tax_rate <= 100:
+        raise HTTPException(status_code=409, detail="Recurring invoice has an invalid tax rate")
+    signed_tax = round(signed_amount * tax_rate / 100, 2)
+    signed_total = round(signed_amount + signed_tax, 2)
+    direction = "charge" if signed_amount > 0 else "credit"
+    common = {
+        "client_id": ri.get("client_id"),
+        "client_name": ri.get("client_name") or "",
+        "currency": calculation["currency"],
+        "recurring_invoice_id": ri["id"],
+        "recurring_description": ri.get("description") or "",
+        "tenant_id": ri.get("tenant_id") or platform_tenant_id(current_user),
+        "created_by": current_user.get("name", ""),
+        "created_at": now.isoformat(),
+    }
+
+    if direction == "charge":
+        due_days = {"due_on_receipt": 0, "net_7": 7, "net_14": 14, "net_30": 30, "net_45": 45, "net_60": 60, "net_90": 90}.get(
+            ri.get("payment_terms"), 30
+        )
+        document = {
+            **common,
+            "id": f"inv-{uuid.uuid4().hex[:10]}",
+            "invoice_number": f"INV-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
+            "invoice_name": f"Proration - {ri.get('description') or ri['id']}"[:160],
+            "description": f"Mid-cycle proration: {calculation['description']}",
+            "line_items": [{
+                "description": f"Prorated adjustment - {calculation['description']}"[:200],
+                "details": f"{calculation['quantity_delta']:+g} x {calculation['currency']} {calculation['unit_price']:.2f} for {calculation['remaining_days']} of {calculation['period_days']} days",
+                "quantity": 1,
+                "rate": signed_amount,
+                "amount": signed_amount,
+                "proration_adjustment": True,
+            }],
+            "subtotal": signed_amount,
+            "tax_rate": tax_rate,
+            "tax_amount": signed_tax,
+            "total": signed_total,
+            "amount_due": signed_total,
+            "amount_paid": 0.0,
+            "status": "draft",
+            "payment_status": "unpaid",
+            "issue_date": now.date().isoformat(),
+            "due_date": (now + timedelta(days=due_days)).date().isoformat(),
+            "notes": f"Proration applied to recurring invoice {ri['id']} effective {calculation['effective_date']}.",
+            "source": "proration_adjustment",
+            "version": 1,
+        }
+        await db.invoices.insert_one(document)
+        document_id = document["id"]
+        document_number = document["invoice_number"]
+        document_type = "invoice"
+    else:
+        credit_total = abs(signed_total)
+        document = {
+            **common,
+            "id": f"cn-{uuid.uuid4().hex[:10]}",
+            "credit_note_number": f"CN-{now.strftime('%Y%m')}-{uuid.uuid4().hex[:6].upper()}",
+            "reason": f"Mid-cycle proration: {calculation['description']}",
+            "line_items": [{
+                "description": f"Prorated credit - {calculation['description']}"[:200],
+                "quantity": 1,
+                "rate": abs(signed_amount),
+                "amount": abs(signed_amount),
+                "proration_adjustment": True,
+            }],
+            "subtotal": abs(signed_amount),
+            "tax": abs(signed_tax),
+            "tax_rate": tax_rate,
+            "total": credit_total,
+            "currency": calculation["currency"],
+            "status": "issued",
+            "applied_to_invoice": False,
+            "source": "proration_adjustment",
+            "version": 1,
+        }
+        await db.credit_notes.insert_one(document)
+        document_id = document["id"]
+        document_number = document["credit_note_number"]
+        document_type = "credit_note"
+
+    adjustment = {
+        "id": f"pra-{uuid.uuid4().hex[:10]}",
+        "idempotency_key": idempotency_key,
+        "client_id": ri.get("client_id"),
+        "client_name": ri.get("client_name") or "",
+        "recurring_invoice_id": ri["id"],
+        "description": calculation["description"],
+        "effective_date": calculation["effective_date"],
+        "quantity_delta": calculation["quantity_delta"],
+        "unit_price": calculation["unit_price"],
+        "remaining_days": calculation["remaining_days"],
+        "period_days": calculation["period_days"],
+        "prorated_amount": signed_amount,
+        "tax_amount": signed_tax,
+        "total": signed_total,
+        "currency": calculation["currency"],
+        "direction": direction,
+        "document_type": document_type,
+        "document_id": document_id,
+        "document_number": document_number,
+        "tenant_id": common["tenant_id"],
+        "applied_by": current_user.get("id"),
+        "applied_by_name": current_user.get("name", ""),
+        "applied_at": now.isoformat(),
+    }
+    await db.billing_proration_adjustments.insert_one(adjustment)
+    await log_activity(
+        current_user,
+        "proration_applied",
+        "recurring_invoice",
+        ri["id"],
+        ri.get("description") or ri["id"],
+        f"Applied a prorated {direction} of {calculation['currency']} {abs(signed_total):.2f}",
+        metadata={
+            "client_id": ri.get("client_id"),
+            "adjustment_id": adjustment["id"],
+            "document_type": document_type,
+            "document_id": document_id,
+            "prorated_amount": signed_amount,
+        },
+    )
     return {
-        "remaining_days": remaining,
-        "period_days": period_days,
-        "full_period_charge": round(full_period_charge, 2),
-        "prorated_amount": prorated,
-        "currency": ri.get("currency", "AUD"),
-        "description": data.get("description", "Mid-cycle change"),
-        "effective_date": eff,
+        "message": f"Prorated {direction} recorded as {document_type.replace('_', ' ')} {document_number}",
+        "replayed": False,
+        "adjustment": adjustment,
+        "document": document,
     }
 
 
@@ -778,73 +977,166 @@ async def generation_calendar(request: Request, months: int = 3, current_user: d
 #  NET-NEW MRR / CHURN / EXPANSION
 # ============================================================================
 
+def _month_starts(now: datetime, count: int = 13) -> list[datetime]:
+    starts: list[datetime] = []
+    year, month = now.year, now.month
+    for _ in range(count):
+        starts.append(datetime(year, month, 1, tzinfo=timezone.utc))
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    return list(reversed(starts))
+
+
+def _iso_day(value: object) -> datetime | None:
+    text = str(value or "").strip()[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _monthly_recurring(amount: float, frequency: str) -> float:
+    freq = str(frequency or "monthly").lower()
+    if freq == "weekly":
+        return amount * 52 / 12
+    if freq == "fortnightly":
+        return amount * 26 / 12
+    if freq == "quarterly":
+        return amount / 3
+    if freq == "annually":
+        return amount / 12
+    return amount
+
+
 @router.get(
     "/billing-pro/recurring/mrr-analytics",
     dependencies=[Depends(require_action("billing.portal.view"))],
 )
 async def mrr_analytics(request: Request, current_user: dict = Depends(get_current_user)):
-    """Compute MRR breakdown — new, churn, expansion, contraction over last 12 months."""
+    """Report MRR movement from persisted recurring-invoice events.
+
+    New and churn use the recurring invoice start/termination dates.  Expansion
+    and contraction use the indexation audit log, the only historical price
+    movement Nexus currently records.  Line-item edits made outside indexation
+    are not inferred; the response states that limitation instead of returning
+    fabricated movement.
+    """
     await assert_global_scope(current_user, operation="billing.recurring.mrr_analytics.view", request=request)
-    ris = await db.recurring_invoices.find({}, {"_id": 0}).to_list(2000)
+    ris = await db.recurring_invoices.find({}, {"_id": 0}).to_list(5000)
+    indexations = await db.recurring_indexation_log.find({}, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
-    months = []
-    for i in range(12, -1, -1):
-        month = (now.replace(day=1) - timedelta(days=i * 30)).strftime("%Y-%m")
-        months.append(month)
-    monthly_mrr = {m: 0 for m in months}
+    starts = _month_starts(now)
+    months = [start.strftime("%Y-%m") for start in starts]
+    month_end = {
+        start.strftime("%Y-%m"): (starts[index + 1] if index + 1 < len(starts) else (now + timedelta(days=1))) - timedelta(seconds=1)
+        for index, start in enumerate(starts)
+    }
 
-    def to_monthly(amount: float, freq: str) -> float:
-        f = (freq or "monthly").lower()
-        if f == "annually":
-            return amount / 12
-        if f == "quarterly":
-            return amount / 3
-        if f == "fortnightly":
-            return amount * 26 / 12
-        if f == "weekly":
-            return amount * 52 / 12
-        return amount
+    frequency_by_ri = {str(ri.get("id")): str(ri.get("frequency") or "monthly") for ri in ris}
+    active_by_month = {month: 0.0 for month in months}
+    new_by_month = {month: 0.0 for month in months}
+    churn_by_month = {month: 0.0 for month in months}
+    expansion_by_month = {month: 0.0 for month in months}
+    contraction_by_month = {month: 0.0 for month in months}
 
-    active_now = 0
-    paused_now = 0
-    cancelled_now = 0
-    new_mrr = 0
-    expansion = 0
-    contraction = 0
-    churn = 0
-
+    current_mrr = paused_mrr = cancelled_mrr = 0.0
+    active_count = paused_count = cancelled_count = 0
     for ri in ris:
-        amount = float(ri.get("amount", 0) or 0)
-        mrr = to_monthly(amount, ri.get("frequency", "monthly"))
-        status = ri.get("status", "active")
-        if status == "active":
-            active_now += mrr
-            try:
-                created = (ri.get("created_at") or "")[:7]
-                if created in monthly_mrr:
-                    monthly_mrr[created] += mrr
-                    if created == months[-1]:
-                        new_mrr += mrr
-            except Exception:
-                pass
+        amount = float(ri.get("subtotal") if ri.get("subtotal") is not None else (ri.get("amount") or 0))
+        mrr = _monthly_recurring(amount, str(ri.get("frequency") or "monthly"))
+        status = str(ri.get("status") or "active")
+        started = _iso_day(ri.get("start_date")) or _iso_day(ri.get("created_at"))
+        if status == "active" and (started is None or started <= now):
+            current_mrr += mrr
+            active_count += 1
         elif status == "paused":
-            paused_now += mrr
-        elif status == "cancelled":
-            cancelled_now += mrr
-            churn += mrr
+            paused_mrr += mrr
+            paused_count += 1
+        elif status in {"cancelled", "completed"}:
+            cancelled_mrr += mrr
+            cancelled_count += 1
 
+        terminated = None
+        if status in {"cancelled", "completed"}:
+            terminated = _iso_day(ri.get("cancelled_at") or ri.get("completed_at") or ri.get("updated_at"))
+        elif status == "paused":
+            paused_at = _iso_day(ri.get("paused_at"))
+            if paused_at:
+                terminated = paused_at
+
+        for month in months:
+            end = month_end[month]
+            if started and started > end:
+                continue
+            if terminated and terminated <= end:
+                continue
+            active_by_month[month] += mrr
+            if started and started.strftime("%Y-%m") == month:
+                new_by_month[month] += mrr
+
+        if terminated:
+            churn_month = terminated.strftime("%Y-%m")
+            if churn_month in churn_by_month:
+                churn_by_month[churn_month] += mrr
+
+    for entry in indexations:
+        applied = _iso_day(entry.get("applied_at"))
+        if not applied:
+            continue
+        month = applied.strftime("%Y-%m")
+        if month not in expansion_by_month:
+            continue
+        try:
+            delta = float(entry.get("delta") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(delta):
+            continue
+        delta = _monthly_recurring(delta, frequency_by_ri.get(str(entry.get("ri_id")), "monthly"))
+        if delta > 0:
+            expansion_by_month[month] += delta
+        elif delta < 0:
+            contraction_by_month[month] += abs(delta)
+
+    by_month = [
+        {
+            "month": month,
+            "mrr": round(active_by_month[month], 2),
+            "new_mrr": round(new_by_month[month], 2),
+            "churn_mrr": round(churn_by_month[month], 2),
+            "expansion_mrr": round(expansion_by_month[month], 2),
+            "contraction_mrr": round(contraction_by_month[month], 2),
+            "net_new_mrr": round(
+                new_by_month[month]
+                + expansion_by_month[month]
+                - churn_by_month[month]
+                - contraction_by_month[month],
+                2,
+            ),
+        }
+        for month in months
+    ]
+    current = by_month[-1] if by_month else {}
     return {
-        "current_mrr": round(active_now, 2),
-        "paused_mrr": round(paused_now, 2),
-        "cancelled_mrr": round(cancelled_now, 2),
-        "new_mrr_this_month": round(new_mrr, 2),
-        "churn_this_month": round(churn, 2),
-        "expansion_mrr": round(expansion, 2),
-        "contraction_mrr": round(contraction, 2),
-        "active_count": sum(1 for r in ris if r.get("status") == "active"),
-        "paused_count": sum(1 for r in ris if r.get("status") == "paused"),
-        "cancelled_count": sum(1 for r in ris if r.get("status") == "cancelled"),
-        "by_month": [{"month": m, "mrr": round(monthly_mrr[m], 2)} for m in months],
+        "current_mrr": round(current_mrr, 2),
+        "paused_mrr": round(paused_mrr, 2),
+        "cancelled_mrr": round(cancelled_mrr, 2),
+        "new_mrr_this_month": current.get("new_mrr", 0),
+        "churn_this_month": current.get("churn_mrr", 0),
+        "expansion_mrr": current.get("expansion_mrr", 0),
+        "contraction_mrr": current.get("contraction_mrr", 0),
+        "net_new_mrr_this_month": current.get("net_new_mrr", 0),
+        "active_count": active_count,
+        "paused_count": paused_count,
+        "cancelled_count": cancelled_count,
+        "by_month": by_month,
+        "movement_source": "recurring_invoices+recurring_indexation_log",
+        "limitations": [
+            "Recurring line-item edits that bypass indexation are not recorded as movement events.",
+            "Historical MRR values use the recurring template's current subtotal; they are reconstructable active-base estimates, not posted general-ledger balances.",
+        ],
     }
 
 

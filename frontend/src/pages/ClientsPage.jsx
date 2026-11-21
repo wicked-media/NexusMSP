@@ -538,15 +538,18 @@ export default function ClientsPage() {
 
   const s = data.summary || {};
   const attentionClients = (data.clients || [])
-    .filter(client => client.patch_pending > 0 || ["critical", "at_risk"].includes(resolveClientHealthBand(client)?.key))
+    .filter(client => client.patch_pending > 0 || ["critical", "at_risk", "needs_attention"].includes(resolveClientHealthBand(client)?.key))
     .sort((a, b) => (b.patch_pending || 0) - (a.patch_pending || 0) || (a.health_score || 0) - (b.health_score || 0));
+  const unscoredClientCount = (data.clients || []).filter((client) => !resolveClientHealthBand(client)).length;
   const clientWorkspaceSignal = attentionClients.some(client => resolveClientHealthBand(client)?.signal === "critical")
     ? "critical"
     : attentionClients.length > 0 || (s.patch_pending || 0) > 0
       ? "attention"
-      : (s.client_count || 0) > 0
-        ? "healthy"
-        : "recommendation";
+      : (s.client_count || 0) === 0
+        ? "recommendation"
+        : unscoredClientCount === (s.client_count || 0)
+          ? "neutral"
+          : "healthy";
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -574,7 +577,7 @@ export default function ClientsPage() {
             <TopMetric label="Clients" value={s.client_count || 0} trend={s.prospects ? `+${s.prospects} prospect${s.prospects !== 1 ? "s" : ""}` : "managed portfolio"} color="indigo" />
             <TopMetric label="Assessed Endpoints" value={s.assessed_endpoints || 0} trend="Nexus Agent evidence" color="sky" />
             <TopMetric label="Patch Exposure" value={s.patch_pending || 0} trend={(s.patch_pending || 0) > 0 ? "updates need review" : "no agent-reported updates"} color={(s.patch_pending || 0) > 0 ? "amber" : "emerald"} />
-            <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : "all clear"} color={attentionClients.length ? "rose" : "emerald"} />
+            <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : unscoredClientCount ? "no scored risk; unassessed excluded" : "all clear"} color={attentionClients.length ? "rose" : unscoredClientCount ? "zinc" : "emerald"} />
           </MetricStrip>
         </div>}
 
@@ -693,7 +696,7 @@ export default function ClientsPage() {
                   <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Portfolio focus</p>
                   <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">Work from the account that needs you next.</h2>
                   <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">The directory is ordered by recorded operational pressure. Open an account to see its clear next step, coverage gaps and complete evidence trail.</p>
-                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
                     {CLIENT_HEALTH_BANDS.map((band) => {
                       const count = (data.clients || []).filter((client) => resolveClientHealthBand(client)?.key === band.key).length;
                       return (
@@ -898,13 +901,16 @@ function ClientWorkspaceNavigation({ value, onChange, resolveEntry }) {
 
 function ClientDigitalTwinOverview({ client, activity, healthDetail }) {
   const breakdown = healthDetail?.breakdown;
+  const currentScore = healthDetail?.health_score ?? client.health_score;
   const dimensions = breakdown ? [
-    { key: "tickets", label: "Tickets", max: 30 },
-    { key: "sla", label: "SLA", max: 20 },
-    { key: "devices", label: "Devices", max: breakdown.m365_hygiene != null ? 15 : 20 },
-    { key: "payments", label: "Payments", max: 20 },
-    { key: "contracts", label: "Contracts", max: breakdown.m365_hygiene != null ? 5 : 10 },
-    ...(breakdown.m365_hygiene != null ? [{ key: "m365_hygiene", label: "Microsoft 365", max: 10 }] : []),
+    { key: "ticket_health", label: "Tickets" },
+    { key: "device_health", label: "Devices" },
+    { key: "payment_health", label: "Payments" },
+    { key: "backup_health", label: "Backups" },
+    { key: "security_health", label: "Security" },
+    { key: "m365_hygiene", label: "Microsoft 365" },
+    { key: "network_health", label: "Network" },
+    { key: "sentiment", label: "Sentiment" },
   ] : [];
 
   return (
@@ -914,27 +920,28 @@ function ClientDigitalTwinOverview({ client, activity, healthDetail }) {
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Health evidence</p>
             <h3 className="mt-1 text-base font-semibold text-foreground">Understand the account score</h3>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">The score is calculated from recorded service, SLA, device, payment, agreement and Microsoft evidence. It is a guide for review, not an unexplained prediction.</p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">The score is calculated from recorded service, device, payment, backup, security, Microsoft 365 and network evidence. Missing sources stay unassessed; the score is a guide for review, not an unexplained prediction.</p>
+            {healthDetail?.evidence_state && <p className="mt-1 text-[11px] text-muted-foreground">Evidence state: {String(healthDetail.evidence_state).replaceAll("_", " ")} · {healthDetail.evidence_coverage_pct ?? 0}% of dimensions recorded</p>}
           </div>
           <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/45 px-3 py-2">
             <span className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">Current score</span>
-            <span className="font-mono text-sm font-semibold text-foreground">{healthDetail?.health_score ?? client.health_score ?? "—"}/100</span>
+            <span className="font-mono text-sm font-semibold text-foreground">{currentScore == null ? "Not assessed" : `${currentScore}/100`}</span>
           </div>
         </div>
         {dimensions.length ? (
-          <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-            {dimensions.map(({ key, label, max }) => {
-              const value = breakdown[key] ?? 0;
-              const percentage = Math.min(100, (value / max) * 100);
+          <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
+            {dimensions.map(({ key, label }) => {
+              const value = typeof breakdown[key] === "number" ? Math.round(breakdown[key]) : null;
+              const percentage = value === null ? 0 : Math.min(100, value);
               const color = percentage >= 85 ? "bg-emerald-400" : percentage >= 60 ? "bg-amber-400" : "bg-rose-400";
               return (
                 <div key={key} data-testid={`health-breakdown-${key}`}>
                   <div className="flex items-center justify-between gap-2 text-[10px]">
                     <span className="uppercase tracking-[0.12em] text-muted-foreground">{label}</span>
-                    <span className="font-mono text-foreground">{value}/{max}</span>
+                    <span className="font-mono text-foreground">{value === null ? "—" : `${value}/100`}</span>
                   </div>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div className={`h-full rounded-full ${color}`} style={{ width: `${percentage}%` }} />
+                    {value !== null && <div className={`h-full rounded-full ${color}`} style={{ width: `${percentage}%` }} />}
                   </div>
                 </div>
               );

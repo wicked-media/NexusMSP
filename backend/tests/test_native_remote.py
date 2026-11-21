@@ -266,6 +266,49 @@ def test_native_readiness_requires_online_capable_linked_agent(monkeypatch):
     }
 
 
+def test_fleet_readiness_batches_agent_evidence_without_single_device_queries(monkeypatch):
+    now = native_remote._iso(native_remote._now())
+    database = SimpleNamespace(
+        nexus_agents=Rows([
+            {
+                "id": "agent-ready", "client_id": "client-1", "tenant_id": "tenant-1",
+                "is_active": True, "last_seen": now,
+                "agent_runtime_capabilities": [
+                    native_remote.RUNTIME_CAPABILITY,
+                    native_remote.UNATTENDED_RUNTIME_CAPABILITY,
+                ],
+                "native_remote_evidence": {"status": "ready"},
+            },
+            {
+                "id": "agent-offline", "client_id": "client-1", "tenant_id": "tenant-1",
+                "is_active": True, "last_seen": "2020-01-01T00:00:00+00:00",
+                "agent_runtime_capabilities": [native_remote.RUNTIME_CAPABILITY],
+                "native_remote_evidence": {"status": "ready"},
+            },
+        ]),
+    )
+    monkeypatch.setattr(native_remote, "db", database)
+
+    rows = asyncio.run(native_remote.fleet_device_readiness(
+        [
+            {"id": "device-ready", "name": "Reception", "client_id": "client-1", "nexus_agent_id": "agent-ready"},
+            {"id": "device-offline", "name": "Workshop", "client_id": "client-1", "nexus_agent_id": "agent-offline"},
+            {"id": "device-missing", "name": "Store room", "client_id": "client-1", "nexus_agent_id": "agent-missing"},
+            {"id": "device-unlinked", "name": "Loan laptop", "client_id": "client-1"},
+        ],
+        "tenant-1",
+    ))
+
+    by_id = {row["device_id"]: row for row in rows}
+    assert by_id["device-ready"]["ready"] is True
+    assert by_id["device-ready"]["state"] == "ready"
+    assert by_id["device-ready"]["unattended_ready"] is True
+    assert by_id["device-offline"]["state"] == "agent_offline"
+    assert by_id["device-missing"]["state"] == "agent_unavailable"
+    assert by_id["device-unlinked"]["state"] == "not_enrolled"
+    assert all(row["client_name"] is None for row in rows)
+
+
 def test_third_party_remote_launches_are_retired(monkeypatch):
     async def no_indexes():
         return None

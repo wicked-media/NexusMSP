@@ -18,8 +18,16 @@ export function buildEstateStatus(summary, phase = "ready") {
   }
 
   const score = normaliseScore(summary?.health_score);
-  if (phase === "unavailable" || score === null) {
+  if (phase === "unavailable") {
     return { label: "Unavailable", score: null, tone: "neutral", detail: "Unavailable" };
+  }
+  if (score === null) {
+    // The API returns an explicit label when a score cannot be earned (for
+    // example an empty estate). Honour it instead of inventing a number.
+    const explicit = typeof summary?.health_label === "string" && summary.health_label.trim()
+      ? summary.health_label.trim()
+      : "Unavailable";
+    return { label: explicit, score: null, tone: "neutral", detail: explicit };
   }
 
   const tone = score < 50 ? "critical" : score < 75 ? "warning" : score < 90 ? "stable" : "healthy";

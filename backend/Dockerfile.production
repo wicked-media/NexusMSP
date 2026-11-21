@@ -17,14 +17,18 @@ RUN mkdir -p /out \
     && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-agent.exe ./cmd/nexus-agent \
     && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-client-chat.exe ./cmd/nexus-chat \
     && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-agent-tray.exe ./cmd/nexus-tray \
-    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-remote-companion.exe ./cmd/nexus-remote-companion
+    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H=windowsgui -X main.Version=${NEXUS_AGENT_VERSION}" -o /out/nexus-remote-companion.exe ./cmd/nexus-remote-companion
 
 
 FROM python:3.12-slim AS runtime
 
+ARG NEXUS_AGENT_VERSION=0.1.11-endpoint-readiness
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    NEXUS_AGENT_VERSION=${NEXUS_AGENT_VERSION} \
+    NEXUS_AGENT_VERSION_FILE=/app/agent/dist/VERSION
 
 WORKDIR /app
 
@@ -45,7 +49,11 @@ COPY --from=agent-build --chown=nexus:nexus /out/nexus-agent.exe ./agent/dist/ne
 COPY --from=agent-build --chown=nexus:nexus /out/nexus-client-chat.exe ./agent/dist/nexus-client-chat.exe
 COPY --from=agent-build --chown=nexus:nexus /out/nexus-agent-tray.exe ./agent/dist/nexus-agent-tray.exe
 COPY --from=agent-build --chown=nexus:nexus /out/nexus-remote-companion.exe ./agent/dist/nexus-remote-companion.exe
-RUN mkdir -p /app/data/agent-installers /app/uploads /app/private_uploads && chown -R nexus:nexus /app
+# Keep the runtime version aligned with the binaries built above. The release
+# image uses the same file, written from the verified signed bundle instead.
+RUN mkdir -p /app/data/agent-installers /app/uploads /app/private_uploads \
+    && printf '%s\n' "$NEXUS_AGENT_VERSION" > /app/agent/dist/VERSION \
+    && chown -R nexus:nexus /app
 
 USER nexus
 EXPOSE 8000

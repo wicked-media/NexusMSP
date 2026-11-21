@@ -119,7 +119,7 @@ def test_load_executive_state_scopes_client_health_with_the_requesting_user(monk
         seen["current_user"] = current_user
         return {"client_id": client.get("id"), "health_score": 72}
 
-    monkeypatch.setattr(executive, "_compute_health", _fake_compute_health)
+    monkeypatch.setattr(executive, "compute_health", _fake_compute_health)
 
     state = asyncio.run(_load_executive_state(user))
 

@@ -14,8 +14,7 @@ import uuid
 from pathlib import Path
 
 from app.database import db, client, UPLOADS_DIR
-from app.services.seed import seed_data
-from app.services.runtime_config import background_workers_enabled, cors_origins, demo_seed_enabled
+from app.services.runtime_config import background_workers_enabled, cors_origins
 from app.services import schema_migrations
 from app.services.observability import (
     HTTP_IN_PROGRESS,
@@ -214,9 +213,6 @@ _LEGACY_HTTP_OPERATION_OWNERS: dict[tuple[str, str], str] = {
     ("/api/huntress/test-connection", "GET"): "huntress",
     ("/api/huntress/agents", "GET"): "huntress",
     ("/api/proxmox/vms", "GET"): "infrastructure",
-    ("/api/warranties", "GET"): "infrastructure",
-    ("/api/warranties", "POST"): "infrastructure",
-    ("/api/warranties/{warranty_id}", "DELETE"): "infrastructure",
     ("/api/vendors", "GET"): "infrastructure",
     ("/api/vendors", "POST"): "infrastructure",
     ("/api/vendors/{vendor_id}", "PUT"): "infrastructure",
@@ -357,7 +353,7 @@ async def root():
     return {"message": "NexusOps API v3.0.0", "status": "operational"}
 
 # Health probes â€” MUST be lightweight + synchronous (no DB calls) so K8s readiness
-# checks pass immediately even while seed_data / background tasks are warming up.
+# checks pass immediately even while background tasks are warming up.
 # Both /health (unprefixed, used by ingress/K8s) and /api/health are exposed.
 @app.get("/health")
 @app.get("/api/health")
@@ -444,6 +440,7 @@ def background_worker_specs():
     from app.routers.invoice_reminders import invoice_reminder_scheduler
     from app.routers.maintenance_windows import maintenance_window_scheduler
     from app.routers.permission_elevation import nexus_elevate_reconcile_scheduler
+    from app.services.ticket_checkpoint_notifications import ticket_checkpoint_notification_scheduler
 
     return (
         ("recurring-invoices", _recurring_invoice_scheduler),
@@ -457,6 +454,7 @@ def background_worker_specs():
         ("event-delivery", _event_delivery_loop),
         ("event-retention", _event_retention_loop),
         ("automation-runtime", _automation_runtime_loop),
+        ("ticket-checkpoints", ticket_checkpoint_notification_scheduler),
         ("proxmox-inventory", _proxmox_inventory_reconcile_loop),
         ("maintenance-windows", maintenance_window_scheduler),
     )
@@ -807,13 +805,6 @@ async def _boot_warmup():
         await ensure_project_ticket_plan_indexes()
     except Exception as e:
         logger.error(f"Project ticket-plan uniqueness guard failed: {e}")
-    if demo_seed_enabled():
-        try:
-            await seed_data()
-        except Exception as e:
-            logger.error(f"seed_data failed: {e}")
-    else:
-        logger.info("Demo-data seeding is disabled for this runtime")
     try:
         from app.routers.ticket_suggestions import generate_ticket_number
         tickets_without_number = await db.tickets.find(

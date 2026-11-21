@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
+from app.services import ticket_checkpoint_notifications
 
 router = APIRouter()
 
@@ -54,4 +55,13 @@ async def move_ticket(data: dict, current_user: dict = Depends(get_current_user)
     result = await db.tickets.update_one({"id": ticket_id}, {"$set": {"status": persisted_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    if persisted_status in {"resolved", "closed", "cancelled"}:
+        ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+        if ticket:
+            await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+                ticket,
+                tenant_id=str(ticket.get("tenant_id") or "nexus-local"),
+                actor=current_user,
+                database=db,
+            )
     return {"status": "moved", "ticket_id": ticket_id, "new_status": new_status}

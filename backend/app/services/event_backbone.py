@@ -13,9 +13,11 @@ from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
+import socket
 from typing import Any
 from urllib.parse import urlparse
 import uuid
@@ -177,6 +179,78 @@ def validate_webhook_url(value: str) -> str:
         raise ValueError("Webhook delivery requires HTTPS; HTTP is allowed only for localhost")
     if not parsed.hostname:
         raise ValueError("A valid webhook host is required")
+    return url
+
+
+def _address_rejection_reason(raw: str) -> str | None:
+    """Return why a resolved address is not a public destination, or ``None``."""
+    try:
+        address = ipaddress.ip_address(str(raw).split("%", 1)[0])
+    except ValueError:
+        return "unparseable address"
+    if address.version == 6 and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    checks = (
+        ("loopback", address.is_loopback),
+        ("link-local", address.is_link_local),
+        ("private", address.is_private),
+        ("multicast", address.is_multicast),
+        ("reserved", address.is_reserved),
+        ("unspecified", address.is_unspecified),
+    )
+    for label, failed in checks:
+        if failed:
+            return label
+    return None
+
+
+async def _resolve_addresses(host: str, port: int) -> list[str]:
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+async def assert_outbound_destination(value: Any) -> str:
+    """Validate a delivery URL and refuse destinations that are not public.
+
+    ``validate_webhook_url`` covers scheme, shape and embedded credentials.
+    This adds the network boundary a delivery needs: the host is resolved and
+    every returned address must be globally routable, so a name pointing at
+    loopback, a private range, link-local metadata or another reserved block is
+    refused before any request is made. Every address is checked, so a
+    round-robin name cannot smuggle an internal target in behind a public one.
+
+    Resolution happens immediately before the attempt, which narrows but cannot
+    eliminate a DNS-rebinding race against a nameserver the attacker controls.
+    Do not present this as proof against such an attacker.
+    """
+    url = validate_webhook_url(str(value or ""))
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise ValueError("Webhook URL has an invalid port") from exc
+
+    try:
+        literal = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        addresses = [str(literal)]
+    else:
+        try:
+            addresses = await _resolve_addresses(host, port)
+        except (socket.gaierror, OSError) as exc:
+            raise ValueError("Webhook host could not be resolved") from exc
+
+    if not addresses:
+        raise ValueError("Webhook host resolved to no addresses")
+    for candidate in addresses:
+        reason = _address_rejection_reason(candidate)
+        if reason:
+            raise ValueError(f"Webhook destination resolves to a non-public address ({reason})")
     return url
 
 
@@ -451,7 +525,7 @@ async def create_subscription(data: dict, actor: dict) -> dict:
     signing_secret = None
     signing_secret_encrypted = None
     if delivery_type == "webhook":
-        endpoint_url = validate_webhook_url(data.get("endpoint_url"))
+        endpoint_url = await assert_outbound_destination(data.get("endpoint_url"))
         signing_secret = secrets.token_urlsafe(32)
         signing_secret_encrypted = encrypt_signing_secret(signing_secret)
     now = utc_now()
@@ -491,7 +565,7 @@ async def update_subscription(subscription_id: str, data: dict) -> dict | None:
     if "enabled" in data:
         update["enabled"] = bool(data["enabled"])
     if "endpoint_url" in data and current.get("delivery_type") == "webhook":
-        update["endpoint_url"] = validate_webhook_url(data["endpoint_url"])
+        update["endpoint_url"] = await assert_outbound_destination(data["endpoint_url"])
     await db.platform_event_subscriptions.update_one({"id": subscription_id}, {"$set": update})
     return await db.platform_event_subscriptions.find_one(
         {"id": subscription_id},
@@ -542,7 +616,14 @@ async def _claim_due_delivery() -> dict | None:
     return document
 
 
-async def _deliver_webhook(delivery: dict, subscription: dict, event: dict) -> tuple[bool, int | None, str | None]:
+async def _deliver_webhook(
+    delivery: dict, subscription: dict, event: dict
+) -> tuple[bool, int | None, str | None, bool]:
+    """Deliver one event, returning (success, status, excerpt, permanent_failure)."""
+    try:
+        endpoint_url = await assert_outbound_destination(subscription.get("endpoint_url"))
+    except ValueError as exc:
+        return False, None, f"Blocked destination: {exc}"[:500], True
     body = json.dumps(event, separators=(",", ":"), sort_keys=True, default=str)
     secret = decrypt_signing_secret(subscription.get("signing_secret_encrypted"))
     signature = hmac.new(secret.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).hexdigest() if secret else ""
@@ -557,11 +638,11 @@ async def _deliver_webhook(delivery: dict, subscription: dict, event: dict) -> t
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0), follow_redirects=False) as client:
-            response = await client.post(subscription["endpoint_url"], content=body, headers=headers)
+            response = await client.post(endpoint_url, content=body, headers=headers)
         excerpt = response.text[:500] if response.text else None
-        return 200 <= response.status_code < 300, response.status_code, excerpt
+        return 200 <= response.status_code < 300, response.status_code, excerpt, False
     except Exception as exc:  # network failures are retained and retried
-        return False, None, str(exc)[:500]
+        return False, None, str(exc)[:500], False
 
 
 async def process_due_deliveries(limit: int = 25) -> dict:
@@ -579,6 +660,7 @@ async def process_due_deliveries(limit: int = 25) -> dict:
         success = False
         status_code = None
         response_excerpt = None
+        permanent_failure = False
         if not subscription:
             response_excerpt = "Subscription no longer exists"
         elif not subscription.get("enabled", True):
@@ -588,7 +670,9 @@ async def process_due_deliveries(limit: int = 25) -> dict:
         elif subscription.get("delivery_type") == "audit":
             success = True
         else:
-            success, status_code, response_excerpt = await _deliver_webhook(delivery, subscription, event)
+            success, status_code, response_excerpt, permanent_failure = await _deliver_webhook(
+                delivery, subscription, event
+            )
 
         attempts = int(delivery.get("attempts") or 0) + 1
         now = utc_now()
@@ -604,7 +688,7 @@ async def process_due_deliveries(limit: int = 25) -> dict:
         if success:
             update.update({"status": "delivered", "delivered_at": now, "next_attempt_at": None, "last_error": None})
             result["delivered"] += 1
-        elif attempts >= int(delivery.get("max_attempts") or MAX_DELIVERY_ATTEMPTS):
+        elif permanent_failure or attempts >= int(delivery.get("max_attempts") or MAX_DELIVERY_ATTEMPTS):
             update.update({"status": "dead_letter", "next_attempt_at": None, "last_error": response_excerpt or f"HTTP {status_code}"})
             result["dead_letter"] += 1
         else:

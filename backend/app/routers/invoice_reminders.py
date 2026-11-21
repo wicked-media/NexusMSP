@@ -33,7 +33,7 @@ SYSTEM_ACTOR = {"id": "system", "name": "Reminder automation"}
 
 # ============== helpers ==============
 
-async def _load_settings() -> dict:
+async def load_reminder_settings() -> dict:
     stored = await db.settings.find_one({"type": "invoice_reminders"}, {"_id": 0})
     if not stored:
         normalised, _ = policy.normalise_reminder_settings({})
@@ -89,8 +89,10 @@ async def run_due_reminders(actor: dict, *, force: bool = False, today=None) -> 
     """
     now = datetime.now(timezone.utc)
     today = today or now.date()
-    settings = await _load_settings()
+    settings = await load_reminder_settings()
     if force:
+        # Manual runs bypass the programme switch and weekend hold, but must
+        # still honour paid/cancelled/zero-balance/minimum-balance eligibility.
         settings = {**settings, "enabled": True, "weekday_only": False}
 
     summary = {"sent": 0, "skipped": 0, "failed": 0, "items": []}
@@ -100,16 +102,17 @@ async def run_due_reminders(actor: dict, *, force: bool = False, today=None) -> 
         return {**summary, "message": "Weekend hold active — reminders resume on the next business day"}
 
     invoices = await db.invoices.find(
-        {"payment_status": {"$in": ["unpaid", "partial"]}, "status": {"$ne": "cancelled"}},
+        {
+            "payment_status": {"$in": ["unpaid", "partial"]},
+            "status": {"$ne": "cancelled"},
+            "is_split_parent": {"$ne": True},
+        },
         {"_id": 0},
     ).to_list(10000)
     msp_name = await _msp_name()
 
     for invoice in invoices:
-        firing = policy.due_stages(invoice, settings, today) if not force else [
-            stage for stage in settings.get("stages", [])
-            if stage.get("enabled", True) and policy.stage_trigger_date(stage, policy.parse_date(invoice.get("due_date")) or today) == today
-        ]
+        firing = policy.due_stages(invoice, settings, today)
         if not firing:
             continue
         recipient = await _billing_contact(str(invoice.get("client_id") or ""), invoice)
@@ -231,7 +234,7 @@ async def invoice_reminder_scheduler():
 
 @router.get("")
 async def get_reminder_programme(current_user: dict = Depends(get_current_user)):
-    settings = await _load_settings()
+    settings = await load_reminder_settings()
     sent_30d = await db.invoice_reminder_log.count_documents({
         "sent_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()},
     })
@@ -270,10 +273,14 @@ async def update_reminder_programme(
 @router.get("/schedule")
 async def reminder_schedule(current_user: dict = Depends(get_current_user)):
     """What is set up to fire: upcoming reminders across unpaid invoices."""
-    settings = await _load_settings()
+    settings = await load_reminder_settings()
     today = datetime.now(timezone.utc).date()
     invoices = await db.invoices.find(
-        {"payment_status": {"$in": ["unpaid", "partial"]}, "status": {"$ne": "cancelled"}},
+        {
+            "payment_status": {"$in": ["unpaid", "partial"]},
+            "status": {"$ne": "cancelled"},
+            "is_split_parent": {"$ne": True},
+        },
         {"_id": 0},
     ).to_list(2000)
     rows = []

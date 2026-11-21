@@ -25,6 +25,7 @@ from app.services.scope_permissions import (
 )
 from app.services.ticket_conversation import sanitise_ticket_rich_text
 from app.services.ticket_subscriptions import ensure_ticket_subscription_indexes, notify_ticket_subscribers
+from app.services import ticket_checkpoint_notifications
 from app.services.upload_security import upload_is_releasable
 from app.services.ticket_time import (
     create_canonical_ticket_time_entry,
@@ -61,6 +62,9 @@ class TicketConversationEntryCreate(BaseModel):
     to_addresses: List[str] = Field(default_factory=list, max_length=25)
     subject_label: str = Field(default="Update", max_length=80)
     status_after: Optional[Literal["open", "in_progress", "on_hold", "resolved"]] = None
+    # A customer-visible update can carry the explicit time Nexus promised the
+    # next update. It is stored on the ticket, not in the retry ledger.
+    next_checkpoint_at: Optional[datetime] = None
     idempotency_key: str = Field(min_length=16, max_length=128)
     time: Optional[TicketConversationTime] = None
 
@@ -310,7 +314,12 @@ async def _ticket_time_actor(current_user: dict) -> tuple[dict, float]:
     )
 
 
-def _conversation_fingerprint(payload: TicketConversationEntryCreate, *, content: str) -> str:
+def _conversation_fingerprint(
+    payload: TicketConversationEntryCreate,
+    *,
+    content: str,
+    next_checkpoint_at: str | None,
+) -> str:
     """Bind a browser retry key to one exact, safe workflow request."""
     time_payload = payload.time.model_dump(mode="json") if payload.time else None
     safe = {
@@ -320,6 +329,7 @@ def _conversation_fingerprint(payload: TicketConversationEntryCreate, *, content
         "to_addresses": sorted({address.strip().lower() for address in payload.to_addresses if address.strip()}),
         "subject_label": payload.subject_label.strip(),
         "status_after": payload.status_after or "",
+        "next_checkpoint_at": next_checkpoint_at or "",
         "time": time_payload,
     }
     encoded = json.dumps(safe, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -411,6 +421,25 @@ def _performed_at(value: datetime | None) -> str | None:
     return normalised.isoformat()
 
 
+def _next_checkpoint_at(value: datetime | None) -> str | None:
+    """Validate the explicit time a customer was promised the next update.
+
+    A small past grace window keeps a retried request replayable when the
+    original promise time has just elapsed.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        raise HTTPException(status_code=422, detail="The next update time must include a timezone")
+    normalised = value.astimezone(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if normalised < now - timedelta(minutes=5):
+        raise HTTPException(status_code=422, detail="The next update time must be in the future")
+    if normalised > now + timedelta(days=366):
+        raise HTTPException(status_code=422, detail="The next update time must be within 366 days")
+    return normalised.isoformat()
+
+
 async def _ensure_ticket_conversation_action_indexes() -> None:
     """Protect the retry ledger without making comments a second source of truth."""
     database_id = id(db)
@@ -457,6 +486,88 @@ async def _ticket_by_create_idempotency_key(current_user: dict, idempotency_key:
     return await db.tickets.find_one(
         tenant_scoped_query(current_user, {"idempotency_key": idempotency_key}),
         {"_id": 0},
+    )
+
+
+async def _settle_promised_checkpoint(
+    ticket: dict,
+    current_user: dict,
+    *,
+    comment: dict,
+    clear_existing_promise: bool,
+) -> None:
+    """Resolve the due-promise projection after a client-visible update.
+
+    Delivery-state maintenance must never turn a published customer update into
+    a failed request.  The ticket and notification records are both scoped by
+    tenant/client in the service; failures leave explicit logs for repair.
+    """
+    try:
+        result = await ticket_checkpoint_notifications.acknowledge_client_visible_update(
+            ticket,
+            tenant_id=platform_tenant_id(current_user),
+            published_before=comment.get("created_at"),
+            actor=current_user,
+            comment_id=comment.get("id"),
+            clear_existing_promise=clear_existing_promise,
+        )
+    except Exception:
+        logger.exception(
+            "ticket checkpoint settlement failed ticket_id=%s comment_id=%s",
+            ticket.get("id"),
+            comment.get("id"),
+        )
+        return
+
+    if result.get("promise_cleared"):
+        checkpoint_at = result.get("cleared_checkpoint_at")
+        await ticket_audit(
+            ticket["id"],
+            current_user,
+            "next_checkpoint_fulfilled",
+            (
+                f"Client-visible update fulfilled the promised update at {checkpoint_at}"
+                if checkpoint_at
+                else "Client-visible update fulfilled the previous promised checkpoint"
+            ),
+            metadata={
+                "comment_id": comment.get("id"),
+                "checkpoint_at": checkpoint_at,
+                "alerts_resolved": result.get("alerts_resolved", 0),
+            },
+        )
+
+
+async def _settle_closed_checkpoint(ticket: dict, current_user: dict) -> None:
+    """Clear an obsolete promised update after a ticket is closed or resolved."""
+    result = await ticket_checkpoint_notifications.settle_closed_ticket_checkpoint(
+        ticket,
+        tenant_id=platform_tenant_id(current_user),
+        actor=current_user,
+        database=db,
+    )
+    if not result.get("promise_cleared") and not result.get("alerts_resolved"):
+        return
+    checkpoint_at = result.get("cleared_checkpoint_at")
+    parts = []
+    if result.get("promise_cleared"):
+        parts.append(
+            f"cleared the promised update at {checkpoint_at}"
+            if checkpoint_at
+            else "cleared the previous promised checkpoint"
+        )
+    if result.get("alerts_resolved"):
+        parts.append(f"resolved {result['alerts_resolved']} due alert(s)")
+    await ticket_audit(
+        ticket["id"],
+        current_user,
+        "next_checkpoint_closed",
+        f"Ticket closure {' and '.join(parts)}",
+        metadata={
+            "checkpoint_at": checkpoint_at,
+            "alerts_resolved": result.get("alerts_resolved", 0),
+            "resolution": result.get("resolution"),
+        },
     )
 
 
@@ -607,7 +718,7 @@ async def get_tickets(
     await attach_user_avatars(tickets, id_fields=("assigned_to",), output_field="assignee_avatar")
     await _attach_client_branding(tickets, current_user)
     for t in tickets:
-        for field in ['created_at', 'updated_at', 'sla_due']:
+        for field in ['created_at', 'updated_at', 'sla_due', 'next_checkpoint_at']:
             if isinstance(t.get(field), str):
                 t[field] = datetime.fromisoformat(t[field])
     return tickets
@@ -1011,6 +1122,8 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     # Return the persisted record so every client surface immediately reflects
     # lifecycle automation (in particular resolved -> closed) without a stale UI state.
     updated_ticket = await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
+    if updated_ticket and str(updated_ticket.get("status") or "").lower() in {"resolved", "closed", "cancelled"}:
+        await _settle_closed_checkpoint(updated_ticket, current_user)
     return {"message": "Ticket updated", "ticket": updated_ticket}
 
 
@@ -1299,6 +1412,13 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
             else "Added internal technician note"
         ),
     )
+    if not is_internal:
+        await _settle_promised_checkpoint(
+            ticket,
+            current_user,
+            comment=comment,
+            clear_existing_promise=True,
+        )
 
     status_after = str(comment_data.get("status_after") or "").strip().lower()
     if status_after in {"open", "in_progress", "on_hold", "resolved"}:
@@ -1335,6 +1455,13 @@ async def create_ticket_conversation_entry(
     if payload.time:
         await assert_action_permission(current_user, "ticket.time.create", request=request)
 
+    next_checkpoint_at = _next_checkpoint_at(payload.next_checkpoint_at)
+    if next_checkpoint_at and payload.visibility != "public":
+        raise HTTPException(
+            status_code=422,
+            detail="A next update time can only be recorded with a customer-visible update",
+        )
+
     content, content_text = sanitise_ticket_rich_text(payload.content)
     resolved_recipients = []
     if payload.visibility == "public" and payload.notify_client:
@@ -1344,7 +1471,11 @@ async def create_ticket_conversation_entry(
                 status_code=422,
                 detail="This public update has no recipient. Add an email address or publish it to the client portal without email.",
             )
-    fingerprint = _conversation_fingerprint(payload, content=content)
+    fingerprint = _conversation_fingerprint(
+        payload,
+        content=content,
+        next_checkpoint_at=next_checkpoint_at,
+    )
     tenant_id = platform_tenant_id(current_user)
 
     async def prepare_time_context() -> dict[str, Any]:
@@ -1485,9 +1616,9 @@ async def create_ticket_conversation_entry(
             tenant_scoped_query(current_user, {"ticket_id": ticket["id"], "conversation_action_id": action["id"]}),
             {"_id": 0},
         )
+    public = payload.visibility == "public"
     if not comment:
         now = datetime.now(timezone.utc).isoformat()
-        public = payload.visibility == "public"
         comment = {
             "id": str(uuid.uuid4()),
             "ticket_id": ticket["id"],
@@ -1543,6 +1674,53 @@ async def create_ticket_conversation_entry(
             "public_update_added" if public else "internal_note_added",
             "Published client-visible portal update" if public else "Added internal technician note",
         )
+
+    if public:
+        await _settle_promised_checkpoint(
+            ticket,
+            current_user,
+            comment=comment,
+            # The queue composer promises a new checkpoint explicitly.  A plain
+            # portal update fulfils the old promise, so it must not leave the
+            # ticket looking late after the client has received the update.
+            clear_existing_promise=not next_checkpoint_at,
+        )
+
+    # Persist the exact promise once per retry key. A retry that lands after
+    # the original response loss reuses the same evidence instead of moving
+    # the client's checkpoint or overwriting a newer promise.
+    if next_checkpoint_at and not action.get("next_checkpoint_applied"):
+        checkpoint_recorded_at = datetime.now(timezone.utc).isoformat()
+        # A retry may land after another technician has recorded a newer
+        # promise. Only replace a promise that predates this retry key.
+        checkpoint_write = await db.tickets.update_one(
+            tenant_scoped_query(current_user, {
+                "id": ticket["id"],
+                "client_id": ticket.get("client_id"),
+                "$or": [
+                    {"next_checkpoint_set_at": {"$exists": False}},
+                    {"next_checkpoint_set_at": {"$lte": action.get("created_at")}},
+                ],
+            }),
+            {"$set": {
+                "next_checkpoint_at": next_checkpoint_at,
+                "next_checkpoint_set_at": checkpoint_recorded_at,
+                "next_checkpoint_set_by": current_user.get("id"),
+                "next_checkpoint_set_by_name": current_user.get("name"),
+            }},
+        )
+        await db.ticket_conversation_actions.update_one(
+            action_scope,
+            {"$set": {"next_checkpoint_applied": True, "updated_at": checkpoint_recorded_at}},
+        )
+        action["next_checkpoint_applied"] = True
+        if checkpoint_write.matched_count:
+            await ticket_audit(
+                ticket["id"],
+                current_user,
+                "next_checkpoint_set",
+                f"Promised the next client update at {next_checkpoint_at}",
+            )
 
     # The comment is intentionally durable before an outbound provider call.
     # Claim the one delivery attempt in Mongo so duplicate browser retries do

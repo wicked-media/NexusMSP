@@ -26,22 +26,29 @@ export default function UsageBillingPage() {
   if (!data) return null;
 
   const s = data.summary;
+  const money = (value, fallback = "Not tracked") => (
+    value === null || value === undefined ? fallback : `$${Number(value).toLocaleString()}`
+  );
+  const quantity = (value) => (value === null || value === undefined ? "—" : value);
 
   return (
     <div className="space-y-6" data-testid="usage-billing-page">
-      <OperationalPageHeader eyebrow="Billing operations · metered evidence" title="Usage Billing" description="Review metered services, device counts and per-unit revenue with a clear route to recurring billing." icon={Database} tone="sky" signal={(s.overages_this_month || 0) > 0 ? "attention" : "ready"} />
+      <OperationalPageHeader eyebrow="Billing operations · metered evidence" title="Usage Billing" description="Derived from active recurring templates and live client asset counts — only quantities Nexus can evidence are shown." icon={Database} tone="sky" signal={(s.overages_this_month || 0) > 0 ? "attention" : "ready"} />
 
       <BillingWorkspaceNav />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <HeroTile label="Usage MRR" value={`$${(s.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/recurring-invoices")} testId="usage-metric-mrr" />
+        <HeroTile label="Usage MRR (ex tax)" value={money(s.total_mrr, "$0")} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/recurring-invoices")} testId="usage-metric-mrr" />
         <HeroTile label="Clients on plans" value={s.total_clients || 0} icon={Users} glow="cyan" testId="usage-metric-clients" />
-        <HeroTile label="Average per device" value={`$${(s.avg_per_device || 0).toFixed(2)}`} icon={HardDrive} glow="violet" animated={false} testId="usage-metric-device" />
-        <HeroTile label="Overages this month" value={`$${(s.overages_this_month || 0).toLocaleString()}`} icon={Zap} glow={(s.overages_this_month || 0) > 0 ? "amber" : "emerald"} animated={false} onClick={() => navigate("/invoices")} testId="usage-metric-overages" />
+        <HeroTile label="Average per device" value={s.avg_per_device === null || s.avg_per_device === undefined ? "No device data" : `$${Number(s.avg_per_device).toFixed(2)}`} icon={HardDrive} glow="violet" animated={false} testId="usage-metric-device" />
+        <HeroTile label="Recorded overages" value={money(s.overages_this_month, "$0")} icon={Zap} glow={(s.overages_this_month || 0) > 0 ? "amber" : "emerald"} animated={false} onClick={() => navigate("/invoices")} testId="usage-metric-overages" />
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-base flex items-center gap-2"><BarChart3 className="w-4 h-4" />Client Usage Plans</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><BarChart3 className="w-4 h-4" />Metered Recurring Plans</CardTitle>
+          <p className="text-xs text-muted-foreground">User and storage quantities show as unknown until a metered source provides them. No synthetic counts are displayed.</p>
+        </CardHeader>
         <CardContent>
           <Table>
             <TableHeader><TableRow>
@@ -50,23 +57,29 @@ export default function UsageBillingPage() {
               <TableHead className="text-right">MRR</TableHead><TableHead>Storage</TableHead><TableHead>Next Invoice</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {data.plans.map(p => (
+              {data.plans.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
+                    No recurring plan has Acronis, Pax8, Yeastar or source-driven usage enabled yet.
+                  </TableCell>
+                </TableRow>
+              ) : data.plans.map(p => (
                 <TableRow key={p.id} data-testid={`usage-plan-${p.id}`}>
                   <TableCell className="font-medium">{p.client_name}</TableCell>
                   <TableCell><Badge variant="outline" className="text-[10px] capitalize">{(p.plan_type || "").replace("_", " ")}</Badge></TableCell>
-                  <TableCell className="text-center">{p.device_count}</TableCell>
-                  <TableCell className="text-center">{p.user_count}</TableCell>
-                  <TableCell className="text-right font-mono">${p.base_fee.toLocaleString()}</TableCell>
-                  <TableCell className="text-right font-mono">${p.per_device_rate.toFixed(2)}</TableCell>
-                  <TableCell className="text-right">{p.overage_amount > 0 ? <span className="font-mono text-amber-400">${p.overage_amount.toFixed(2)}</span> : <span className="text-muted-foreground">$0</span>}</TableCell>
-                  <TableCell className="text-right font-mono font-semibold">${p.current_mrr.toLocaleString()}</TableCell>
+                  <TableCell className="text-center">{quantity(p.device_count)}</TableCell>
+                  <TableCell className="text-center">{quantity(p.user_count)}</TableCell>
+                  <TableCell className="text-right font-mono">{p.base_fee === null ? "—" : `$${Number(p.base_fee).toLocaleString()}`}</TableCell>
+                  <TableCell className="text-right font-mono">{p.per_device_rate === null ? "—" : `$${Number(p.per_device_rate).toFixed(2)}`}</TableCell>
+                  <TableCell className="text-right">{p.overage_amount > 0 ? <span className="font-mono text-amber-400">${Number(p.overage_amount).toFixed(2)}</span> : <span className="text-muted-foreground">$0</span>}</TableCell>
+                  <TableCell className="text-right font-mono font-semibold">{money(p.current_mrr, "—")}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1.5">
                       <Database className="w-3 h-3 text-muted-foreground" />
-                      <span className="text-xs">{p.storage_gb}GB</span>
+                      <span className="text-xs">{p.storage_gb === null ? "Unknown" : `${p.storage_gb}GB`}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{p.next_invoice}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{p.next_invoice || "Not scheduled"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

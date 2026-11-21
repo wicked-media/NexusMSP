@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone
+from typing import Any
 import uuid
 import os
 from app.database import db, ROOT_DIR, UPLOADS_DIR
@@ -56,8 +57,23 @@ async def store_ticket_attachment(
     uploaded_by_name: str,
     source: str = "manual_upload",
     source_message_id: str | None = None,
+    syncro_attachment_id: str | None = None,
+    syncro_ticket_id: str | None = None,
+    database: Any | None = None,
 ) -> dict:
     """Store a ticket attachment through the single approved attachment path."""
+    store = database or db
+    if syncro_attachment_id:
+        existing = await store.ticket_attachments.find_one(
+            {
+                "tenant_id": ticket.get("tenant_id") or "nexus-local",
+                "ticket_id": ticket["id"],
+                "syncro_attachment_id": str(syncro_attachment_id),
+            },
+            {"_id": 0},
+        )
+        if existing:
+            return _attachment_response(existing)
     if len(content) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
     ext = safe_upload_extension(filename, allowed=ATTACHMENT_EXTENSIONS, default="bin")
@@ -66,7 +82,7 @@ async def store_ticket_attachment(
     stored_filename = f"{str(ticket['id'])[:8]}_{uuid.uuid4().hex[:8]}.{ext}"
     try:
         clean_upload = await inspect_upload(
-            database=db,
+            database=store,
             content=content,
             filename=filename,
             content_type=content_type,
@@ -96,9 +112,12 @@ async def store_ticket_attachment(
         "uploaded_by_name": uploaded_by_name,
         "source": source,
         "source_message_id": source_message_id,
+        "syncro_attachment_id": str(syncro_attachment_id) if syncro_attachment_id else None,
+        "syncro_ticket_id": str(syncro_ticket_id) if syncro_ticket_id else None,
         "security_scan": clean_upload.metadata(),
         "created_at": now,
     }
+    attachment = {key: value for key, value in attachment.items() if value is not None}
     local_path = UPLOAD_DIR / stored_filename
     artifact_path = None
     inserted = False
@@ -113,9 +132,9 @@ async def store_ticket_attachment(
                 "object_path": artifact_path,
                 "mirrored_at": now,
             }
-        await db.ticket_attachments.insert_one(attachment)
+        await store.ticket_attachments.insert_one(attachment)
         inserted = True
-        await db.audit_logs.insert_one({
+        await store.audit_logs.insert_one({
             "id": str(uuid.uuid4()),
             "action": "ticket_attachment_added",
             "entity_type": "ticket_attachment",
@@ -140,10 +159,10 @@ async def store_ticket_attachment(
         if artifact_path:
             await delete_artifact(artifact_path)
         if inserted:
-            await db.ticket_attachments.delete_one({"id": attachment_id})
-        await discard_upload(db, clean_upload)
+            await store.ticket_attachments.delete_one({"id": attachment_id})
+        await discard_upload(store, clean_upload)
         raise
-    await release_upload(db, clean_upload)
+    await release_upload(store, clean_upload)
     return _attachment_response(attachment)
 
 

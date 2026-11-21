@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import UnifiControllersManager from "@/components/unifi/UnifiControllersManager";
 import ServiceTiersSettings from "@/components/settings/ServiceTiersSettings";
+import SyncroMigrationPanel from "@/components/settings/SyncroMigrationPanel";
 import ContractTypesSettings from "@/components/settings/ContractTypesSettings";
 import WeatherClockSettingsCard from "@/components/settings/WeatherClockSettingsCard";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
@@ -201,7 +202,7 @@ export default function SettingsPage() {
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
   const [huduSaving, setHuduSaving] = useState(false);
-  const [syncro, setSyncro] = useState({ subdomain: "", api_key: "", enabled: false });
+  const [syncro, setSyncro] = useState({ subdomain: "", api_key: "", api_key_configured: false, enabled: false });
   const [syncroSaving, setSyncroSaving] = useState(false);
   const [aiConfig, setAiConfig] = useState({ provider: "openai", model: "gpt-5.6-terra", reasoning_effort: "medium", connection: { configured: false, method: "environment" } });
   const [aiSaving, setAiSaving] = useState(false);
@@ -350,7 +351,13 @@ export default function SettingsPage() {
             project_id: aiRes.data.connection?.project_id || "",
           }));
         }
-        setSyncro(prev => ({ ...prev, ...(syncroRes.data || {}), subdomain: syncroRes.data?.subdomain || "", api_key: syncroRes.data?.api_key || "" }));
+        setSyncro(prev => ({
+          ...prev,
+          ...(syncroRes.data || {}),
+          subdomain: syncroRes.data?.subdomain || "",
+          api_key: "",
+          api_key_configured: Boolean(syncroRes.data?.api_key_configured || syncroRes.data?.api_key),
+        }));
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data, client_secret: "" }));
         if (brandingRes.data && brandingRes.data.company_name) setBranding(prev => ({ ...prev, ...brandingRes.data }));
         if (mbxRes.data) setMailbox(mbxRes.data);
@@ -2285,9 +2292,9 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Zap className="w-5 h-5 text-orange-500" />
-            <CardTitle>Syncro RMM - Client Import</CardTitle>
+            <CardTitle>Syncro Migration</CardTitle>
           </div>
-          <CardDescription>Connect to Syncro to import clients, contacts, and devices</CardDescription>
+          <CardDescription>Copy Syncro customers, contacts, assets, tickets, invoices, recurring invoices and more into Nexus.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <SetupGuideCallout title="Prepare a Syncro import key" source="In Syncro, create an API token under Admin → API Tokens and enter only the account subdomain, not the full Syncro URL." steps={["Use a dedicated read-focused import token where the source permissions allow it.", "Validate the subdomain before saving.", "Test before importing, then review client matches to avoid duplicates."]} securityNote="Do not use a technician’s personal token for recurring imports. Revoke the token in Syncro when the integration is retired." />
@@ -2312,19 +2319,27 @@ export default function SettingsPage() {
               type="password"
               value={syncro.api_key}
               onChange={(e) => setSyncro({ ...syncro, api_key: e.target.value })}
-              placeholder="Syncro API Key"
+              placeholder={syncro.api_key_configured ? "Leave blank to keep the saved key" : "Syncro API Key"}
               data-testid="syncro-api-key"
             />
-            <p className="text-xs text-muted-foreground mt-1">Generate an API key in Syncro under <strong>Admin &gt; API Tokens</strong>.</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Generate an API key in Syncro under <strong>Admin &gt; API Tokens</strong>.
+              {syncro.api_key_configured ? " A key is already saved; leave this blank to keep it." : ""}
+            </p>
           </div>
           <div className="flex gap-2">
             <Button onClick={async () => {
-              if (!syncro.subdomain || !syncro.api_key) { toast.error("Subdomain and API key required"); return; }
+              if (!syncro.subdomain || (!syncro.api_key && !syncro.api_key_configured)) {
+                toast.error("Subdomain and API key required");
+                return;
+              }
               setSyncroSaving(true);
               try {
-                await axios.put(`${API}/syncro/settings`, { subdomain: syncro.subdomain, api_key: syncro.api_key, enabled: true }, { headers });
+                const payload = { subdomain: syncro.subdomain, enabled: true };
+                if (syncro.api_key) payload.api_key = syncro.api_key;
+                await axios.put(`${API}/syncro/settings`, payload, { headers });
                 toast.success("Syncro settings saved");
-                setSyncro({ ...syncro, enabled: true });
+                setSyncro(prev => ({ ...prev, enabled: true, api_key: "", api_key_configured: true }));
               } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
               finally { setSyncroSaving(false); }
             }} data-testid="save-syncro-btn" disabled={syncroSaving}>
@@ -2341,19 +2356,10 @@ export default function SettingsPage() {
                 }} data-testid="test-syncro-btn">
                   Test Connection
                 </Button>
-                <Button variant="default" onClick={async () => {
-                  if (!window.confirm("Import all clients from Syncro? This may take a moment.")) return;
-                  try {
-                    toast.info("Importing clients from Syncro...");
-                    const res = await axios.post(`${API}/syncro/import-clients`, {}, { headers });
-                    toast.success(res.data.message);
-                  } catch (e) { toast.error(e.response?.data?.detail || "Import failed"); }
-                }} data-testid="import-syncro-btn">
-                  Import Clients
-                </Button>
               </>
             )}
           </div>
+          {syncro.enabled && <SyncroMigrationPanel apiBase={API} headers={headers} />}
         </CardContent>
       </Card>
       </>)}

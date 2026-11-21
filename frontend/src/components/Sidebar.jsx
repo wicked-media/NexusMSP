@@ -41,6 +41,7 @@ const notificationTypeVisuals = {
   device_offline: { icon: Monitor, label: "Device", tone: "warning" },
   ticket_assigned: { icon: Ticket, label: "Ticket", tone: "info" },
   ticket_updated: { icon: Ticket, label: "Ticket", tone: "info" },
+  ticket_checkpoint_due: { icon: Clock3, label: "Promise due", tone: "critical" },
   new_lead: { icon: UserPlus, label: "Lead", tone: "success" },
   supplier_invoice_follow_up: { icon: ReceiptText, label: "Invoice", tone: "warning" },
   chat_mention: { icon: MessageCircle, label: "Mention", tone: "info" },

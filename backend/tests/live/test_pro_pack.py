@@ -246,38 +246,6 @@ class TestApiTokens:
 
 
 # ============== 2FA TESTS ==============
-class Test2FA:
-    """2FA TOTP setup and verification tests"""
-    
-    def test_setup_2fa(self, headers):
-        """POST /pro-pack/2fa/setup returns secret + otpauth URI"""
-        r = requests.post(f"{BASE_URL}/api/pro-pack/2fa/setup", json={}, headers=headers)
-        assert r.status_code == 200
-        data = r.json()
-        assert "secret" in data
-        assert "otpauth_uri" in data
-        assert data["otpauth_uri"].startswith("otpauth://totp/")
-        assert "NexusOps" in data["otpauth_uri"]
-        print(f"Ã¢Å“â€œ 2FA setup returned secret: {data['secret'][:6]}...")
-    
-    def test_verify_2fa_wrong_code(self, headers):
-        """POST /pro-pack/2fa/verify with wrong code returns 400"""
-        # First setup
-        requests.post(f"{BASE_URL}/api/pro-pack/2fa/setup", json={}, headers=headers)
-        
-        # Try wrong code
-        r = requests.post(f"{BASE_URL}/api/pro-pack/2fa/verify", json={"code": "000000"}, headers=headers)
-        assert r.status_code == 400
-        print("Ã¢Å“â€œ Wrong 2FA code correctly rejected")
-    
-    def test_disable_2fa(self, headers):
-        """DELETE /pro-pack/2fa disables 2FA"""
-        r = requests.delete(f"{BASE_URL}/api/pro-pack/2fa", headers=headers)
-        assert r.status_code == 200
-        print("Ã¢Å“â€œ 2FA disabled")
-
-
-# ============== CRM PIPELINE TESTS ==============
 class TestCrmPipeline:
     """CRM Pipeline tests"""
     

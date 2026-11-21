@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ import {
   Server, Activity, Download, Plus, Terminal, Zap, FileDown,
   Settings as SettingsIcon, ShieldCheck, Loader2, Sparkles, Copy,
   CheckCircle2, WifiOff, Users, TrendingUp, AlertCircle, XCircle, ExternalLink, RefreshCw,
-  KeyRound, BadgeCheck, Wrench, LockKeyhole, HardDrive,
+  KeyRound, BadgeCheck, Wrench, LockKeyhole, HardDrive, MonitorSmartphone,
 } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
@@ -462,11 +462,11 @@ function FleetScriptRunner() {
 
 // ───────── Installer Builder (kept) ─────────
 
-function InstallerBuilder({ open, onClose }) {
+function InstallerBuilder({ open, onClose, initialClientId = "" }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [clients, setClients] = useState([]);
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(initialClientId || "");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -475,10 +475,11 @@ function InstallerBuilder({ open, onClose }) {
 
   useEffect(() => {
     if (!open) return;
+    if (initialClientId) setClientId(initialClientId);
     axios.get(`${API}/clients-enriched`, { headers })
       .then(r => { setClients(r.data?.clients || []); setLoadError(""); })
       .catch(() => { setClients([]); setLoadError("Unable to load clients."); });
-  }, [open, headers]);
+  }, [open, headers, initialClientId]);
 
   const submit = async () => {
     if (!clientId) { toast.error("Pick a client"); return; }
@@ -496,7 +497,7 @@ function InstallerBuilder({ open, onClose }) {
       <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="installer-builder-dialog">
         <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12">
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
-          <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield, Nexus Canary, secure Client Chat, Nexus Elevate, and the staged Nexus DNS endpoint channel.</DialogDescription>
+          <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield, Nexus Canary, secure Client Chat, Nexus Elevate, Nexus Remote, and the staged Nexus DNS endpoint channel.</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {!result ? (
@@ -524,6 +525,7 @@ function InstallerBuilder({ open, onClose }) {
               <div className={`rounded border p-3 text-xs ${result.includes_nexus_shield ? "border-violet-500/25 bg-violet-500/[0.05] text-violet-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_shield ? <ShieldCheck className="h-3.5 w-3.5 text-violet-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_shield ? "Nexus Shield + Canary" : "Nexus Shield unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_shield ? "Posture telemetry starts at first check-in; one Canary sensor is automatically queued for each Windows endpoint." : "This installer predates the Nexus Shield deployment profile."}</p></div>
               <div className={`rounded border p-3 text-xs ${result.includes_nexus_elevate ? "border-emerald-500/25 bg-emerald-500/[0.05] text-emerald-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_elevate ? <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_elevate ? "Client Chat + Nexus Elevate" : "Client companion unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_elevate ? "Client chat and the auditable administrator-access request flow are bundled." : "Build the Nexus Client Chat companion before generating a deployment package."}</p></div>
               <div className={`rounded border p-3 text-xs ${result.includes_nexus_dns ? "border-sky-500/25 bg-sky-500/[0.05] text-sky-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_dns ? <ShieldCheck className="h-3.5 w-3.5 text-sky-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_dns ? "Nexus DNS ready" : "Nexus DNS unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_dns ? "Visibility, resolver health and staged policy delivery are included. DNS is not changed until a technician approves deployment." : "Generate a current installer to include the Nexus DNS deployment channel."}</p></div>
+              <div className={`rounded border p-3 text-xs ${result.includes_native_remote ? "border-cyan-500/25 bg-cyan-500/[0.05] text-cyan-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_native_remote ? <MonitorSmartphone className="h-3.5 w-3.5 text-cyan-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_native_remote ? "Nexus Remote included" : "Nexus Remote companion unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_native_remote ? "The user-session companion is packaged and registered at the next sign-in for attended, view-only support with local consent and Ctrl+Shift+F12 stop." : "Build and sign the Native Remote Companion release artifact, then generate a fresh installer."}</p></div>
               <div className={`rounded border p-3 text-xs sm:col-span-2 ${result.includes_device_identity ? "border-emerald-500/25 bg-emerald-500/[0.05] text-emerald-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_device_identity ? <LockKeyhole className="h-3.5 w-3.5 text-emerald-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_device_identity ? "Device trust included" : "Legacy trust package"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_device_identity ? "The endpoint creates its own private key, enrolls a short-lived certificate, caches checksummed policy, verifies Ed25519 update manifests and reports self-repair evidence." : "Generate a current installer to include Nexus Agent device identity."}</p></div>
             </div>
             {isLocalInstaller && (
@@ -835,13 +837,19 @@ function SettingsCard({ canEdit }) {
 export default function NexusAgentCenterPage() {
   const { token, user } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [searchParams] = useSearchParams();
+  const requestedClientId = searchParams.get("client") || "";
   const [stats, setStats] = useState({});
-  const [installerOpen, setInstallerOpen] = useState(false);
+  const [installerOpen, setInstallerOpen] = useState(searchParams.get("installer") === "1");
   const [statsError, setStatsError] = useState("");
   const navigate = useNavigate();
   const canOperate = canExecuteAgentCommands(user);
   const role = String(user?.role || "").toLowerCase();
   const canManageSettings = Boolean(user?.is_admin || role === "admin" || role === "owner");
+
+  useEffect(() => {
+    if (searchParams.get("installer") === "1") setInstallerOpen(true);
+  }, [searchParams]);
 
   useEffect(() => {
     const load = () => axios.get(`${API}/nexus-agent/stats`, { headers })
@@ -929,7 +937,7 @@ export default function NexusAgentCenterPage() {
         {canManageSettings && <SettingsCard canEdit />}
       </div>
 
-      {canOperate && <InstallerBuilder open={installerOpen} onClose={() => setInstallerOpen(false)} />}
+      {canOperate && <InstallerBuilder open={installerOpen} onClose={() => setInstallerOpen(false)} initialClientId={requestedClientId} />}
     </div>
   );
 }

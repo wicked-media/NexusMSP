@@ -81,7 +81,7 @@ export function getClientAttentionReasons(client) {
       severity: "critical",
       weight: 74,
     });
-  } else if (scoreBand?.key === "attention") {
+  } else if (scoreBand?.key === "needs_attention") {
     reasons.push({
       id: "health-attention",
       label: `Health ${Math.round(healthScore)}/100`,

@@ -60,21 +60,6 @@ def validate_runtime_database_name(database_name: str) -> str:
     return normalised
 
 
-def demo_seed_enabled() -> bool:
-    """Return whether development-only demonstration data may be generated.
-
-    Existing development launches retain their sample data behaviour.  Test
-    and production processes never manufacture records, even if a local
-    environment file carries an accidental seed flag.
-    """
-    if is_production() or acceptance_environment_enabled() or environment() in {"test", "testing"}:
-        return False
-    raw = os.environ.get("NEXUS_SEED_DEMO_DATA")
-    if raw is None:
-        return True
-    return str(raw).strip().lower() in _TRUE_VALUES
-
-
 def cors_origins() -> list[str]:
     raw = os.environ.get("CORS_ORIGINS")
     origins = [item.strip().rstrip("/") for item in (raw or "").split(",") if item.strip()]

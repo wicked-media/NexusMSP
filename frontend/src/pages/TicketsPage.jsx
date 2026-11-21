@@ -80,6 +80,8 @@ import {
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG } from "@/config/ticketConfig";
 import TicketConsoleHeader from "@/components/tickets/TicketConsoleHeader";
+import TicketServicePulse from "@/components/tickets/TicketServicePulse";
+import TicketQueueSignalDialog from "@/components/tickets/TicketQueueSignalDialog";
 import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
   buildTicketQueueSignals,
@@ -166,6 +168,11 @@ export default function TicketsPage() {
   const [resolutionReview, setResolutionReview] = useState(null);
   // Ticket id whose inline status write is in flight (disables the queue control).
   const [queueStatusPendingId, setQueueStatusPendingId] = useState(null);
+  // The queue signal's own workflow: claim is direct, update/device open a
+  // compact dialog and never navigate into the full ticket.
+  const [queueSignalAction, setQueueSignalAction] = useState(null);
+  const [queueSignalBusy, setQueueSignalBusy] = useState(false);
+  const [queueSignalPendingId, setQueueSignalPendingId] = useState(null);
   // Ticket id that just changed, for a one-shot queue highlight.
   const [recentlyChangedTicketId, setRecentlyChangedTicketId] = useState(null);
   const queueChangeTimerRef = useRef(null);
@@ -955,6 +962,71 @@ export default function TicketsPage() {
       toast.success(label);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Could not update ticket");
+    }
+  };
+
+  const createQueueUpdateKey = () => (
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `queue-update-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+
+  const handleQueueSignalAction = async (ticket, move) => {
+    if (!ticket?.id || !move || move.key === "complete") return;
+    if (move.key === "claim") {
+      setQueueSignalPendingId(ticket.id);
+      try {
+        await handleQueueQuickAction(ticket, "claim");
+      } finally {
+        setQueueSignalPendingId(null);
+      }
+      return;
+    }
+    setQueueSignalAction({ ticket, move, key: createQueueUpdateKey() });
+  };
+
+  const handleQueueSignalUpdate = async (ticket, content, key, move, nextCheckpointAt) => {
+    if (!ticket?.id || !content || !key || queueSignalBusy) return;
+    const checkpoint = nextCheckpointAt ? new Date(nextCheckpointAt) : null;
+    if (!checkpoint || !Number.isFinite(checkpoint.getTime())) {
+      toast.error("Choose a future next-update time before publishing");
+      return;
+    }
+    setQueueSignalBusy(true);
+    try {
+      await axios.post(`${API}/tickets/${ticket.id}/conversation-entries`, {
+        content,
+        visibility: "public",
+        notify_client: false,
+        to_addresses: [],
+        subject_label: move?.label || "Update",
+        status_after: null,
+        next_checkpoint_at: checkpoint.toISOString(),
+        time: null,
+        idempotency_key: key,
+      }, { headers });
+      await fetchTickets();
+      setQueueSignalAction(null);
+      toast.success(`${ticket.ticket_number || "Ticket"} update published to the client portal`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not publish the queue update");
+    } finally {
+      setQueueSignalBusy(false);
+    }
+  };
+
+  const handleQueueSignalDevice = async (ticket, deviceId) => {
+    if (!ticket?.id || !deviceId || queueSignalBusy) return;
+    setQueueSignalBusy(true);
+    try {
+      await axios.post(`${API}/tickets/${ticket.id}/devices`, { device_id: deviceId }, { headers });
+      await fetchTickets();
+      setQueueSignalAction(null);
+      toast.success(`Endpoint linked to ${ticket.ticket_number || "the ticket"}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not link the endpoint");
+    } finally {
+      setQueueSignalBusy(false);
     }
   };
 
@@ -2137,16 +2209,30 @@ export default function TicketsPage() {
   if (viewingTicket) {
     const ticketCompleted = ["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase());
     const slaHours = viewingTicket.sla_due && !ticketCompleted ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
-    const formatSlaDuration = (hours) => {
-      const absoluteHours = Math.abs(Number(hours) || 0);
-      const days = Math.floor(absoluteHours / 24);
-      const remainder = absoluteHours % 24;
-      return days ? `${days}d${remainder ? ` ${remainder}h` : ""}` : `${remainder}h`;
-    };
     const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
     const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
     const unbilledTicketItems = ticketProducts.filter(item => !item.invoice_id);
     const unbilledTicketTotal = unbilledTicketItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
+    const focusReplyComposer = () => {
+      setDetailTab("conversation");
+      setConversationType("public");
+      setComposerFocusRequest((request) => request + 1);
+      window.requestAnimationFrame(() => {
+        conversationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    };
+    const claimTicket = () => {
+      if (!user?.id) { toast.error("Sign in to claim this ticket"); return; }
+      handleUpdateTicket("assigned_to", user.id);
+    };
+    const openDevicesTab = () => {
+      setDetailTab("devices");
+      window.requestAnimationFrame(() => document.querySelector('[data-testid="ticket-workspace-tabs"]')?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    };
+    const openSiteEvidence = () => {
+      // Wait for the dropdown's focus restore to finish before moving the viewport.
+      window.setTimeout(() => document.querySelector('[data-testid="ticket-site-evidence"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+    };
     return (
       <PageShell>
         <div className="p-6 space-y-4 ticket-glass" data-testid="ticket-detail-view">
@@ -2158,20 +2244,14 @@ export default function TicketsPage() {
             if (viewingTicket) axios.post(`${API}/tickets/${viewingTicket.id}/stop-viewing`, {}, { headers }).catch(() => {});
             setViewingTicket(null);
           }}
-          onReply={() => {
-            setDetailTab("conversation");
-            setConversationType("public");
-            setComposerFocusRequest((request) => request + 1);
-            window.requestAnimationFrame(() => {
-              conversationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-            });
-          }}
+          onReply={focusReplyComposer}
           onResolve={() => handleUpdateTicket("status", "resolved")}
           onStatusChange={(status) => ["resolved", "closed"].includes(status)
             ? requestResolutionReview(viewingTicket, status)
             : handleUpdateTicket("status", status)}
           onRequestResolution={(ticket, target) => requestResolutionReview(ticket, target)}
           onOpenTools={() => setToolsOpen(true)}
+          onOpenSiteEvidence={openSiteEvidence}
           onInvoice={openTicketInvoiceWorkflow}
           onAddItems={() => setIsAddItemOpen(true)}
           itemCount={ticketProducts.length}
@@ -2208,6 +2288,15 @@ export default function TicketsPage() {
             }}));
             toast.success("Ticket pinned to your Object Dock");
           }}
+        />
+        <TicketServicePulse
+          ticket={viewingTicket}
+          notes={ticketNotes}
+          emails={ticketEmails}
+          timeEntries={timeEntries}
+          onClaim={claimTicket}
+          onReply={focusReplyComposer}
+          onOpenDevices={openDevicesTab}
         />
         <TicketResolutionReviewDialog
           review={resolutionReview}
@@ -2417,46 +2506,23 @@ export default function TicketsPage() {
           }}
         />
 
-        {!ticketFocusMode && <TicketElevateEvidence ticket={viewingTicket} headers={headers} />}
-
-        <Card className={`${ticketFocusMode ? "hidden" : ""} overflow-hidden rounded-xl border border-violet-400/12 bg-violet-500/[0.035]`} data-testid="ticket-advanced-edge-tools">
-          <CardContent className="flex flex-col gap-2.5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-400/20 bg-violet-500/[0.09]"><Shield className="h-3.5 w-3.5 text-violet-200" /></div>
-              <div><p className="text-xs font-semibold text-zinc-200">Site access <span className="ml-1 rounded border border-violet-400/20 bg-violet-500/[0.08] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-violet-200">Optional</span></p><p className="mt-0.5 text-[11px] text-muted-foreground">Open Nexus Edge verification or a controlled Jump only when site-level diagnostics are needed.</p></div>
-            </div>
-            <Button variant="outline" size="sm" className="h-8 shrink-0 border-violet-400/20 bg-violet-500/[0.04] text-xs text-violet-100 hover:bg-violet-500/[0.12]" onClick={() => setEdgeToolsOpen((open) => !open)} data-testid="ticket-advanced-edge-tools-toggle">
-              {edgeToolsOpen ? "Close site tools" : "Use site tools"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        {edgeToolsOpen && !ticketFocusMode && (
-          <div className="grid gap-3 animate-in fade-in-0 slide-in-from-top-1 duration-200" data-testid="ticket-advanced-edge-tools-panel">
-            <TicketConnectivityVerification ticket={viewingTicket} headers={headers} />
-            <TicketJumpAccessRequest ticket={viewingTicket} headers={headers} />
-          </div>
-        )}
-
-        {/* Title + Compact Progress side-by-side (saves vertical space) */}
-        <div className={ticketFocusMode ? "hidden" : "grid grid-cols-1 gap-4"} data-testid="ticket-case-context">
-          <TicketRequestRecord
-            ticket={viewingTicket}
-            deviceStatus={deviceStatus}
-            tagInput={tagInput}
-            onTagInputChange={setTagInput}
-            onAddTag={handleAddTag}
-            onRemoveTag={handleRemoveTag}
-            ticketCompleted={ticketCompleted}
-            slaHours={slaHours}
-          />
-
-          {/* RIGHT — Compact progress + related-tickets quick chips */}
-        </div>
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
+            <div className={ticketFocusMode ? "hidden" : ""} data-testid="ticket-case-context">
+              <TicketRequestRecord
+                compact
+                ticket={viewingTicket}
+                deviceStatus={deviceStatus}
+                tagInput={tagInput}
+                onTagInputChange={setTagInput}
+                onAddTag={handleAddTag}
+                onRemoveTag={handleRemoveTag}
+                ticketCompleted={ticketCompleted}
+                slaHours={slaHours}
+              />
+            </div>
+
             {/* Related tickets are deliberately presented as a compact review strip.
                 They are suggestions, not confirmed relationships, so they should
                 inform the technician without taking focus from the live record. */}
@@ -2768,35 +2834,6 @@ export default function TicketsPage() {
                 <WhisperRail email={viewingTicket.requester_email || viewingTicket.contact_email} />
               </div>
             )}
-            {panelVisible.serviceTier && (
-              <div key="serviceTier" className="min-w-0">
-                <TicketServiceTierWidget
-                  ticketId={viewingTicket.id}
-                  clientId={viewingTicket.client_id}
-                  token={token}
-                  isAdmin={false}
-                />
-              </div>
-            )}
-            <div key="sla-posture" className="min-w-0" data-testid="ticket-sla-posture">
-                <Card className="overflow-hidden border border-amber-400/20 bg-[linear-gradient(125deg,rgba(251,191,36,0.10),rgba(17,19,24,0.92)_55%,rgba(10,12,17,0.92))]">
-                  <CardContent className="flex items-center justify-between gap-3 p-3">
-                    <div className="min-w-0">
-                      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200"><Timer className="h-3.5 w-3.5" />SLA posture</p>
-                      <p className="mt-1 text-xs text-zinc-400">
-                        {ticketCompleted
-                          ? "Resolution is recorded; service history remains available."
-                          : viewingTicket.sla_due
-                            ? `Resolution target ${format(new Date(viewingTicket.sla_due), "MMM d, HH:mm")}`
-                            : "No resolution target is recorded for this ticket."}
-                      </p>
-                    </div>
-                    <Badge className={ticketCompleted ? "shrink-0 border-emerald-400/30 bg-emerald-500/15 text-emerald-200" : slaHours == null ? "shrink-0 border-zinc-500/30 bg-zinc-500/10 text-zinc-300" : slaHours < 0 ? "shrink-0 border-rose-400/30 bg-rose-500/15 text-rose-200" : slaHours <= 4 ? "shrink-0 border-amber-400/30 bg-amber-500/15 text-amber-100" : "shrink-0 border-cyan-400/30 bg-cyan-500/15 text-cyan-100"}>
-                      {ticketCompleted ? "Closed" : slaHours == null ? "No target" : slaHours < 0 ? `${formatSlaDuration(slaHours)} overdue` : `${formatSlaDuration(slaHours)} remaining`}
-                    </Badge>
-                  </CardContent>
-                </Card>
-            </div>
             <div key="statusCard" className="min-w-0">
               <Card className="overflow-hidden rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.13),transparent_40%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.07),transparent_28%),linear-gradient(145deg,rgba(17,19,24,0.92),rgba(10,12,17,0.92))] shadow-[0_16px_42px_rgba(0,0,0,0.2)]">
               <CardContent className="space-y-4 p-4">
@@ -2910,11 +2947,48 @@ export default function TicketsPage() {
               </CardContent>
             </Card>
             </div>
+            {panelVisible.serviceTier && (
+              <div key="serviceTier" className="min-w-0">
+                <TicketServiceTierWidget
+                  ticketId={viewingTicket.id}
+                  clientId={viewingTicket.client_id}
+                  token={token}
+                  isAdmin={false}
+                />
+              </div>
+            )}
 
             {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
 
           </aside>
         </div>
+
+        <section className="space-y-3 pt-1" data-testid="ticket-site-evidence">
+          <div className="flex flex-wrap items-center gap-2 px-1">
+            <Shield className="h-3.5 w-3.5 text-violet-300" />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-zinc-400">Site & privilege evidence</p>
+            <span className="rounded-full border border-white/[0.07] bg-white/[0.025] px-2 py-0.5 text-[9px] text-zinc-500">Advanced controls</span>
+            <p className="w-full text-[11px] text-zinc-500 sm:ml-auto sm:w-auto">Use only when site-level diagnostics or controlled access are required.</p>
+          </div>
+          {!ticketFocusMode && <TicketElevateEvidence ticket={viewingTicket} headers={headers} />}
+          <Card className={`${ticketFocusMode ? "hidden" : ""} overflow-hidden rounded-xl border border-violet-400/12 bg-violet-500/[0.035]`} data-testid="ticket-advanced-edge-tools">
+            <CardContent className="flex flex-col gap-2.5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-400/20 bg-violet-500/[0.09]"><Shield className="h-3.5 w-3.5 text-violet-200" /></div>
+                <div><p className="text-xs font-semibold text-zinc-200">Site access <span className="ml-1 rounded border border-violet-400/20 bg-violet-500/[0.08] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-violet-200">Optional</span></p><p className="mt-0.5 text-[11px] text-muted-foreground">Open Nexus Edge verification or a controlled Jump only when site-level diagnostics are needed.</p></div>
+              </div>
+              <Button variant="outline" size="sm" className="h-8 shrink-0 border-violet-400/20 bg-violet-500/[0.04] text-xs text-violet-100 hover:bg-violet-500/[0.12]" onClick={() => setEdgeToolsOpen((open) => !open)} data-testid="ticket-advanced-edge-tools-toggle">
+                {edgeToolsOpen ? "Close site tools" : "Use site tools"}
+              </Button>
+            </CardContent>
+          </Card>
+          {edgeToolsOpen && !ticketFocusMode && (
+            <div className="grid gap-3 animate-in fade-in-0 slide-in-from-top-1 duration-200" data-testid="ticket-advanced-edge-tools-panel">
+              <TicketConnectivityVerification ticket={viewingTicket} headers={headers} />
+              <TicketJumpAccessRequest ticket={viewingTicket} headers={headers} />
+            </div>
+          )}
+        </section>
 
         <EmailDialog
           open={isEmailOpen} onOpenChange={setIsEmailOpen}
@@ -4409,13 +4483,14 @@ export default function TicketsPage() {
             <span className="w-[78px] shrink-0">ID</span>
             <span className="w-4 shrink-0" />
             <span className="flex-1">Title</span>
-            <span className="hidden md:inline-block w-[160px] shrink-0">Client</span>
-            <span className="hidden lg:inline-block w-[44px] shrink-0">Activity</span>
+            <span className="hidden xl:inline-block w-[160px] shrink-0">Client</span>
+            <span className="hidden xl:inline-block w-[44px] shrink-0">Activity</span>
             <span className="w-[20px] shrink-0" />
             <span className="w-[68px] shrink-0">Status</span>
             <span className="hidden xl:inline-block w-[104px] shrink-0">Quick actions</span>
             <span className="w-6 shrink-0">Owner</span>
-            <span className="hidden sm:inline-block w-[60px] shrink-0 text-right">SLA / Age</span>
+            <span className="hidden sm:inline-block xl:hidden w-[60px] shrink-0 text-right">SLA / Age</span>
+            <span className="hidden xl:inline-block w-[142px] shrink-0 text-right">SLA · Next move</span>
             <span className="w-6 shrink-0" />
           </div>
         )}
@@ -4435,6 +4510,8 @@ export default function TicketsPage() {
                   onToggleSelect={toggleTicketSelect}
                   onOpen={fetchTicketDetail}
                   onQuickAction={handleQueueQuickAction}
+                  onSignalAction={handleQueueSignalAction}
+                  signalPending={queueSignalPendingId === t.id}
                   onStatusChange={handleQueueStatusChange}
                   onRequestTerminal={requestResolutionReview}
                   statusPending={queueStatusPendingId === t.id}
@@ -4456,6 +4533,8 @@ export default function TicketsPage() {
                 onToggleSelect={toggleTicketSelect}
                 onOpen={fetchTicketDetail}
                 onQuickAction={handleQueueQuickAction}
+                onSignalAction={handleQueueSignalAction}
+                signalPending={queueSignalPendingId === t.id}
                 onStatusChange={handleQueueStatusChange}
                 onRequestTerminal={requestResolutionReview}
                 statusPending={queueStatusPendingId === t.id}
@@ -4578,6 +4657,15 @@ export default function TicketsPage() {
           </CardContent></Card>
         )}
       </div>
+
+      <TicketQueueSignalDialog
+        action={queueSignalAction}
+        devices={devices}
+        busy={queueSignalBusy}
+        onOpenChange={(open) => { if (!open) setQueueSignalAction(null); }}
+        onSendUpdate={handleQueueSignalUpdate}
+        onLinkDevice={handleQueueSignalDevice}
+      />
 
       <CreateTicketDialog
         open={isCreateOpen} onOpenChange={(open) => { if (!createTicketPendingRef.current) setIsCreateOpen(open); }}

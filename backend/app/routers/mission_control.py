@@ -81,6 +81,28 @@ def _work_item(
     }
 
 
+def _estate_health(
+    managed_devices: int,
+    open_tickets: int,
+    critical_pressure: int,
+    warning_pressure: int,
+) -> tuple[int | None, str]:
+    """Score the estate only when there is something observed to score.
+
+    An empty database is not a perfect estate.  With no managed device and no
+    active ticket there is no evidence, so the honest answer is ``None`` /
+    "Not assessed" rather than a manufactured 100/100.
+    """
+    if managed_devices <= 0 and open_tickets <= 0:
+        return None, "Not assessed"
+    score = max(
+        0,
+        100 - min(55, critical_pressure * 7) - min(30, warning_pressure * 2),
+    )
+    label = "Healthy" if score >= 90 else "Stable" if score >= 75 else "At risk" if score >= 50 else "Critical"
+    return score, label
+
+
 @router.get("/mission-control/overview")
 async def mission_control_overview(current_user: dict = Depends(get_current_user)):
     """Return one scoped operating picture that answers what to do next."""
@@ -93,6 +115,7 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
 
     (
         clients,
+        managed_devices,
         open_tickets,
         critical_tickets,
         sla_breaches,
@@ -121,6 +144,7 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
             field="id",
             site_field=None,
         )),
+        db.devices.count_documents(_query(current_user, {})),
         db.tickets.count_documents(_query(current_user, {"status": {"$in": active_ticket_statuses}})),
         db.tickets.count_documents(_query(current_user, {
             "status": {"$in": active_ticket_statuses},
@@ -583,12 +607,12 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
         high_cpu_devices + open_vulnerabilities + failed_automations
         + expiring_items + active_predictions + overdue_invoices + failed_xero_syncs + stale_tickets
     )
-    health_score = max(
-        0,
-        100 - min(55, critical_pressure * 7) - min(30, warning_pressure * 2),
+    health_score, health_label = _estate_health(
+        managed_devices, open_tickets, critical_pressure, warning_pressure
     )
-    health_label = "Healthy" if health_score >= 90 else "Stable" if health_score >= 75 else "At risk" if health_score >= 50 else "Critical"
     health_factors = []
+    if health_score is None:
+        health_factors.append("No managed devices or active tickets observed")
     if sla_breaches:
         health_factors.append(f"{sla_breaches} SLA breach{'es' if sla_breaches != 1 else ''}")
     if stale_tickets:
@@ -614,14 +638,30 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
         revenue_items[0]
         if revenue_items else
         _work_item(
-            "focus-clear",
+            "focus-setup" if health_score is None else "focus-clear",
             severity="healthy",
             source="Nexus Mission Control",
-            title="No urgent action is required",
-            detail="Connected operational records are currently clear.",
+            title=(
+                "Connect your first client and device"
+                if health_score is None
+                else "No urgent action is required"
+            ),
+            detail=(
+                "No clients, devices or active tickets are recorded yet."
+                if health_score is None
+                else "Connected operational records are currently clear."
+            ),
             route="/clients",
-            why="No critical, warning, predictive or revenue exception was found.",
-            recommendation="Review client opportunities and plan the highest-value proactive work.",
+            why=(
+                "There is no operational evidence to assess yet."
+                if health_score is None
+                else "No critical, warning, predictive or revenue exception was found."
+            ),
+            recommendation=(
+                "Add a client, enrol a device, or create the first ticket so Nexus has evidence to work from."
+                if health_score is None
+                else "Review client opportunities and plan the highest-value proactive work."
+            ),
             estimated_minutes=5,
             confidence="High",
         )

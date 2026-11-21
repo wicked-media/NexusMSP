@@ -51,6 +51,13 @@ dump.rdb
 # Local runtime state written by the dev stack (service logs, PIDs).
 .local/
 
+# Downloaded signed-agent release bundle used only while building Dockerfile.release.
+/signed-bundle/
+
+# Local verification screenshots and generated release-drill evidence.
+/artifacts/*.png
+/artifacts/release-drills/
+
 # System files
 .DS_Store
 *.pem

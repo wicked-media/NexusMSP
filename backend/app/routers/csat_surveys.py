@@ -1,15 +1,46 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from app.database import db
 from app.auth import get_current_user
 from app.services.scope_permissions import scoped_query
 
 router = APIRouter()
 
+# A response is only feedback that came back through a survey link.  Older demo
+# rows carried a score but no response status, so status is part of the test.
+_RESPONSE_STATUSES = {"responded", "completed"}
+
 
 def _is_response(survey: dict) -> bool:
-    """Only scored feedback is a CSAT response; sent surveys are not ratings."""
+    """Only answered feedback is a CSAT response; issued surveys are not ratings."""
     score = survey.get("score")
-    return isinstance(score, (int, float)) and 1 <= score <= 5
+    return (
+        isinstance(score, (int, float))
+        and 1 <= score <= 5
+        and survey.get("status") in _RESPONSE_STATUSES
+    )
+
+
+@router.get("/csat/{survey_id}/public")
+async def get_public_survey(survey_id: str, response: Response):
+    """Capability-URL lookup used by the public feedback page.
+
+    The survey id is an unguessable per-ticket token, and only the fields needed
+    to render the page are returned.  Contact addresses and tenant identifiers
+    stay server-side.
+    """
+    survey = await db.csat_surveys.find_one(
+        {"id": survey_id, "status": "sent"},
+        {"_id": 0, "id": 1, "ticket_number": 1, "client_name": 1},
+    )
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found or already answered")
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "id": survey["id"],
+        "ticket_number": survey.get("ticket_number"),
+        "client_name": survey.get("client_name"),
+        "status": "open",
+    }
 
 
 @router.get("/csat/surveys")
@@ -85,6 +116,18 @@ async def csat_dashboard(current_user: dict = Depends(get_current_user)):
         dist[sc] = dist.get(sc, 0) + 1
 
     return {"avg_score": avg, "total_responses": len(surveys), "by_tech": by_tech, "by_client": by_client, "distribution": dist}
+
+
+@router.post("/csat/{survey_id}/respond-public")
+async def respond_public(survey_id: str):
+    """Retired duplicate of POST /csat/{id}/respond (wrong status vocabulary)."""
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Public CSAT response moved to POST /api/csat/{id}/respond, which is the sin"
+            "gle ticket-linked response route."
+        ),
+    )
 
 
 @router.post("/csat/submit")

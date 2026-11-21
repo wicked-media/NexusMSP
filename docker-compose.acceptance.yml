@@ -1,6 +1,12 @@
 # Disposable API acceptance environment.  It is intentionally separate from
 # docker-compose.production.yml: no production-like volumes, worker, uploads or
 # external provider credentials are attached to this stack.
+#
+# The API joins a second, non-internal network solely so Docker publishes its
+# host-loopback port. Docker silently ignores `ports:` for a container attached
+# only to an internal network, which made the runner wait for a readiness
+# endpoint that was healthy inside the container but unreachable from the host.
+# MongoDB remains internal-only.
 services:
   mongo:
     image: mongo:7.0
@@ -25,7 +31,6 @@ services:
     environment:
       APP_ENV: test
       NEXUS_TEST_ENVIRONMENT: "1"
-      NEXUS_SEED_DEMO_DATA: "false"
       NEXUS_RUN_BACKGROUND_WORKERS: "false"
       # Deterministic clean/EICAR-only scanner is accepted solely because this
       # stack also enforces NEXUS_TEST_ENVIRONMENT and a disposable database.
@@ -39,8 +44,9 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-    networks: [acceptance]
+    networks: [acceptance, acceptance_publish]
 
 networks:
   acceptance:
     internal: true
+  acceptance_publish:

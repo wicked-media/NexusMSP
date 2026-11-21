@@ -115,6 +115,11 @@ async def ensure_remote_runtime_indexes() -> None:
         [("client_id", 1), ("status", 1), ("started_at", -1)],
         name="remote_session_client_status_time",
     )
+    # Fleet readiness joins active native sessions by device inside one tenant.
+    await db.remote_sessions.create_index(
+        [("tenant_id", 1), ("provider", 1), ("status", 1), ("started_at", -1)],
+        name="remote_session_tenant_provider_status_time",
+    )
     await db.remote_sessions.create_index(
         [("ticket_id", 1), ("started_at", -1)],
         name="remote_session_ticket_time",

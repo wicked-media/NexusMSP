@@ -1,0 +1,170 @@
+$ id
+uid=196587368(fbbb628c84f0fe689b45a11f64) gid=1001(freebuff) groups=1001(freebuff)
+
+$ getent group docker
+docker:x:103:ubuntu
+
+$ stat -c "%U %G %a %n" /var/run/docker.sock
+root docker 660 /var/run/docker.sock
+
+$ sudo -n true
+sudo: The "no new privileges" flag is set, which prevents sudo from running as root.
+sudo: If sudo is running in a container, you may need to adjust the container configuration to disable the flag.
+exit=1
+
+$ su -s /bin/sh ubuntu -c id </dev/null
+Password: su: Authentication failure
+exit=1
+
+$ ctr version
+Client:
+  Version:  2.2.1
+  Revision: 
+  Go version: go1.24.13
+
+$ grep current-user /etc/subuid /etc/subgid
+no subordinate-ID entry
+
+$ command -v podman buildah newuidmap newgidmap
+podman: missing
+buildah: missing
+newuidmap: missing
+newgidmap: missing
+
+$ unshare -Ur true
+exit=0
+
+$ docker compose -f docker-compose.production.yml config --quiet
+exit=0
+
+===== 2026-11-19 post-restart Docker host re-check =====
+identity: uid=196587368 gid=1001(freebuff), supplementary groups: freebuff
+/var/run/docker.sock: srw-rw---- root:docker
+docker info: "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"
+/etc/subuid: ubuntu:100000:65536; freebuff-git:165536:65536; no entry for this account
+/etc/subgid: same two entries; no entry for this account
+docker context: only default unix:///var/run/docker.sock
+DOCKER_HOST/BUILDKIT_HOST: unset; no DinD hostname or TCP 2375/2376 endpoint
+sg docker: "Password: Invalid password"
+sudo -n: blocked by no_new_privs
+newuidmap/newgidmap: not installed
+result: API and web were attempted earlier and failed at image layer registration
+        (Lchown /etc/gshadow and /etc/shadow, UID 0, GID 42, invalid argument).
+        Production API and release API were not attempted because the same
+        base-layer prerequisite fails. The four-build matrix remains blocked;
+        no image was produced.
+
+===== 2026-11-19 existing CI Docker-host evidence =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/41771659755
+job: container-build (127182153198), commit 17758d3, runner ubuntu-latest
+steps:
+  Build API image: SUCCESS
+  Build production API image with Agent release components: SUCCESS
+  Build web image: SUCCESS
+  Validate production compose model: SUCCESS
+  Build release API image: NOT PRESENT IN THE JOB
+reason: the release API step exists only in the uncommitted worktree ci.yml;
+        HEAD's ci.yml has five container-build steps, not six.
+local tree at that time: backend/Dockerfile.production and
+        .github/workflows/ci.yml were modified locally, so this CI run does not
+        cover those changes.
+
+===== 2026-11-21 CI four-build probe (commit 2721e46) =====
+branch: ci/container-builds-2026-11-21
+commit: 2721e46ec4c527d50a6a91c42c1c84a9f8924675
+PR: https://github.com/wicked-media/NexusMSP/pull/3 (draft probe)
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44853975650
+job: container-build (136691671613), runner ubuntu-latest
+steps:
+  Build API image: SUCCESS at 02:07:10Z
+  Build production API image with Agent release components: SUCCESS at 02:08:18Z
+  Build release API image from a verified signed-agent fixture: SUCCESS at 02:09:17Z
+  Build web image: SUCCESS at 02:11:37Z
+  Validate production compose model: SUCCESS at 02:11:37Z
+job conclusion: success at 02:11:40Z
+result: 4/4 images built on a Docker host with subordinate IDs; the production
+        Compose model validates. The commit contains the worktree source,
+        Dockerfiles and workflow changes at that time; untracked screenshot
+        artifacts were excluded.
+
+same run, other jobs:
+  backend: SUCCESS
+  frontend: SUCCESS
+  agent: SUCCESS
+  promotion-recovery-drill: SUCCESS
+  tenant-boundary-acceptance: FAILURE (job 136692274500)
+    step: Disposable two-client API acceptance, 02:08:44Z-02:12:12Z
+    error: The disposable Nexus acceptance API did not reach /api/ready within
+           120 seconds.
+    note: the API container started at 02:10:10Z; the runner removed the
+          Compose project at teardown without retaining API container logs, so
+          the readiness failure cause is not established.
+    prior: the same job failed identically on base commit 17758d3 in run
+           41771659755 (attempt 2): API container started 10:14:56Z and the
+           /api/ready wait timed out at 10:16:58Z. The failure predates this
+           worktree.
+
+===== 2026-11-21 local API readiness reproduction =====
+environment: same env as docker-compose.acceptance.yml api service; host
+             Python 3.12.3, MongoDB 7.0.14, loopback Mongo, no container
+result: /api/ready returned 503 while warming up, then 200 at 8s after start;
+        boot reconciliation completed in 1.2s.
+conclusion: application startup is not the cause. The failure is in the
+            compose/container path, not in Nexus application boot.
+
+===== 2026-11-21 acceptance readiness diagnosis (run 44855166233) =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44855166233
+job: tenant-boundary-acceptance (136696121479), commit ef016fd
+API container started 02:23:42Z. Captured before teardown:
+  02:23:47.301 NexusOps API v3.0.0 started successfully
+  02:23:47.440 NexusMSP boot reconciliation complete
+  /ready 200 at 02:23:52Z, 02:24:22Z, 02:24:53Z, 02:25:23Z
+  compose port api 8000 -> "invalid IP:0"
+  compose exec api /api/ready -> status 200
+  host GET http://127.0.0.1:18000/api/ready -> never connected
+  host wait failed after 120s at 02:25:44Z
+cause: docker-compose.acceptance.yml attached api only to the `acceptance`
+       network with internal: true. Docker silently ignores `ports:` for a
+       container attached only to internal networks, so the 127.0.0.1:18000
+       mapping never existed. The API itself was healthy.
+fix: api now joins `acceptance_publish`, a non-internal network used only for
+     the host-loopback publish; mongo remains internal-only.
+
+===== 2026-11-21 fix-validation run (ddc88ef): all four images + acceptance (44856147536) =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44856147536
+commit: ddc88ef8a69a87ff8cca7f8ff97f0a9e5b733cd1
+PR: https://github.com/wicked-media/NexusMSP/pull/3
+container-build (136698722482), all steps SUCCESS:
+  Build API image: 02:29:22Z-02:30:37Z
+  Build production API image with Agent release components: 02:30:37Z-02:31:54Z
+  Build release API image from a verified signed-agent fixture: 02:31:54Z-02:33:06Z
+  Build web image: 02:33:06Z-02:35:24Z
+  Validate production compose model: 02:35:24Z
+tenant-boundary-acceptance (136699291589), SUCCESS:
+  step 02:31:50Z-02:33:56Z
+  pytest: 1 passed in 2.73s at 02:33:55Z
+  runner: [Nexus acceptance] Passed.
+run conclusion: success at 02:35:27Z.
+attribution: this run validates the network fix on ddc88ef; it is not the
+             validated-code run. That run is recorded below.
+
+===== 2026-11-21 validated-code run (11b4864): all four images + acceptance (44856885006) =====
+run: https://github.com/wicked-media/NexusMSP/actions/runs/44856885006
+validated code commit: 11b48640b065a53be38b93fdbe466d923ab0b38f
+PR: https://github.com/wicked-media/NexusMSP/pull/3
+attribution: this is the run on validated code commit 11b4864. The evidence-only
+             commit carrying this log is documentation-only and changes no
+             application, container, workflow or test file; CI re-runs the
+             same gates on that commit.
+container-build (136701052647), all steps SUCCESS; job 02:37:13Z-02:45:52Z:
+  Build API image: 02:37:17Z-02:38:56Z
+  Build production API image with Agent release components: 02:38:56Z-02:40:42Z
+  Build release API image from a verified signed-agent fixture: 02:40:42Z-02:42:20Z
+  Build web image: 02:42:20Z-02:45:50Z
+  Validate production compose model: 02:45:50Z
+tenant-boundary-acceptance (136701576056), SUCCESS; job 02:39:05Z-02:42:10Z:
+  acceptance step 02:39:55Z-02:42:08Z
+  readiness confirmed 02:42:03Z; published port: 127.0.0.1:18000
+  pytest: 1 passed in 2.26s at 02:42:06Z
+  runner: [Nexus acceptance] Passed.
+run conclusion: success at 02:45:53Z.

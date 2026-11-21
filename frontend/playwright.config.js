@@ -25,14 +25,17 @@ module.exports = defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: "pnpm start",
+    // Build and serve the production artifact. The CRA development shell
+    // compiles lazy route chunks on demand, which can leave a fresh browser
+    // context without the login form and turn a UI readiness race into a false
+    // authentication failure. This gate must exercise what ships.
+    command: "pnpm build && node scripts/serve-build.js",
     url: browserBaseUrl,
     reuseExistingServer: false,
-    timeout: 180_000,
+    timeout: 300_000,
     stdout: "pipe",
     stderr: "pipe",
     env: {
-      BROWSER: "none",
       HOST: "127.0.0.1",
       PORT: frontendPort,
       REACT_APP_BACKEND_URL: process.env.NEXUS_ACCEPTANCE_BASE_URL || "http://127.0.0.1:18000",

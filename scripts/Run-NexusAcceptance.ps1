@@ -102,6 +102,19 @@ function Wait-NexusAcceptanceApi {
     throw "The disposable Nexus acceptance API did not reach /api/ready within 120 seconds."
 }
 
+function Write-NexusAcceptanceComposeDiagnostics {
+    Write-Warning "[Nexus acceptance] Compose diagnostics follow before cleanup:"
+    & $script:composeExecutable @script:composePrefix @composeProjectArguments ps --all | Out-Host
+    foreach ($service in @("api", "mongo")) {
+        Write-Host "--- $service logs (tail 200) ---"
+        & $script:composeExecutable @script:composePrefix @composeProjectArguments logs --no-color --tail 200 $service | Out-Host
+    }
+    Write-Host "--- published api port mapping ---"
+    & $script:composeExecutable @script:composePrefix @composeProjectArguments port api 8000 | Out-Host
+    Write-Host "--- api internal /api/ready probe ---"
+    & $script:composeExecutable @script:composePrefix @composeProjectArguments exec -T api python -c "import urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=5); print('status', response.status); print(response.read().decode()[:800])" | Out-Host
+}
+
 function Test-NexusComposeRuntime {
     param(
         [Parameter(Mandatory = $true)]
@@ -322,7 +335,6 @@ if ($Browser) {
 $environmentNames = @(
     "APP_ENV",
     "NEXUS_TEST_ENVIRONMENT",
-    "NEXUS_SEED_DEMO_DATA",
     "NEXUS_RUN_BACKGROUND_WORKERS",
     "NEXUS_ACCEPTANCE_PORT",
     "NEXUS_ACCEPTANCE_DB_NAME",
@@ -349,7 +361,6 @@ try {
     # a local .env, integration credential, or existing Nexus database.
     [Environment]::SetEnvironmentVariable("APP_ENV", "test", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_TEST_ENVIRONMENT", "1", "Process")
-    [Environment]::SetEnvironmentVariable("NEXUS_SEED_DEMO_DATA", "false", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_RUN_BACKGROUND_WORKERS", "false", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_PORT", "$Port", "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_DB_NAME", $acceptanceDatabase, "Process")
@@ -396,6 +407,7 @@ try {
         $composeAttempted = $true
         $composeExitCode = Invoke-NexusAcceptanceCompose up --build --detach
         if ($composeExitCode -ne 0) {
+            Write-NexusAcceptanceComposeDiagnostics
             throw "The selected Compose runtime could not start the disposable acceptance environment."
         }
     }
@@ -407,7 +419,14 @@ try {
         if ($UseLocalMongo) {
             Write-NexusAcceptanceApiDiagnostics -LogDirectory $localApiLogDirectory
         }
+        else {
+            Write-NexusAcceptanceComposeDiagnostics
+        }
         throw
+    }
+    if (-not $UseLocalMongo) {
+        $publishedApiPort = & $script:composeExecutable @script:composePrefix @composeProjectArguments port api 8000
+        Write-Host "[Nexus acceptance] API readiness confirmed at $apiUrl/api/ready; published port: $publishedApiPort"
     }
     if ($Browser) {
         Write-Host "[Nexus acceptance] Running authenticated two-client browser acceptance across eight golden workflows..."

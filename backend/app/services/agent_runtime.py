@@ -22,6 +22,7 @@ import re
 import uuid
 import zipfile
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -111,6 +112,21 @@ def agent_supports_remote_companion(agent_version: str, server_version: str) -> 
     newer than the control-plane minimum.
     """
     return agent_release_state(agent_version, server_version) in {"current", "ahead_or_unmanaged"}
+
+
+def read_agent_release_version(path: Path) -> str:
+    """Read a release VERSION file, rejecting labels that are not semver.
+
+    The release API image carries the exact version of the Authenticode-signed
+    Windows bundle it contains. Reading that file prevents a stale environment
+    default from advertising a different update target than the binaries the
+    installer builder actually distributes.
+    """
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return ""
+    return value if _AGENT_VERSION_RE.fullmatch(value) else ""
 
 
 def validate_agent_server_url(value: str, *, allow_empty: bool = True) -> str:
@@ -396,6 +412,12 @@ def build_installer_zip(
         if tray_companion_bytes else ""
     )
     remote_copy_line = (
+        # A running user-session companion holds its executable open. Stop only
+        # this named component before replacing it, then copy the hash-pinned
+        # build that the agent registers for the next interactive sign-in.
+        'REM Stop the signed-in user Remote Companion before replacing its image.\r\n'
+        'taskkill /F /IM nexus-remote-companion.exe >nul 2>&1\r\n'
+        'timeout /t 1 /nobreak >nul\r\n'
         'copy /Y "%~dp0nexus-remote-companion.exe" "%INSTDIR%\\nexus-remote-companion.exe" >nul\r\n'
         'if errorlevel 1 ( echo Could not copy nexus-remote-companion.exe & exit /b 1 )\r\n'
         if remote_companion_bytes else ""

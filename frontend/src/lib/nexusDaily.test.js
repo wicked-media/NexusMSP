@@ -46,4 +46,18 @@ describe("Nexus Daily briefing", () => {
     expect(briefing.sections.find(section => section.id === "customers").detail).toContain("2 SLA breaches");
     expect(briefing.focus.title).toBe("Review failed backup");
   });
+
+  test("does not claim a stable estate when nothing has been observed", () => {
+    const briefing = buildNexusDailyBriefing({
+      missionControl: { summary: { health_score: null, health_label: "Not assessed", attention_count: 0 } },
+      nexusBrain: {},
+      user: { role: "admin" },
+    });
+
+    expect(briefing.healthAssessed).toBe(false);
+    expect(briefing.healthScore).toBeNull();
+    expect(briefing.headline).not.toContain("stable");
+    expect(briefing.headline).toContain("Nothing is connected yet");
+    expect(briefing.sections.find(section => section.id === "customers").headline).toBe("No client portfolio is connected yet.");
+  });
 });
